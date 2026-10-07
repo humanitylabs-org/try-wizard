@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -7,13 +8,17 @@ struct SettingsRequestBuffer {
     private var line = Data()
     private var discarding = false
     private(set) var migrationReports: [GuestBootFixReport] = []
+    /// Wizard Desktop: https links the guest asked the Mac to open.
+    private(set) var openURLs: [URL] = []
 
     mutating func consume(_ data: Data) -> Bool {
         var requested = false
         migrationReports.removeAll(keepingCapacity: true)
+        openURLs.removeAll(keepingCapacity: true)
         for byte in data {
             if byte == 10 {
                 requested = requested || (!discarding && line == Data("open-settings".utf8))
+                if !discarding, let url = Self.openURLRequest(line) { openURLs.append(url) }
                 if !discarding, let report = try? GuestBootFixReport.decode(line) {
                     migrationReports.append(report)
                 }
@@ -29,6 +34,17 @@ struct SettingsRequestBuffer {
             }
         }
         return requested
+    }
+
+    /// Only plain https URLs, bounded, no whitespace or control bytes.
+    static func openURLRequest(_ line: Data) -> URL? {
+        let prefix = Data("open-url ".utf8)
+        guard line.count > prefix.count, line.count <= 2048, line.starts(with: prefix),
+              let text = String(data: line.dropFirst(prefix.count), encoding: .utf8),
+              !text.unicodeScalars.contains(where: { $0.value <= 0x20 || $0.value == 0x7f }),
+              let url = URL(string: text), url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
     }
 }
 
@@ -79,11 +95,13 @@ final class NativeSettingsBridge {
         var buffer = [UInt8](repeating: 0, count: 512)
         // Bound work on the UI thread even if the guest floods the channel.
         var requested = false
+        var opened: [URL] = []
         for _ in 0..<16 {
             let count = Darwin.read(descriptor, &buffer, buffer.count)
             if count > 0 {
                 let nextRequest = requests.consume(Data(buffer.prefix(count)))
                 for report in requests.migrationReports { migrationReport(report) }
+                opened.append(contentsOf: requests.openURLs)
                 requested = requested || nextRequest
             } else if count < 0 && errno == EINTR {
                 continue
@@ -93,6 +111,12 @@ final class NativeSettingsBridge {
                 stop()
                 return
             }
+        }
+        for url in opened.prefix(4) {
+            let ok = NSWorkspace.shared.open(url)
+            let reply = Data((ok ? "opened\n" : "unavailable\n").utf8)
+            let written = reply.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
+            if written != reply.count { stop(); return }
         }
         guard requested else { return }
         let reply = Data((openSettings() ? "opened\n" : "unavailable\n").utf8)

@@ -314,7 +314,7 @@ _qps_prepare_state_root() {
       _qps_fail 'HOME is unavailable; cannot locate Application Support'
       return 1
     }
-    qps_configured_root="$HOME/Library/Application Support/Try Omarchy/VM/v1"
+    qps_configured_root="$HOME/Library/Application Support/Wizard/VM/v1"
   fi
   _qps_assert_safe_root_path "$qps_configured_root" || return 1
 

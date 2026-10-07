@@ -51,6 +51,7 @@ final class AppReleaseChecker {
     }
 
     func checkAutomaticallyIfDue() {
+        return  // Wizard Desktop: no upstream update polling
         guard preferences.shouldCheckAutomatically(now: now()) else { return }
         check()
     }

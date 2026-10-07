@@ -62,8 +62,8 @@ macos_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$macos_dir/.." && pwd -P)
 case "$configuration" in
   development)
-    bundle_identifier=dev.tryomarchy.native.development
-    app_display_name='Try Omarchy Dev'
+    bundle_identifier=com.aiwizards.desktop.development
+    app_display_name='Wizard Dev'
     (( build_dmg == 0 )) || {
       echo 'build-app: --dmg requires --configuration production' >&2
       exit 1
@@ -71,8 +71,8 @@ case "$configuration" in
     sign_identity=$(python3 "$macos_dir/development-sign-identity.py" "$sign_identity")
     ;;
   production)
-    bundle_identifier=dev.tryomarchy.native
-    app_display_name='Try Omarchy'
+    bundle_identifier=com.aiwizards.desktop
+    app_display_name='Wizard'
     [[ $sign_identity != auto ]] || {
       echo 'build-app: production requires --sign-identity (use - for an explicit ad-hoc test build)' >&2
       exit 1
@@ -81,20 +81,20 @@ case "$configuration" in
   *) usage ;;
 esac
 helper="$macos_dir/.build/release/omarchy-vm-helper"
-legacy_app="$repo_dir/dist/Try Omarchy.app"
-app="$repo_dir/dist/app.noindex/Try Omarchy.app"
+legacy_app="$repo_dir/dist/Wizard.app"
+app="$repo_dir/dist/app.noindex/Wizard.app"
 if [[ $configuration == production ]]; then
-  app="$repo_dir/dist/release.noindex/Try Omarchy.app"
+  app="$repo_dir/dist/release.noindex/Wizard.app"
 fi
 contents="$app/Contents"
-bundled_qemu="$contents/Resources/runtime/bin/Try Omarchy"
+bundled_qemu="$contents/Resources/runtime/bin/Wizard"
 module_cache="$macos_dir/.build/module-cache"
 runtime_source="$macos_dir/.build/qemu-gpu-runtime"
 guest_dir=${guest_dir:-"$repo_dir/dist/guest"}
 dependency_bundler="$macos_dir/bundle-macho-dependencies.sh"
 compatibility_verifier="$macos_dir/verify-macos-compatibility.sh"
 package_dmg="$macos_dir/package-dmg.sh"
-app_icon_source="$macos_dir/OmarchyIcon.svg"
+app_icon_source="$macos_dir/WizardIcon.svg"
 app_icon_renderer_source="$macos_dir/render-app-icon.swift"
 app_icon_packer="$macos_dir/pack-app-icon.py"
 icon_renderer="$macos_dir/.build/app-icon-renderer"
@@ -349,7 +349,7 @@ codesign --verify --deep --strict --verbose=2 "$app"
 
 echo "[native] Built $app"
 if (( build_dmg )); then
-  dmg="$repo_dir/dist/TryOmarchy.dmg"
+  dmg="$repo_dir/dist/Wizard.dmg"
   rm -f "$dmg"
   package_options=()
   if [[ $sign_identity != - ]]; then

@@ -52,7 +52,7 @@ resources_dir=$(cd "$script_dir/.." && pwd -P)
 contents_dir=$(cd "$resources_dir/.." && pwd -P)
 app_bundle=$(cd "$contents_dir/.." && pwd -P)
 guest_input=${1:-"$resources_dir/guest"}
-qemu_bin="$resources_dir/runtime/bin/Try Omarchy"
+qemu_bin="$resources_dir/runtime/bin/Wizard"
 native_bridge="$contents_dir/MacOS/omarchy-vm-helper"
 storage_library="$script_dir/qemu-persistent-storage.sh"
 port_forwarding_library="$script_dir/qemu-port-forwarding.sh"
@@ -378,7 +378,7 @@ if spec_profile != "factory" or manifest_profile != spec_profile:
 profile_contract = {
     "filesystemLabel": "omarchy-factory",
     "filesystemUuid": "89054943-1f4e-4f14-b934-d6db3fba4254",
-    "sizeMiB": 6144,
+    "sizeMiB": 8192,
     "hostname": "omarchy-factory",
     "username": None,
     "uid": None,
@@ -1389,7 +1389,7 @@ recover_persistent_boot_kit() {
   (
     unset TRYOMARCHY_KEYBOARD
     exec "$qemu_bin" \
-      -name 'Try Omarchy Boot Recovery' \
+      -name 'Wizard Boot Recovery' \
       -machine "$qemu_machine" \
       -cpu 'host,pmu=off' \
       -smp '2,sockets=1,cores=2,threads=1' \
@@ -1731,7 +1731,7 @@ launch_append_bytes=$(printf '%s' "$launch_append" | wc -c | tr -d ' ')
 (( launch_append_bytes < 2048 )) || fail "shared-folder safety boot arguments exceed the ARM64 limit"
 
 qemu_args=(
-  -name 'Try Omarchy'
+  -name 'Wizard'
   "${qemu_virtualization_args[@]}"
   # HVF does not provide a usable guest PMU on Apple Silicon. Do not advertise
   # one: Linux otherwise probes the dead device and prints a misleading failure.
