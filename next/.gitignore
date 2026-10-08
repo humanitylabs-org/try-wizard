@@ -1,0 +1,5 @@
+mac/dist/
+*.dmg
+*.tar.xz
+work/
+out/

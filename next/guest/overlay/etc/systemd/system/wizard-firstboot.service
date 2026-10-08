@@ -1,0 +1,13 @@
+[Unit]
+Description=Wizard first-boot secrets and state directory
+Before=wizard-hermes.service wizard-ux.service wizard-setup.service
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/wizard/bin/wizard-firstboot
+
+[Install]
+WantedBy=multi-user.target

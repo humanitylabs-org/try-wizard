@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+. /opt/wizard/bin/wizard-env
+export WIZARD_SETUP_HOST=$WIZARD_BIND WIZARD_SETUP_PORT=8930
+export WIZARD_UX_ORIGIN=http://127.0.0.1:8923
+export WIZARD_HERMES_ORIGIN=http://127.0.0.1:8865
+cd /opt/wizard/hermes-agent
+exec /opt/wizard/venv/bin/python /opt/wizard/setup/server.py

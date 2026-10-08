@@ -1,0 +1,18 @@
+[Unit]
+Description=Wizard interface server
+After=wizard-hermes.service wizard-firstboot.service
+Requires=wizard-firstboot.service
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+User=wizard
+Group=wizard
+WorkingDirectory=/home/wizard
+Environment=HOME=/home/wizard
+ExecStart=/opt/wizard/bin/wizard-ux-start
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

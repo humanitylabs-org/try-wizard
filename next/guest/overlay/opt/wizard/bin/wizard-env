@@ -1,0 +1,20 @@
+#!/bin/bash
+# Shared runtime environment for Wizard services. Sourced, not executed.
+export WIZARD_ROOT=/var/lib/wizard
+export HERMES_HOME=/var/lib/wizard/hermes
+export HERMES_GUEST_ONBOARDING=1
+export PATH=/opt/wizard/node/bin:/opt/wizard/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
+# Loopback only, unless the Mac owner explicitly enabled developer port
+# forwarding (the launcher then adds wizard.dev=1 for this boot).
+WIZARD_BIND=127.0.0.1
+if grep -qw 'wizard.dev=1' /proc/cmdline 2>/dev/null; then
+  WIZARD_BIND=127.0.0.1
+fi
+export WIZARD_BIND
+if [[ -r /var/lib/wizard/secrets.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /var/lib/wizard/secrets.env
+  set +a
+fi
+export WIZARD_PUBLIC_UX_ORIGIN="${WIZARD_PUBLIC_UX_ORIGIN:-http://127.0.0.1:47823}"

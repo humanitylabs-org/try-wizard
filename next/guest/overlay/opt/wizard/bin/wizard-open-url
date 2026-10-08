@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Open an https URL in the Mac's default browser through the Wizard OS vsock bridge."""
+import socket, sys
+from urllib.parse import urlparse
+HOST_CID, PORT = 2, 9101
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: wizard-open-url https://...", file=sys.stderr); return 64
+    url = sys.argv[1].strip(); p = urlparse(url)
+    if p.scheme != "https" or not p.netloc or len(url) > 2000 or any(c in url for c in "\r\n \t"):
+        print("wizard-open-url: only plain https URLs are allowed", file=sys.stderr); return 65
+    try:
+        with socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM) as s:
+            s.settimeout(4); s.connect((HOST_CID, PORT))
+            s.sendall(f"open-url {url}\n".encode())
+            reply = s.recv(64)
+    except OSError as e:
+        print(f"wizard-open-url: Mac bridge unavailable: {e}", file=sys.stderr); return 69
+    return 0 if reply.startswith(b"opened") else 1
+
+if __name__ == "__main__":
+    raise SystemExit(main())
