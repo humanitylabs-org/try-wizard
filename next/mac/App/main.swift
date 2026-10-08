@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ServiceManagement
 import WebKit
@@ -232,7 +233,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
               ["127.0.0.1", "localhost", Store.active.flatMap { URL(string: $0.url)?.host }].contains(origin.host)
         else { return }
         let id = body["id"] ?? NSNull()
-        let params = body["params"] as? [String: Any] ?? [:]
+        var params = body["params"] as? [String: Any] ?? [:]
+        let so = message.frameInfo.securityOrigin
+        params["_origin"] = "\(so.protocol)://\(so.host)\(so.port != 0 ? ":\(so.port)" : "")"
         guard let handler = handlers.first(where: { method.hasPrefix($0.key) })?.value else { return }
         handler(method, params) { result in
             let payload = (try? JSONSerialization.data(withJSONObject: ["id": id, "result": result ?? NSNull()], options: [.fragmentsAllowed]))
@@ -262,6 +265,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         cfg.websiteDataStore = .default()
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
         cfg.userContentController.add(NativeBridge.shared, name: NativeBridge.name)
+        // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
+        cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -471,7 +476,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     // MARK: WKNavigationDelegate
 
+    var onNavigate: () -> Void = {}
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        onNavigate()
         loadedAt = Date()
         localRetries = 0
         overlay.isHidden = true
@@ -555,6 +562,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         controller.begin()
         installWizardKey()
+        installMeetings()
+    }
+
+    // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
+
+    func installMeetings() {
+        MeetingBridge.register(origin: { [weak self] in self?.wizardOrigin })
+        MeetingSpool.shared.kick()   // deliver anything left from a previous run
+        let panel = RecorderPanel.shared
+        panel.onExpand = { [weak self] url in
+            guard let self, let u = URL(string: url) else { return }
+            self.showMainWindow(); self.controller.load(u)
+        }
+        panel.shouldShow = { [weak self] in
+            guard let self, NSApp.isActive, self.controller.window?.isVisible == true, self.controller.window?.isMiniaturized == false,
+                  let s = MeetingRecorder.shared.session, let u = self.controller.web.url else { return true }
+            // Mizel already shows this recording in the window.
+            return !(u.path.contains("/meetings") && (u.fragment ?? "").contains(s.meetingId))
+        }
+        for n in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification, NSWindow.didMiniaturizeNotification,
+                  NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification] {
+            NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { _ in DispatchQueue.main.async { panel.sync() } }
+        }
+        controller.onNavigate = { panel.sync() }
+
+        CallPrompt.shared.onRecord = { [weak self] title, eventId in self?.recordNew(title: title, eventId: eventId) }
+        CallDetector.shared.origin = { [weak self] in self?.wizardOrigin }
+        CallDetector.shared.install()
+
+        let vk = VoiceKeys.shared
+        vk.origin = { [weak self] in self?.wizardOrigin }
+        vk.orb = { [weak self] start in self?.orb(start) }
+        vk.install(prompt: false)
+
+        statusActions.isRecording = { MeetingRecorder.shared.isRecording }
+        statusActions.recordToggle = { [weak self] in
+            if MeetingRecorder.shared.isRecording { MeetingRecorder.shared.stop(finalize: true) { _ in } }
+            else { self?.recordNew(title: nil, eventId: CallDetector.shared.currentEvent()?["id"] as? String) }
+        }
+    }
+
+    func recordNew(title: String?, eventId: String?) {
+        guard let o = wizardOrigin else { return }
+        let clean = title.map { $0.replacingOccurrences(of: "^(Call: |Starting now: )", with: "", options: .regularExpression) }
+        MeetingRecorder.shared.startNew(origin: o, title: eventId == nil ? clean : nil, calendarEventId: eventId) { err in
+            if let err {
+                let a = NSAlert(); a.messageText = "Couldn't start recording"; a.informativeText = err.localizedDescription; a.runModal()
+            }
+        }
+    }
+
+    /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
+    func orb(_ start: Bool) {
+        guard let o = wizardOrigin else { return }
+        showMainWindow()
+        _ = start
+        // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
+        let js = "(() => { const f = document.querySelector('button.voice-fab'); const l = f ? (f.getAttribute('aria-label')||'') : ''; if (f && /Finish and send/.test(l)) { f.click(); return 'sent'; } if (/Opening microphone|Transcribing/.test(l)) return 'busy'; if (f && !f.disabled && /Start voice/.test(l)) { f.click(); return 'voice'; } const n = document.querySelector('button.new-thread-fab'); if (n) { n.click(); return 'new'; } return 'none'; })()"
+        var tries = 0
+        func attempt() {
+            controller.web.evaluateJavaScript(js) { [weak self] r, _ in
+                let res = (r as? String) ?? "none"
+                MeetingLog.log("orb: \(res)")
+                if res == "none", tries < 25 {
+                    tries += 1
+                    if tries == 1, start, let u = self?.controller.web.url, u.path.contains("/meetings") || u.path.contains("/files") || u.path.contains("/apps") {
+                        self?.controller.load(o)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: attempt)
+                }
+            }
+        }
+        attempt()
     }
 
     // MARK: Wizard key, search, menu bar
@@ -573,6 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusActions.open = { [weak self] path in self?.openView(path) }
         statusActions.show = { [weak self] in self?.showMainWindow() }
         statusActions.quit = { if Store.active?.kind == .thisMac { HostControl.send("quit") }; NSApp.terminate(nil) }
+        statusActions.toggleVoice = { VoiceKeys.enabled.toggle(); VoiceKeys.shared.install(prompt: VoiceKeys.enabled) }
         statusMenu.install(statusActions)
 
         let search = WizardSearch.shared
@@ -640,6 +721,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Leave the keyboard as we found it when Wizard isn't running.
         if CapsLockRemap.active { CapsLockRemap.remove() }
+        // Chunks already on disk upload at next launch; flush the current partial chunk now.
+        if let s = MeetingRecorder.shared.session { s.me.stop(); s.them?.stop(); MeetingSpool.shared.markDone(s.meetingId) }
     }
 
     func buildMenus() {
@@ -747,6 +830,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             WizardKey.shared.handle(id: 1, pressed: false)
         case "close-window": controller.window?.performClose(nil)
+        case "meeting-new": recordNew(title: arg.isEmpty ? "QA meeting" : arg, eventId: nil)
+        case "meeting-stop": MeetingRecorder.shared.stop(finalize: true) { s in
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) { try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-meeting-stop.json")) } }
+        case "meeting-note": MeetingRecorder.shared.addNote(arg)
+        case "meeting-expand": RecorderPanel.shared.expand()
+        case "meeting-prompt": CallDetector.shared.prompt(arg.isEmpty ? "Call in Zoom" : arg, eventId: nil)
+        case "meeting-prompt-record": CallPrompt.shared.record()
+        case "voice-tap": VoiceKeys.shared.tap(arg == "cmd" ? VoiceKeys.rightCommand : VoiceKeys.rightOption)
+        case "voice-enable": VoiceKeys.enabled = arg != "off"; VoiceKeys.shared.install(prompt: false)
+        case "panel-snapshot":
+            // panel-snapshot <recorder|prompt|hud> <png>
+            let a = arg.split(separator: " ", maxSplits: 1).map(String.init)
+            let p: NSPanel = a.first == "prompt" ? CallPrompt.shared.panel : a.first == "hud" ? VoiceHUD.shared.panel : RecorderPanel.shared.panel
+            if let v = p.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: a.count > 1 ? a[1] : "/tmp/wizard-qa-panel.png"))
+            }
+        case "meeting-state":
+            var s: [String: Any] = MeetingRecorder.shared.status()
+            s["recorderVisible"] = RecorderPanel.shared.panel.isVisible
+            s["detector"] = CallDetector.shared.state
+            s["voice"] = VoiceKeys.shared.state
+            s["hudVisible"] = VoiceHUD.shared.panel.isVisible
+            s["spoolPending"] = MeetingSpool.shared.pendingTotal
+            s["micAuth"] = AVCaptureDevice.authorizationStatus(for: .audio).rawValue
+            s["url"] = controller.web.url?.absoluteString ?? ""
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-meeting.json"))
+            }
         case "keys-state":
             let s: [String: Any] = [
                 "triggerRegistered": WizardKey.shared.registered, "capsRemapActive": CapsLockRemap.active,

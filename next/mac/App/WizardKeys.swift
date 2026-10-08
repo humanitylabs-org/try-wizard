@@ -447,6 +447,7 @@ final class WizardStatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(status)
         menu.addItem(.separator())
         add(menu, "Open Wizard", #selector(WizardStatusActions.openWizard))
+        add(menu, actions.isRecording() ? "Stop Recording" : "Record a Meeting", #selector(WizardStatusActions.toggleRecording))
         let search = add(menu, "Search…", #selector(WizardStatusActions.openSearch))
         search.toolTip = "Tap Caps Lock"
         let views = NSMenuItem(title: "Views", action: nil, keyEquivalent: ""); let sub = NSMenu()
@@ -458,6 +459,10 @@ final class WizardStatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         let caps = add(menu, "Use Caps Lock as the Wizard key", #selector(WizardStatusActions.toggleWizardKey))
         caps.state = CapsLockRemap.enabled ? .on : .off
+        let prompts = add(menu, "Ask to Record Calls", #selector(WizardStatusActions.togglePrompts))
+        prompts.state = CallDetector.enabled ? .on : .off
+        let voice = add(menu, "Voice Keys (Right ⌥ dictate, Right ⌘ Wizard)", #selector(WizardStatusActions.toggleVoiceKeys))
+        voice.state = VoiceKeys.enabled ? .on : .off
         if actions.isLocal() {
             menu.addItem(.separator())
             add(menu, "Restart Wizard OS", #selector(WizardStatusActions.restartOS))
@@ -484,7 +489,13 @@ final class WizardStatusActions: NSObject {
     var open: (String) -> Void = { _ in }
     var show: () -> Void = {}
     var quit: () -> Void = {}
+    var isRecording: () -> Bool = { false }
+    var recordToggle: () -> Void = {}
+    var toggleVoice: () -> Void = {}
     @objc func openWizard() { show() }
+    @objc func toggleRecording() { recordToggle() }
+    @objc func togglePrompts() { CallDetector.enabled.toggle() }
+    @objc func toggleVoiceKeys() { toggleVoice() }
     @objc func openSearch() { WizardSearch.shared.show() }
     @objc func openBinding(_ sender: NSMenuItem) {
         let list = WizardBindings.current
