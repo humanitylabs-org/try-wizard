@@ -74,10 +74,70 @@ sub(r'(fullScreenMenuItem = \[\[\[NSMenuItem alloc\] initWithTitle:@"Enter Full 
     r'\1\n    [fullScreenMenuItem setKeyEquivalentModifierMask:(NSEventModifierFlagControl | NSEventModifierFlagCommand)];',
     1)
 
-# 4. remember window size/position; keep the Wizard UI usable when shrunk
+# 4. remember window size/position. Small enough for a phone-shaped window; a
+#    remembered frame below the minimum (e.g. from an older build) is replaced
+#    by the default size. "WizardWindow" deliberately ignores 0.1.1's saved frame.
 sub(r'(\[window makeKeyAndOrderFront:self\];\s*\n(\s*)\[window center\];)',
-    r'\1\n\2[window setContentMinSize:NSMakeSize(720.0, 480.0)];\n\2[window setFrameAutosaveName:@"WizardMainWindow"];',
+    r'\1\n\2[window setContentMinSize:NSMakeSize(520.0, 480.0)];'
+    r'\n\2[window setFrameAutosaveName:@"WizardWindow"];'
+    r'\n\2if (NSWidth([window contentRectForFrameRect:[window frame]]) < 520.0 ||'
+    r'\n\2    NSHeight([window contentRectForFrameRect:[window frame]]) < 480.0) {'
+    r'\n\2    [window setFrame:[window frameRectForContentRect:cocoa_initial_window_frame()] display:YES];'
+    r'\n\2}',
     1)
+
+# 9. tell the guest the real window size as soon as events are allowed. Stock
+#    QEMU only sends it on the first user resize, so the Wizard first drew at
+#    1920x1080 and was scaled down into the window.
+sub(r'(- \(void\)applicationDidFinishLaunching: \(NSNotification \*\) note\n\{\n.*?\n(\s*)allow_events = true;\n)',
+    r'\1\2[cocoaView updateScale];\n\2[cocoaView updateUIInfo];\n', 1, flags=re.S)
+
+# 6. free resizing: the guest display follows the window (Try Omarchy's dynamic
+#    display), so the window is never locked to the guest's aspect ratio and is
+#    never shrunk to the guest's pixel size (that is what opened it tiny on Retina).
+RESIZE = r'''- (void) resizeWindow
+{
+    NSWindow *window = [self window];
+    if (!window) {
+        return;
+    }
+    /* Wizard Desktop: no aspect lock; any shape the user drags is fine. */
+    [window setContentResizeIncrements:NSMakeSize(1.0, 1.0)];
+    if ([window styleMask] & NSWindowStyleMaskFullScreen) {
+        [window setContentSize:[self screenSafeAreaSize]];
+        [window center];
+    }
+}
+
+- (void) updateScale
+'''
+sub(r'- \(void\) resizeWindow\n\{.*?\n\}\n\n- \(void\) updateScale\n', lambda m: RESIZE, 1, flags=re.S)
+
+# 7. the window is resizable from birth (not only after zoom-to-fit is applied)
+sub(r'styleMask:NSWindowStyleMaskTitled\|NSWindowStyleMaskMiniaturizable\|NSWindowStyleMaskClosable\n',
+    'styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable\n',
+    1)
+
+# 8. open at a normal desktop-app size: 1280x840 points, capped to the screen
+INITIAL = r'''static NSRect cocoa_initial_window_frame(void)
+{
+    NSScreen *hostScreen = [NSScreen mainScreen];
+    if (!hostScreen) {
+        return NSMakeRect(0.0, 0.0, 1280.0, 840.0);
+    }
+
+    NSRect available = [hostScreen visibleFrame];
+    NSSize size = NSMakeSize(floor(MIN(1280.0, NSWidth(available) * 0.85)),
+                             floor(MIN(840.0, NSHeight(available) * 0.85)));
+    size.width = MAX(size.width, 520.0);
+    size.height = MAX(size.height, 480.0);
+
+    return NSMakeRect(floor(NSMidX(available) - size.width / 2.0),
+                      floor(NSMidY(available) - size.height / 2.0),
+                      size.width, size.height);
+}
+'''
+sub(r'static NSRect cocoa_initial_window_frame\(void\)\n\{.*?\n\}\n', lambda m: INITIAL, 1, flags=re.S)
 
 # 5. product name
 n_before = s.count("Try Omarchy")

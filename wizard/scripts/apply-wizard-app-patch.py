@@ -232,6 +232,11 @@ edit(mac / "build-qemu-gpu-runtime.sh", [
     ('patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"\n',
      'patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"\n'
      '/usr/bin/python3 "$native_dir/patches/wizard-cocoa-edit.py" "$source_dir/ui/cocoa.m"\n'),
+    # Big QEMU/ANGLE scratch builds go to TMPDIR (a roomy volume), and cleanup accepts it.
+    ("work_dir=$(mktemp -d /private/tmp/omarchy-qemu-source-build.XXXXXX)\n",
+     'work_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/omarchy-qemu-source-build.XXXXXX")\n'),
+    ("  [[ $path == /private/tmp/omarchy-qemu-source-build.* ]] || \\\n",
+     "  [[ $path == */omarchy-qemu-source-build.* ]] || \\\n"),
 ])
 
 print("WIZARD_PATCH_OK")

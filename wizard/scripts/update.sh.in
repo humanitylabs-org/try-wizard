@@ -1,0 +1,40 @@
+#!/bin/bash
+# Wizard quick update: swaps in a new Wizard.app but keeps the 1.8 GB Linux image
+# already on this Mac, so only the small app part is downloaded.
+# Usage: curl -fsSL https://private.wizard001.com/reports/wizard-desktop/update.sh | bash
+set -euo pipefail
+BASE=${WIZARD_UPDATE_BASE:-https://private.wizard001.com/reports/wizard-desktop}
+VER=__VER__
+SHA=__SHA__
+APP=${WIZARD_APP:-/Applications/Wizard.app}
+WORK="$HOME/Library/Caches/wizard-update"
+
+[ -d "$APP/Contents/Resources/guest" ] || { echo "Wizard isn't in /Applications yet. Install the full DMG once first."; exit 1; }
+rm -rf "$WORK"; mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
+
+echo "Downloading Wizard $VER (app only)..."
+curl -fL --progress-bar "$BASE/Wizard-$VER-app.tar.gz" -o "$WORK/app.tgz"
+echo "$SHA  $WORK/app.tgz" | shasum -a 256 -c - >/dev/null || { echo "Download was corrupted; run the command again."; exit 1; }
+tar -xzf "$WORK/app.tgz" -C "$WORK"
+
+echo "Reusing the Linux image already on this Mac..."
+cp -cR "$APP/Contents/Resources/guest" "$WORK/Wizard.app/Contents/Resources/guest" 2>/dev/null \
+  || cp -R "$APP/Contents/Resources/guest" "$WORK/Wizard.app/Contents/Resources/guest"
+codesign --verify --deep --strict "$WORK/Wizard.app" 2>/dev/null \
+  || { echo "This version changed the Linux image, so it needs the full DMG instead."; exit 1; }
+
+if pgrep -f "Wizard.app/Contents/MacOS/omarchy-vm-helper" >/dev/null; then
+  echo "Closing Wizard (your chats are saved)..."
+  pkill -TERM -f "Wizard.app/Contents/MacOS/omarchy-vm-helper" || true
+  for _ in $(seq 1 60); do pgrep -f "Wizard.app/Contents/MacOS/omarchy-vm-helper" >/dev/null || break; sleep 1; done
+fi
+
+rm -rf "$APP.previous"
+mv "$APP" "$APP.previous"
+if mv "$WORK/Wizard.app" "$APP"; then
+  rm -rf "$APP.previous"
+else
+  mv "$APP.previous" "$APP"; echo "Could not replace Wizard; the old version is untouched."; exit 1
+fi
+echo "Wizard $VER installed. Opening..."
+open "$APP"
