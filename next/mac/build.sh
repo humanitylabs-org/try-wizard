@@ -2,7 +2,7 @@
 # Build Wizard.app (front end) with Wizard Host.app (back-end runner) embedded as a login item.
 # Runs on Thales. Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
 set -euo pipefail
-VER=${VER:-0.2.1}
+VER=${VER:-0.3.0}
 BUILD=${BUILD:-1}
 cd "$(dirname "$0")"
 SRC=$PWD
@@ -17,7 +17,7 @@ HOST=$APP/Contents/Library/LoginItems/"Wizard Host.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" "$HOST/Contents/Resources"
 
 "${SWIFTC[@]}" Shared/Shared.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
-"${SWIFTC[@]}" Shared/Shared.swift App/main.swift -framework WebKit -framework AppKit -framework ServiceManagement -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift App/WizardKeys.swift App/main.swift -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -o "$APP/Contents/MacOS/Wizard"
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra
 cat > "$1" <<EOF

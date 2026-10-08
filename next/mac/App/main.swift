@@ -538,27 +538,109 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
 // MARK: - App
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var controller: WizardWindowController!
     let wizardsMenu = NSMenu(title: "Wizard")
+    let statusMenu = WizardStatusMenu()
+    let statusActions = WizardStatusActions()
+    var bindingsTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()
+        controller.window?.delegate = self
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         controller.begin()
+        installWizardKey()
+    }
+
+    // MARK: Wizard key, search, menu bar
+
+    /// Origin of the Wizard this window is showing (the place views like /meetings/ live).
+    var wizardOrigin: URL? {
+        let base = controller.web.url ?? Store.active.flatMap { URL(string: $0.url) }
+        guard let u = base, let scheme = u.scheme, let host = u.host, ["http", "https"].contains(scheme) else { return nil }
+        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = u.port
+        return c.url
+    }
+
+    func installWizardKey() {
+        statusActions.statusLine = { [weak self] in self?.statusLine() ?? "" }
+        statusActions.isLocal = { Store.active?.kind == .thisMac }
+        statusActions.open = { [weak self] path in self?.openView(path) }
+        statusActions.show = { [weak self] in self?.showMainWindow() }
+        statusActions.quit = { if Store.active?.kind == .thisMac { HostControl.send("quit") }; NSApp.terminate(nil) }
+        statusMenu.install(statusActions)
+
+        let search = WizardSearch.shared
+        search.origin = { [weak self] in self?.wizardOrigin }
+        search.onOpen = { [weak self] path in self?.openView(path) }
+        WizardBindings.onChange = { search.rebuildCatalog(apps: []); search.refreshApps() }
+
+        let key = WizardKey.shared
+        key.onTap = { WizardSearch.shared.toggle() }
+        key.onChord = { [weak self] c in
+            if c == " " { WizardSearch.shared.toggle(); return }
+            if let b = WizardBindings.current.first(where: { $0.key == String(c) }), let p = b.open { self?.openView(p) }
+        }
+        key.install()
+        if CapsLockRemap.enabled { CapsLockRemap.install() }
+
+        WizardBindings.refresh(origin: wizardOrigin)
+        bindingsTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            WizardBindings.refresh(origin: self?.wizardOrigin)
+        }
+    }
+
+    func statusLine() -> String {
+        guard let b = Store.active else { return "Wizard isn't set up yet" }
+        if b.kind == .remote { return "Connected to \(b.name)" }
+        guard let d = try? Data(contentsOf: WizardShared.statusFile),
+              let s = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let state = s["state"] as? String else {
+            return "Wizard OS on this Mac"
+        }
+        switch state {
+        case "running": return "Wizard is running on this Mac"
+        case "starting": return "Wizard OS is starting…"
+        case "stopped": return "Wizard OS is stopped"
+        case "notInstalled": return "Wizard OS is not installed"
+        case "stopping": return "Wizard OS is shutting down…"
+        default: return "Wizard OS hit a problem — see logs"
+        }
+    }
+
+    func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Open a Wizard view (path on the Wizard's own origin) in the main window.
+    func openView(_ path: String) {
+        guard let origin = wizardOrigin, let url = URL(string: path, relativeTo: origin)?.absoluteURL,
+              url.host == origin.host else { return }
+        showMainWindow()
+        controller.load(url)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { controller.showWindow(nil) }
+        if !flag { showMainWindow() }
         return true
     }
 
-    // Closing the window quits the front end; Wizard OS keeps running in the menu bar.
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // Closing the window keeps Wizard in the menu bar (Wizard key, search, meeting detection keep working).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        // Leave the keyboard as we found it when Wizard isn't running.
+        if CapsLockRemap.active { CapsLockRemap.remove() }
+    }
 
     func buildMenus() {
         let main = NSMenu()
@@ -649,6 +731,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? s.write(toFile: "/tmp/wizard-qa-eval.txt", atomically: true, encoding: .utf8)
             }
         case "snapshot": snapshot(to: arg.isEmpty ? "/tmp/wizard-qa.png" : arg)
+        case "search": WizardSearch.shared.show(); if !arg.isEmpty { WizardSearch.shared.field.stringValue = arg; WizardSearch.shared.filter() }
+        case "search-open": WizardSearch.shared.openSelected()
+        case "search-snapshot":
+            let p = WizardSearch.shared.panel
+            if let v = p.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg.isEmpty ? "/tmp/wizard-qa-search.png" : arg))
+            }
+        case "wizard-key": // simulate the physical key path: down, optional chord letter, up
+            WizardKey.shared.handle(id: 1, pressed: true)
+            if let c = arg.first {
+                let id = UInt32(100 + (Array(WizardBindings.keyCodes.keys).firstIndex(of: c) ?? 0))
+                WizardKey.shared.handle(id: id, pressed: true)
+            }
+            WizardKey.shared.handle(id: 1, pressed: false)
+        case "close-window": controller.window?.performClose(nil)
+        case "keys-state":
+            let s: [String: Any] = [
+                "triggerRegistered": WizardKey.shared.registered, "capsRemapActive": CapsLockRemap.active,
+                "bindings": WizardBindings.current.map { "\($0.key)=\($0.open ?? "")" },
+                "searchVisible": WizardSearch.shared.panel.isVisible,
+                "searchResults": WizardSearch.shared.results.prefix(8).map { $0.title },
+                "statusMenu": statusMenu.titles(), "statusItemVisible": statusMenu.item.isVisible,
+                "activationPolicy": NSApp.activationPolicy().rawValue, "windowVisible": controller.window?.isVisible ?? false,
+                "url": controller.web.url?.absoluteString ?? ""]
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-keys.json"))
+            }
         case "state":
             let s: [String: Any] = ["overlayHidden": controller.overlay.isHidden, "title": controller.title.stringValue,
                                     "subtitle": controller.subtitle.stringValue, "url": controller.web.url?.absoluteString ?? "",

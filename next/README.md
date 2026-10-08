@@ -43,3 +43,10 @@ bash next/mac/build.sh              # -> mac/dist/Wizard.app, Wizard-<ver>.dmg
 ```
 
 The guest build expects the existing Try Wizard runtime bundle (Hermes + Node + Wizard UX) at `out/wizard-runtime.tgz`.
+
+## Wizard key and Wizard search (0.3, branch `mizel-mac`)
+
+- **Caps Lock is the Wizard key.** Tap it to open Wizard search (apps, views, previews). Hold it and press a letter to jump straight to the view bound to that letter (C Chat, M Mizel, F Files by default). Turn it off from the Wizard menu-bar icon.
+- How: `hidutil` maps Caps Lock to F18 for this user (no admin, no Accessibility or Input Monitoring prompt); Carbon hot keys for letters exist only while F18 is held. Quitting Wizard restores Caps Lock.
+- **Your Wizard edits the bindings.** Wizard.app reads `<your Wizard>/wizard-os/keybindings.json` on launch, when search opens, and every 5 minutes; a local override can live at `~/Library/Application Support/Wizard/keybindings.json`. Format: `{"schema":1,"bindings":[{"key":"m","title":"Mizel","open":"/meetings/"}]}`.
+- **One menu-bar icon.** Wizard.app owns it in both modes (this Mac or another computer), and closing the window keeps Wizard running there. Wizard Host hides its icon while Wizard.app is running and shows it again if the app quits.
