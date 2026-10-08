@@ -57,7 +57,8 @@ final class OSInstaller: NSObject, URLSessionDownloadDelegate {
 
     func install() {
         onProgress?("Finding the latest Wizard OS…", nil)
-        session.dataTask(with: Store.osFeedURL) { data, resp, err in
+        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
+        session.dataTask(with: req) { data, resp, err in
             DispatchQueue.main.async {
                 guard let data, (resp as? HTTPURLResponse)?.statusCode == 200,
                       let feed = try? JSONDecoder().decode(Feed.self, from: data),
@@ -409,14 +410,29 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         installer.onDone = { [weak self] err in
             guard let self else { return }
             if let err {
-                self.showOverlay("Setup didn't finish", err.localizedDescription + "\n\nIf you downloaded wizard-os-….tar.xz from the release page, choose it here.", spinning: false,
-                                 actions: [("Choose Wizard OS File…", #selector(self.chooseOSFile)), ("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
+                // A bad picked file says so; an unreachable feed just shows the GitHub steps.
+                let bad = err.localizedDescription.contains("valid Wizard OS")
+                self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
                 HostControl.send("start")
                 self.connectLocal()
             }
         }
         installer.install()
+    }
+
+    /// Off the Wizard team network the automatic download isn't reachable: get the file from GitHub instead.
+    func showGetOS(note: String? = nil) {
+        showOverlay("Get Wizard OS",
+                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download from GitHub and download wizard-os-0.1.0.tar.xz (about 270 MB).\n2. Come back here and click Choose Downloaded File.",
+                    spinning: false,
+                    actions: [("Download from GitHub", #selector(openReleasePage)),
+                              ("Choose Downloaded File…", #selector(chooseOSFile)),
+                              ("Back", #selector(backToChooser))])
+    }
+
+    @objc func openReleasePage() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/latest")!)
     }
 
     @objc func chooseOSFile() {

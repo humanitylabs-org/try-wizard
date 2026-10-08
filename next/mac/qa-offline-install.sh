@@ -14,8 +14,8 @@ rm -rf "$APP"; ditto "$W/mac/dist/Wizard.app" "$APP"
 defaults write org.humanitylabs.wizard QAHooks -bool true
 t0=$(python3 -c 'import time;print(time.time())')
 open "$APP"; sleep 2; cd $W/mac; bash qa.sh choose-this-mac-offline >/dev/null 2>&1
-sleep 4; bash qa.sh state >/dev/null; python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print('feed-unreachable screen:',d['title'],'|',d['subtitle'][:90])"
-bash qa.sh "install-file /tmp/wizard-os-bad.tar.xz" >/dev/null; sleep 4; bash qa.sh state >/dev/null; python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print('bad-file screen:',d['title'],'|',d['subtitle'][:70])"
+sleep 12; bash qa.sh "snapshot /tmp/wq-getos.png" >/dev/null; sleep 1; bash qa.sh state >/dev/null; python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print('feed-unreachable screen:',d['title'],'|',d['subtitle'][:160].replace(chr(10),' / '))"
+bash qa.sh "install-file /tmp/wizard-os-bad.tar.xz" >/dev/null; sleep 4; bash qa.sh state >/dev/null; python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print('bad-file screen:',d['title'],'|',d['subtitle'][:90].replace(chr(10),' / '))"
 t0=$(python3 -c 'import time;print(time.time())')
 cp "$W/out/wizard-os-0.1.0.tar.xz" /tmp/wizard-os-0.1.0.tar.xz; bash qa.sh "install-file /tmp/wizard-os-0.1.0.tar.xz" >/dev/null
 while python3 -c "import time,sys;sys.exit(0 if time.time()-$t0<180 else 1)"; do

@@ -7,7 +7,7 @@ The 0.2 line splits Wizard into two pieces:
 
 On first launch the app asks *Where should Wizard live?*
 
-1. **On this Mac**: downloads Wizard OS (about 270 MB, checked against a SHA-256 hash), unpacks it into `~/Library/Application Support/Wizard/os`, and starts it in the background.
+1. **On this Mac**: downloads Wizard OS (about 270 MB, checked against a SHA-256 hash), unpacks it into `~/Library/Application Support/Wizard/os`, and starts it in the background. The automatic download comes from the Wizard team's private network; anyone else gets a *Get Wizard OS* screen that opens this repo's latest release and installs the downloaded `wizard-os-*.tar.xz`.
 2. **On another computer**: paste the address of an existing Wizard (tailnet or LAN). No VM is installed.
 
 The *Wizard* menu can switch between Wizards, add another one, install Wizard OS from a downloaded file, or restart the local Wizard OS.
