@@ -65,7 +65,7 @@ enum ApplicationHelpLink: Int, CaseIterable {
 
     var title: String {
         switch self {
-        case .usage: "Try Omarchy Help"
+        case .usage: "Wizard Help"
         case .troubleshooting: "Troubleshooting"
         case .reportIssue: "Report an Issue…"
         }

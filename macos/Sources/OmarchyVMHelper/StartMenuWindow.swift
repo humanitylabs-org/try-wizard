@@ -26,7 +26,7 @@ enum OmarchyStartMenuTheme {
 }
 
 enum ResetConfirmationPolicy {
-    static let requiredText = "Try Omarchy"
+    static let requiredText = "Wizard"
 
     static func allowsReset(_ text: String) -> Bool {
         text == requiredText
@@ -124,7 +124,7 @@ final class ResetConfirmationPrompt {
 @MainActor
 enum StartMenuWindowChrome {
     static func apply(to window: NSWindow) {
-        window.title = "Try Omarchy"
+        window.title = "Wizard"
         // The start menu draws its own heading inside a full-size content view.
         // Keep the native title as the window identity, but do not composite a
         // second copy over that custom heading in the transparent title bar.
@@ -350,7 +350,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         virtualMachineRunning = true
         closeRunningSettings = closeSettings
         self.requestSettingsAction = requestSettingsAction
-        window.title = "Try Omarchy Settings"
+        window.title = "Wizard Settings"
         // The VM has its own Cocoa process and may occupy a fullscreen Space.
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.level = .floating
@@ -378,7 +378,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
               !microphoneRequestInFlight, !cameraRequestInFlight,
               window.attachedSheet == nil, portForwardingEditor == nil else { return }
         let alert = NSAlert()
-        alert.messageText = action == .restart ? "Restart Try Omarchy?" : "Shut down Omarchy to manage this VM?"
+        alert.messageText = action == .restart ? "Restart Wizard?" : "Shut down Omarchy to manage this VM?"
         alert.informativeText = action == .restart
             ? "Save your work first. Omarchy will shut down and start again with your saved settings."
             : "Save your work first. The settings window will stay open so you can change the VM location or reset it."
@@ -424,7 +424,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         guard let catalog = GuestBootFixCatalog.bundled else {
             let alert = NSAlert()
             alert.messageText = "VM update details are unavailable"
-            alert.informativeText = "The update catalog is missing or damaged. Reinstall Try Omarchy before updating this VM."
+            alert.informativeText = "The update catalog is missing or damaged. Reinstall Wizard before updating this VM."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return .cancel
@@ -577,7 +577,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
             alert.informativeText = errorMessage
         } else {
             alert.alertStyle = .informational
-            alert.messageText = "Try Omarchy has been reset"
+            alert.messageText = "Wizard has been reset"
             if let estimate = pendingResetSpaceEstimate {
                 alert.informativeText = "The VM has been deleted. Up to \(estimate) of disk space was reclaimed. A fresh VM will be prepared on the next launch."
             } else {
@@ -600,7 +600,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
     /// Clears the resetting state when the controller refused to start the
     /// reset at all. Deliberately silent, and deliberately not
     /// `resetDidFinish(errorMessage: nil)` — nothing was erased, so claiming
-    /// "Try Omarchy has been reset" would be a lie about a destructive action.
+    /// "Wizard has been reset" would be a lie about a destructive action.
     func resetDidAbort() {
         guard resetInProgress else { return }
         resetInProgress = false
@@ -642,7 +642,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = "Try Omarchy couldn’t start"
+        alert.messageText = "Wizard couldn’t start"
         alert.informativeText = errorMessage
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window)
@@ -676,7 +676,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
             icon.heightAnchor.constraint(equalToConstant: 62),
         ])
 
-        let title = NSTextField(labelWithString: virtualMachineRunning ? "Try Omarchy Settings" : "Try Omarchy")
+        let title = NSTextField(labelWithString: virtualMachineRunning ? "Wizard Settings" : "Wizard")
         title.font = .monospacedSystemFont(ofSize: 27, weight: .bold)
         title.textColor = OmarchyStartMenuTheme.foreground
         title.identifier = NSUserInterfaceItemIdentifier("app-title")
@@ -952,7 +952,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         let resetAction = virtualMachineRunning && canResetStorage ? manage : reset
 
         let fixesPending = GuestBootFixCache.needsUpdate(cacheURL: bootFixCacheURL(), expectedIdentity: bootFixIdentity())
-        let launchButtonTitle = virtualMachineRunning ? "Done" : (launchInProgress ? launchPhase.buttonTitle : (fixesPending ? "Update and Launch" : "Launch Omarchy"))
+        let launchButtonTitle = virtualMachineRunning ? "Done" : (launchInProgress ? launchPhase.buttonTitle : (fixesPending ? "Update and Launch" : "Open Wizard"))
         let launchButton = OmarchyActionButton(
             title: launchButtonTitle,
             style: .primary,
@@ -1024,7 +1024,7 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
         restart.isEnabled = !controlsBusy
         let restartCaption = NSTextField(wrappingLabelWithString: shutdownInProgress
             ? "Waiting for Omarchy to shut down. Finish saving your work inside Omarchy."
-            : "CPU, memory, shared folder, networking, port forwarding, and immersive mode changes apply when Try Omarchy next starts. Restart to apply them now.")
+            : "CPU, memory, shared folder, networking, port forwarding, and immersive mode changes apply when Wizard next starts. Restart to apply them now.")
         restartCaption.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         restartCaption.textColor = OmarchyStartMenuTheme.muted
         restartCaption.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1393,8 +1393,8 @@ final class StartMenuWindow: NSObject, NSWindowDelegate {
 
     private func automaticStartSettingRow() -> NSView {
         let detail = virtualMachineRunning
-            ? "Launch Omarchy with your saved settings. Open settings anytime from Omarchy’s Setup menu."
-            : "Launch Omarchy with your saved settings. Hold Option while opening the app to show the launcher."
+            ? "Open Wizard with your saved settings. Open settings anytime from Omarchy’s Setup menu."
+            : "Open Wizard with your saved settings. Hold Option while opening the app to show the launcher."
         return toggleSettingRow(
             titleText: "Skip launcher",
             detailText: detail,

@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+. /opt/wizard/bin/wizard-env
+export WIZARD_API_HOST=127.0.0.1 WIZARD_API_PORT=8865
+cd /opt/wizard/hermes-agent
+# A brand-new Wizard has no sessions yet; create the state DB so the UX can list "nothing" cleanly.
+/opt/wizard/venv/bin/python -c "from hermes_state import SessionDB; SessionDB()" >/dev/null 2>&1 || true
+exec /opt/wizard/venv/bin/python /opt/wizard/bin/wizard-api-standalone.py

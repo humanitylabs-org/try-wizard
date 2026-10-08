@@ -14,13 +14,13 @@ enum NativeAuthenticationOperation: String, Equatable {
     var localizedReason: String {
         switch self {
         case .disable:
-            "Disable Touch ID for sudo in this Try Omarchy guest"
+            "Disable Touch ID for sudo in this Wizard guest"
         case .enroll:
-            "Pair this Try Omarchy guest for Touch ID sudo testing"
+            "Pair this Wizard guest for Touch ID sudo testing"
         case .sudo:
-            "Approve sudo in the focused Try Omarchy guest"
+            "Approve sudo in the focused Wizard guest"
         case .onePasswordUnlock:
-            "Unlock 1Password in the focused Try Omarchy guest"
+            "Unlock 1Password in the focused Wizard guest"
         }
     }
 }
@@ -232,7 +232,7 @@ final class SecureEnclaveAuthorizationSigner: HostAuthorizationSigning, @uncheck
                 for: .applicationSupportDirectory,
                 in: .userDomainMask
             )[0]
-            .appendingPathComponent("Try Omarchy", isDirectory: true)
+            .appendingPathComponent("Wizard", isDirectory: true)
             .appendingPathComponent("Native Authentication Keys", isDirectory: true)
     }
 

@@ -3,4 +3,6 @@
 # Pinned from archlinuxarm/PKGBUILDs 0b5418fc3f62860b191cd872cb2f933f9fc77841
 # (core/pacman-mirrorlist). pacman expands $arch.
 #
+Server = http://tw.mirror.archlinuxarm.org/$arch/$repo
+Server = http://dk.mirror.archlinuxarm.org/$arch/$repo
 Server = http://mirror.archlinuxarm.org/$arch/$repo

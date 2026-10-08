@@ -59,9 +59,9 @@ layout_source="$native_dir/dmg-layout.applescript"
   fail "DMG Finder layout is missing or unsafe"
 }
 
-work_dir=$(mktemp -d /private/tmp/omarchy-dmg.XXXXXX)
+work_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/omarchy-dmg.XXXXXX")
 mounted=0
-working_volume_name="Try Omarchy ${work_dir##*/}"
+working_volume_name="Wizard ${work_dir##*/}"
 mount_dir="$work_dir/$working_volume_name"
 cleanup() {
   status=$?
@@ -104,7 +104,7 @@ osascript "$layout_source" "$mount_dir" "${app##*/}"
 
 # Finder references can use volume and window names. Keep both the volume
 # label and mount folder distinct until Finder has finished arranging it.
-diskutil rename "$mount_dir" "Try Omarchy" >/dev/null
+diskutil rename "$mount_dir" "Wizard" >/dev/null
 sync
 hdiutil detach "$mount_dir" >/dev/null
 mounted=0
@@ -117,7 +117,7 @@ hdiutil convert \
 if [[ -n $sign_identity ]]; then
   codesign \
     --sign "$sign_identity" \
-    --identifier dev.tryomarchy.native.disk-image \
+    --identifier com.aiwizards.desktop.disk-image \
     --timestamp \
     "$output"
   codesign --verify --strict --verbose=2 "$output"

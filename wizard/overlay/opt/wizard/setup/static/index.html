@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wizard</title>
+<style>
+  :root {
+    --bg: #0b0b12; --panel: #14131f; --line: #26243a; --text: #ece9fb; --dim: #9a96b5;
+    --accent: #8b6dff; --accent2: #b9a6ff; --ok: #5fd39a; --err: #ff7a8a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Inter", "Noto Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  body::before { content: ""; position: fixed; inset: -20%; pointer-events: none;
+    background: radial-gradient(40% 35% at 70% 20%, #3a2a8a33, transparent 70%),
+                radial-gradient(35% 30% at 20% 85%, #1f5a8a22, transparent 70%); }
+  .card { position: relative; width: min(560px, 92vw); padding: 44px 44px 36px; border-radius: 22px;
+    background: linear-gradient(180deg, #17162499, #11101a99); border: 1px solid var(--line);
+    box-shadow: 0 30px 80px #0008; backdrop-filter: blur(12px); }
+  .dots { display: flex; gap: 8px; margin-bottom: 28px; }
+  .dot { width: 26px; height: 4px; border-radius: 4px; background: var(--line); transition: background .3s; }
+  .dot.on { background: var(--accent); }
+  h1 { font-size: 28px; font-weight: 650; margin: 0 0 8px; letter-spacing: -.2px; }
+  p.lead { color: var(--dim); margin: 0 0 26px; line-height: 1.5; font-size: 15px; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 0 0 8px; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line);
+    background: #0e0d16; color: var(--text); font-size: 16px; outline: none; transition: border .2s; }
+  input:focus, select:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 18px; align-items: center; }
+  .portrait { flex: none; width: 84px; height: 84px; border-radius: 50%; cursor: pointer; overflow: hidden;
+    border: 1px dashed #4a4670; display: grid; place-items: center; color: var(--dim); font-size: 12px;
+    background: radial-gradient(circle at 35% 30%, #2c2556, #15122a); text-align: center; }
+  .portrait img { width: 100%; height: 100%; object-fit: cover; }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 30px; gap: 12px; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 12px; padding: 13px 22px; font-size: 15px; font-weight: 600; }
+  .primary { background: var(--accent); color: white; box-shadow: 0 8px 24px #8b6dff44; }
+  .primary:disabled { opacity: .45; cursor: default; box-shadow: none; }
+  .ghost { background: transparent; color: var(--dim); padding-left: 0; }
+  .choices { display: grid; gap: 12px; }
+  .choice { text-align: left; background: #0f0e18; border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px;
+    color: var(--text); font-weight: 500; display: flex; gap: 14px; align-items: center; transition: border .2s, transform .1s; }
+  .choice:hover { border-color: #4a3f99; }
+  .choice.sel { border-color: var(--accent); background: #17142b; }
+  .choice .ico { font-size: 22px; width: 30px; text-align: center; }
+  .choice b { display: block; font-size: 15px; margin-bottom: 3px; }
+  .choice span { color: var(--dim); font-size: 13px; font-weight: 400; }
+  .tag { margin-left: auto; font-size: 11px; color: var(--accent2); border: 1px solid #4a3f99; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
+  .sub { margin-top: 16px; display: none; }
+  .sub.show { display: block; }
+  .code { font: 600 30px ui-monospace, "JetBrains Mono", monospace; letter-spacing: 4px; text-align: center;
+    padding: 16px; border-radius: 12px; background: #0e0d16; border: 1px solid var(--line); margin: 10px 0 12px; user-select: all; }
+  .note { color: var(--dim); font-size: 13px; line-height: 1.5; }
+  .err { color: var(--err); font-size: 14px; margin-top: 14px; min-height: 1em; }
+  .orb { width: 72px; height: 72px; border-radius: 50%; margin: 6px auto 22px;
+    background: radial-gradient(circle at 35% 30%, #d1c4ff, #7b5cff 45%, #2a1d66 75%); box-shadow: 0 0 50px #7b5cff77; }
+  .orb.busy { animation: breathe 1.6s ease-in-out infinite; }
+  .orb.ok { box-shadow: 0 0 60px #5fd39a66; }
+  @keyframes breathe { 0%,100% { transform: scale(.92); opacity: .8 } 50% { transform: scale(1.05); opacity: 1 } }
+  .bubble { background: #17142b; border: 1px solid #3a3170; border-radius: 16px 16px 16px 4px; padding: 16px 18px;
+    line-height: 1.55; font-size: 16px; margin-top: 4px; white-space: pre-wrap; }
+  .center { text-align: center; }
+  .hidden { display: none !important; }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #ffffff55; border-top-color: white;
+    display: inline-block; vertical-align: -3px; margin-right: 8px; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i></div>
+
+  <!-- 1. Name -->
+  <section data-step="1">
+    <h1>Name your Wizard</h1>
+    <p class="lead">This is your own AI, living on its own computer inside your Mac. What should it be called?</p>
+    <div class="row">
+      <div class="portrait" id="portrait" title="Add a portrait (optional)"><span>Add<br>portrait</span></div>
+      <div style="flex:1">
+        <label for="name">Name</label>
+        <input id="name" type="text" maxlength="40" placeholder="Merlin" autocomplete="off" autofocus>
+      </div>
+    </div>
+    <input id="portraitFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+    <div class="err" id="err1"></div>
+    <div class="actions"><span></span><button class="primary" id="next1" disabled>Continue</button></div>
+  </section>
+
+  <!-- 2. Brain -->
+  <section data-step="2" class="hidden">
+    <h1>Connect <span class="wname">its</span> brain</h1>
+    <p class="lead">Your Wizard thinks with a language model. Pick how it connects. You can change this later.</p>
+    <div class="choices">
+      <button class="choice" data-kind="chatgpt"><span class="ico">✦</span><div><b>Sign in with ChatGPT</b><span>Use your ChatGPT plan. Sign-in opens in your Mac browser.</span></div><span class="tag">Recommended</span></button>
+      <button class="choice" data-kind="free"><span class="ico">⚡</span><div><b>Start free</b><span>A starter brain, no account needed. Upgrade any time.</span></div></button>
+      <button class="choice" data-kind="apikey"><span class="ico">🔑</span><div><b>Use an API key</b><span>Anthropic or OpenRouter.</span></div></button>
+    </div>
+
+    <div class="sub" id="sub-chatgpt">
+      <p class="note" id="codexNote">Getting a sign-in code…</p>
+      <div class="code hidden" id="codexCode"></div>
+      <p class="note hidden" id="codexHelp">We opened <b>auth.openai.com/codex/device</b> in your Mac browser. Sign in and enter this code. This page continues on its own.</p>
+      <button class="ghost hidden" id="codexReopen">Open the sign-in page again</button>
+    </div>
+
+    <div class="sub" id="sub-apikey">
+      <label for="provider">Provider</label>
+      <select id="provider"><option value="anthropic">Anthropic</option><option value="openrouter">OpenRouter</option></select>
+      <div style="height:12px"></div>
+      <label for="key">API key</label>
+      <input id="key" type="password" placeholder="Paste your key" autocomplete="off">
+    </div>
+
+    <div class="err" id="err2"></div>
+    <div class="actions"><button class="ghost" data-back="1">Back</button><button class="primary" id="next2" disabled>Connect</button></div>
+  </section>
+
+  <!-- 3. Verify -->
+  <section data-step="3" class="hidden">
+    <div class="orb busy" id="orb3"></div>
+    <h1 class="center" id="h3">Waking <span class="wname">your Wizard</span>…</h1>
+    <p class="lead center" id="l3">Checking that its brain really answers.</p>
+    <div class="bubble hidden" id="reply"></div>
+    <div class="err center" id="err3"></div>
+    <div class="actions"><button class="ghost" data-back="2">Change brain</button><button class="primary" id="next3" disabled>Continue</button></div>
+  </section>
+
+  <!-- 4. First chat -->
+  <section data-step="4" class="hidden">
+    <h1>Give it its first job</h1>
+    <p class="lead"><span class="wname">Your Wizard</span> has a real Linux computer with admin rights. To prove it, it will install a program, run it, and tell you about its new home.</p>
+    <div class="bubble" id="firstTask">Install <b>fastfetch</b>, run it, and tell me what kind of machine you live on.</div>
+    <div class="err" id="err4"></div>
+    <div class="actions"><button class="ghost" data-back="3">Back</button><button class="primary" id="next4">Start chatting</button></div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s)
+const $$ = (s) => [...document.querySelectorAll(s)]
+let state = {}
+let brainKind = null
+let codexTimer = null
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  return data
+}
+
+function show(step) {
+  $$('section').forEach((s) => s.classList.toggle('hidden', s.dataset.step !== String(step)))
+  $$('.dot').forEach((d, i) => d.classList.toggle('on', i < step))
+  if (step === 3) verify()
+}
+
+function setName(name) {
+  $$('.wname').forEach((el) => { el.textContent = name || el.textContent })
+}
+
+// 1. Name
+$('#name').addEventListener('input', (e) => { $('#next1').disabled = !e.target.value.trim() })
+$('#name').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('#next1').disabled) $('#next1').click() })
+$('#portrait').addEventListener('click', () => $('#portraitFile').click())
+$('#portraitFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+  try {
+    await fetch('/api/portrait', { method: 'POST', body: file }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error) })
+    $('#portrait').innerHTML = `<img src="/api/portrait?t=${Date.now()}" alt="">`
+  } catch (err) { $('#err1').textContent = err.message }
+})
+$('#next1').addEventListener('click', async () => {
+  $('#err1').textContent = ''
+  try {
+    state = await api('/api/name', { method: 'POST', body: JSON.stringify({ name: $('#name').value }) })
+    setName(state.name)
+    show(2)
+  } catch (err) { $('#err1').textContent = err.message }
+})
+
+// 2. Brain
+$$('.choice').forEach((btn) => btn.addEventListener('click', () => {
+  brainKind = btn.dataset.kind
+  $$('.choice').forEach((b) => b.classList.toggle('sel', b === btn))
+  $('#sub-chatgpt').classList.toggle('show', brainKind === 'chatgpt')
+  $('#sub-apikey').classList.toggle('show', brainKind === 'apikey')
+  $('#err2').textContent = ''
+  $('#next2').textContent = brainKind === 'chatgpt' ? 'Waiting for sign-in…' : 'Connect'
+  $('#next2').disabled = brainKind === 'chatgpt'
+  if (brainKind === 'chatgpt') startCodex()
+  else stopCodex()
+}))
+
+async function startCodex() {
+  stopCodex()
+  $('#codexNote').textContent = 'Getting a sign-in code…'
+  $('#codexCode').classList.add('hidden'); $('#codexHelp').classList.add('hidden'); $('#codexReopen').classList.add('hidden')
+  try { await api('/api/brain/chatgpt/start', { method: 'POST' }) } catch (err) { $('#err2').textContent = err.message; return }
+  codexTimer = setInterval(pollCodex, 1500)
+}
+function stopCodex() {
+  if (codexTimer) { clearInterval(codexTimer); codexTimer = null; api('/api/brain/chatgpt/cancel', { method: 'POST' }).catch(() => {}) }
+}
+async function pollCodex() {
+  let s
+  try { s = await api('/api/brain/chatgpt') } catch { return }
+  if (s.status === 'waiting') {
+    $('#codexNote').textContent = 'Your sign-in code:'
+    $('#codexCode').textContent = s.userCode
+    $('#codexCode').classList.remove('hidden'); $('#codexHelp').classList.remove('hidden'); $('#codexReopen').classList.remove('hidden')
+    if (!s.openedOnMac) $('#codexHelp').innerHTML = 'On your Mac, open <b>auth.openai.com/codex/device</b>, sign in, and enter this code. This page continues on its own.'
+  } else if (s.status === 'signed-in') {
+    clearInterval(codexTimer); codexTimer = null
+    $('#codexNote').textContent = 'Signed in.'
+    show(3)
+  } else if (s.status === 'error') {
+    clearInterval(codexTimer); codexTimer = null
+    $('#err2').textContent = s.error || 'Sign-in failed. Try again.'
+    $('#next2').textContent = 'Try again'; $('#next2').disabled = false
+  }
+}
+$('#codexReopen').addEventListener('click', () => api('/api/brain/chatgpt/open', { method: 'POST' }).catch(() => {}))
+$('#key').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#next2').click() })
+
+$('#next2').addEventListener('click', async () => {
+  $('#err2').textContent = ''
+  if (brainKind === 'chatgpt') { $('#next2').textContent = 'Waiting for sign-in…'; $('#next2').disabled = true; startCodex(); return }
+  const btn = $('#next2'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Connecting'
+  try {
+    const body = brainKind === 'apikey' ? { kind: 'apikey', provider: $('#provider').value, key: $('#key').value } : { kind: 'free' }
+    state = await api('/api/brain', { method: 'POST', body: JSON.stringify(body) })
+    show(3)
+  } catch (err) { $('#err2').textContent = err.message }
+  btn.disabled = false; btn.textContent = 'Connect'
+})
+
+// 3. Verify
+async function verify() {
+  $('#orb3').className = 'orb busy'; $('#reply').classList.add('hidden'); $('#err3').textContent = ''
+  $('#h3').innerHTML = `Waking ${state.name || 'your Wizard'}…`; $('#l3').textContent = 'Checking that its brain really answers.'
+  $('#next3').disabled = true
+  try {
+    const data = await api('/api/verify', { method: 'POST' })
+    $('#orb3').className = 'orb ok'
+    $('#h3').textContent = `${state.name || 'Your Wizard'} is awake`
+    $('#l3').textContent = 'Its first words:'
+    $('#reply').textContent = data.reply; $('#reply').classList.remove('hidden')
+    $('#next3').disabled = false
+  } catch (err) {
+    $('#orb3').className = 'orb'
+    $('#err3').textContent = err.message
+    $('#next3').textContent = 'Retry'; $('#next3').disabled = false
+    $('#next3').onclick = () => { $('#next3').textContent = 'Continue'; $('#next3').onclick = null; verify() }
+  }
+}
+$('#next3').addEventListener('click', () => { if (!$('#next3').onclick) show(4) })
+
+// 4. First chat
+$('#next4').addEventListener('click', async () => {
+  const btn = $('#next4'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Opening'
+  try {
+    const data = await api('/api/finish', { method: 'POST' })
+    location.replace(data.target)
+  } catch (err) { $('#err4').textContent = err.message; btn.disabled = false; btn.textContent = 'Start chatting' }
+})
+
+$$('[data-back]').forEach((b) => b.addEventListener('click', () => { stopCodex(); show(Number(b.dataset.back)) }))
+
+;(async () => {
+  try { state = await api('/api/state') } catch {}
+  if (state.name) { $('#name').value = state.name; $('#next1').disabled = false; setName(state.name) }
+  if (state.hasPortrait) $('#portrait').innerHTML = '<img src="/api/portrait" alt="">'
+  show(state.brain && state.verified ? 4 : state.brain ? 3 : state.name ? 2 : 1)
+})()
+</script>
+</body>
+</html>

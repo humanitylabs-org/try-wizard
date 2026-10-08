@@ -82,7 +82,7 @@ enum QEMUGPUStorageSpaceEstimate {
             in: .userDomainMask
         ).first else { return nil }
         return applicationSupport
-            .appendingPathComponent("Try Omarchy", isDirectory: true)
+            .appendingPathComponent("Wizard", isDirectory: true)
             .standardizedFileURL
     }
 
@@ -612,7 +612,7 @@ struct QEMUGPULaunchRequest: Equatable {
 }
 
 enum QEMUGPULauncherPath {
-    static let appName = "Try Omarchy.app"
+    static let appName = "Wizard.app"
     static let launcherName = "run-qemu-gpu.sh"
 
     static func resolve(bundleURL: URL) throws -> URL {

@@ -291,8 +291,8 @@ enum StartMenuPresentation {
 
     static func immersiveDetail(isEnabled: Bool) -> String {
         isEnabled
-            ? "Omarchy opens Full Screen with the Mac menu bar and Dock hidden."
-            : "Omarchy opens in a window with the Mac menu bar and Dock available."
+            ? "Wizard opens Full Screen with the Mac menu bar and Dock hidden."
+            : "Wizard opens in a resizable window, like any Mac app."
     }
 
 }

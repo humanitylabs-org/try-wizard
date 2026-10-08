@@ -153,7 +153,7 @@ struct StorageLocationResolution: Equatable {
 /// recorded disk without materializing the current app's factory image.
 enum StorageLocationPolicy {
     static let environmentKey = "OMARCHY_QEMU_GPU_STATE_ROOT"
-    static let workspaceDirectoryName = "Try Omarchy"
+    static let workspaceDirectoryName = "Wizard"
     static let rootMarkerName = ".omarchy-qemu-storage"
 
     /// The marker's only valid contents. Kept byte-identical to

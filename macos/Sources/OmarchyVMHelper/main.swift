@@ -281,7 +281,7 @@ do {
             )
             ApplicationPresentation.installMainMenu(
                 in: application,
-                applicationName: "Try Omarchy",
+                applicationName: "Wizard",
                 actionsTarget: controller
             )
             application.delegate = controller

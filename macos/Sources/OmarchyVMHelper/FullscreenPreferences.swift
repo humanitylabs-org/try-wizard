@@ -3,7 +3,7 @@ import Foundation
 struct FullscreenPreferences: Equatable {
     var isImmersive: Bool
 
-    static let defaults = Self(isImmersive: true)
+    static let defaults = Self(isImmersive: false)
 }
 
 struct FullscreenPreferenceStore {

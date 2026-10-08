@@ -7,7 +7,7 @@ final class StartupPreferenceStore {
     private var pendingChoices: [URL: Bool] = [:]
 
     func load(storageRoot: URL?) -> Bool {
-        guard let storageRoot else { return false }
+        guard let storageRoot else { return true }
         if let pending = pendingChoices[storageRoot] { return pending }
         let url = storageRoot.appendingPathComponent(Self.fileName)
         guard StorageLocationPolicy.hasValidRootMarker(in: storageRoot),
@@ -17,7 +17,7 @@ final class StartupPreferenceStore {
               size <= 4096,
               let data = try? Data(contentsOf: url),
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              payload.schemaVersion == 1 else { return false }
+              payload.schemaVersion == 1 else { return true }
         return payload.startAutomatically
     }
 
@@ -84,7 +84,8 @@ enum StartupPolicy {
     ) -> Bool {
         let resetRequested = initialArguments.first == QEMUGPUStorageOption.resetStorage.rawValue
             || initialArguments.first == QEMUGPUStorageOption.resetStorageOnly.rawValue
-        return isEnabled && hasExistingVM && !optionKeyHeld && !resetRequested
+        _ = isEnabled; _ = hasExistingVM  // Wizard Desktop: always open straight into the Wizard
+        return !optionKeyHeld && !resetRequested
             && initialArguments.first != QEMUGPUStorageOption.ephemeral.rawValue
             && !requiresVMFixReview
     }

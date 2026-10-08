@@ -166,6 +166,10 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             )
         )
         prepareStartMenu(startAutomatically: startAutomatically)
+        if !AXIsProcessTrusted(), !UserDefaults.standard.bool(forKey: "wizardAccessibilityAsked") {
+            UserDefaults.standard.set(true, forKey: "wizardAccessibilityAsked")
+            requestOptionalAccessibilityPermission()
+        }
         appReleaseChecker.checkAutomaticallyIfDue()
         scheduleAppReleasePrompt()
     }
@@ -324,7 +328,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
                     return try self.networkIdentityOperation(arguments)
                 }),
             immersiveMode: { [weak self] in
-                self?.fullscreenPreferenceStore.load().isImmersive ?? true
+                self?.fullscreenPreferenceStore.load().isImmersive ?? false
             },
             setImmersiveMode: { [weak self] isImmersive in
                 self?.fullscreenPreferenceStore.save(
@@ -545,7 +549,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             startMenuWindow?.resetDidFinish(errorMessage: nil)
         } else {
             startMenuWindow?.resetDidFinish(
-                errorMessage: "The VM disk could not be reset. Try again, or reinstall the latest Try Omarchy app."
+                errorMessage: "The VM disk could not be reset. Try again, or reinstall the latest Wizard app."
             )
         }
     }
@@ -860,7 +864,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             "omarchy-vm-helper: host sleep control is unavailable: \(detail)\n",
             stderr
         )
-        pendingHostSleepControlFailure = "The virtual machine started, but Try Omarchy could not enable safe Mac sleep. Please close and reopen the app. (\(detail))"
+        pendingHostSleepControlFailure = "The virtual machine started, but Wizard could not enable safe Mac sleep. Please close and reopen the app. (\(detail))"
         lifecycle.requestQuit()
         supervisor.forward(signal: SIGTERM)
     }
@@ -1128,9 +1132,9 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = "Omarchy is still paused"
-        alert.informativeText = "Try Omarchy could not reconnect after this Mac woke, so the VM remains paused to protect its state. Try again, or quit the app. (\(error.localizedDescription))"
+        alert.informativeText = "Wizard could not reconnect after this Mac woke, so the VM remains paused to protect its state. Try again, or quit the app. (\(error.localizedDescription))"
         alert.addButton(withTitle: "Try Again")
-        alert.addButton(withTitle: "Quit Try Omarchy")
+        alert.addButton(withTitle: "Quit Wizard")
 
         isPresentingBlockingAlert = true
         let response = alert.runModal()
@@ -1275,7 +1279,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
             ) {
             case .reportFailure:
                 startMenuWindow?.launchDidFail(
-                    errorMessage: "Try Omarchy could not complete the one-time boot-file pairing. The saved VM was not reset or upgraded. You can safely try again."
+                    errorMessage: "Wizard could not complete the one-time boot-file pairing. The saved VM was not reset or upgraded. You can safely try again."
                 )
                 return
             case .requestConfirmation:
@@ -1317,7 +1321,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
                 }
                 let alert = NSAlert()
                 alert.alertStyle = .critical
-                alert.messageText = "Try Omarchy couldn’t start"
+                alert.messageText = "Wizard couldn’t start"
                 alert.informativeText = message
                 alert.addButton(withTitle: "Close")
                 alert.runModal()

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wizard</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b12; color: #e9e7f5;
+    font-family: -apple-system, "Inter", "Noto Sans", system-ui, sans-serif; }
+  .wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+  .orb { width: 88px; height: 88px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #c9b8ff, #7b5cff 45%, #2a1d66 75%);
+    box-shadow: 0 0 60px #7b5cff88; animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { transform: scale(.94); opacity: .85 } 50% { transform: scale(1.04); opacity: 1 } }
+  h1 { font-weight: 600; font-size: 22px; letter-spacing: .2px; margin: 0; }
+  p { margin: 0; color: #9d99b8; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="orb"></div>
+  <h1>Waking your Wizard…</h1>
+  <p id="hint">Starting its mind. This takes a few seconds.</p>
+</div>
+<script>
+  const target = 'http://127.0.0.1:8930/';
+  let tries = 0;
+  async function poll() {
+    tries += 1;
+    try {
+      await fetch(target + 'healthz', { mode: 'no-cors', cache: 'no-store' });
+      location.replace(target);
+      return;
+    } catch (_) {}
+    if (tries === 40) document.getElementById('hint').textContent = 'Still starting — first boot takes a little longer.';
+    setTimeout(poll, 750);
+  }
+  poll();
+</script>
+</body>
+</html>
