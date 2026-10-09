@@ -43,3 +43,7 @@ bash next/mac/build.sh              # -> mac/dist/Wizard.app, Wizard-<ver>.dmg
 ```
 
 The guest build expects the existing Try Wizard runtime bundle (Hermes + Node + Wizard UX) at `out/wizard-runtime.tgz`.
+
+## Always-on plan
+
+The roadmap for running Wizard 24/7 on owned hardware, and for moving Archimedes onto Thales, lives in [docs/always-on-wizard-plan.md](../docs/always-on-wizard-plan.md). Track it through the `always-on` issues.
