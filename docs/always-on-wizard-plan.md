@@ -6,9 +6,9 @@
 
 ## Direction
 
-1. **Owned hardware beats a VPS.** ([#1](https://github.com/humanitylabs-org/try-wizard/issues/1)) Hostinger introduced CPU credits on 1 October 2026: a KVM 4 earns credits below 40% CPU, spends them above it, and is throttled to about 10% CPU when the balance runs out. Light Wizard use is fine on a VPS, but the long-term home for a Wizard is a machine the owner controls.
-2. **Stopgap until Wizard One:** ([#2](https://github.com/humanitylabs-org/try-wizard/issues/2)) recommend an always-on machine running Wizard for Mac (or the Windows/Linux build later). A VPS stays the fallback for people without a suitable machine or with poor home internet.
-3. **Archimedes moves to Thales only when the packaged installer is complete,** ([#3](https://github.com/humanitylabs-org/try-wizard/issues/3)) so the migration is also the end-to-end test of the product.
+1. **Owned hardware beats a VPS.** Hostinger introduced CPU credits on 1 October 2026: a KVM 4 earns credits below 40% CPU, spends them above it, and is throttled to about 10% CPU when the balance runs out. Light Wizard use is fine on a VPS, but the long-term home for a Wizard is a machine the owner controls.
+2. **Stopgap until Wizard One:** recommend an always-on machine running Wizard for Mac (or the Windows/Linux build later). A VPS stays the fallback for people without a suitable machine or with poor home internet.
+3. **Archimedes moves to Thales only when the packaged installer is complete,** so the migration is also the end-to-end test of the product.
 
 ## Recommended home machine
 
