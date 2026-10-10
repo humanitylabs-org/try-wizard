@@ -490,12 +490,16 @@ final class VoiceKeys {
                     self.lastError = err ?? "blank"; VoiceHUD.shared.show(err ?? "Didn't catch that", color: WizStyle.rec, live: false); VoiceHUD.shared.hide(after: 2.5); return
                 }
                 self.lastText = text
-                Self.insert(text)
+                // Wizard in front: hand the text to Wizard UX (composer at the cursor); otherwise paste into the focused app.
+                if let hook = Self.deliverInWizard { hook(text) { handled in if !handled { Self.insert(text) } } } else { Self.insert(text) }
                 VoiceHUD.shared.hide()
             }
         default: break
         }
     }
+
+    /// Set by the app: deliver dictated text to Wizard UX via the bridge; reports false to fall back to ⌘V.
+    static var deliverInWizard: ((String, @escaping (Bool) -> Void) -> Void)?
 
     /// The page owns the truth (it may have been reloaded or finished by mouse): Wizard decides start vs send there.
     func toggleOrb() { orbTaps += 1; orb(true) }

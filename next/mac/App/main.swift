@@ -355,6 +355,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: Flow
 
     func begin() {
+        homeURL = nil; resolvedOrigins = []
         guard let backend = Store.active else { showChooser(); return }
         switch backend.kind {
         case .thisMac:
@@ -362,7 +363,65 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)
-            if let url = URL(string: backend.url) { load(url) }
+            if let url = URL(string: backend.url) { resolveHome(url) { [weak self] home in self?.homeURL = home; self?.load(home) } }
+        }
+    }
+
+    // MARK: Wizard UX (wizard-ux) and the native bridge (wizard-os spec/NATIVE_BRIDGE.md)
+
+    /// Where this window's Wizard lives right now: Wizard UX when the back end serves it, else the address as given.
+    var homeURL: URL?
+    func loadHome() {
+        if let homeURL { load(homeURL); return }
+        if let b = Store.active, let u = URL(string: b.url) { load(u) }
+    }
+
+    /// Wizard UX is served at /wizard-os-home/ on a Wizard's origin and picks its desktop shell inside this app.
+    /// A root or legacy /wizard/ address is upgraded to it when the back end answers there; a deeper address stays as typed.
+    /// `defaults write org.humanitylabs.wizard LegacyUX -bool true` keeps the old UX.
+    func resolveHome(_ base: URL, done: @escaping (URL) -> Void) {
+        let p = base.path.isEmpty ? "/" : base.path
+        guard !UserDefaults.standard.bool(forKey: "LegacyUX"), p == "/" || p == "/wizard" || p.hasPrefix("/wizard/"),
+              let scheme = base.scheme, let host = base.host else { done(base); return }
+        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = base.port
+        guard let origin = c.url, let entry = URL(string: "/wizard-os-home/", relativeTo: origin)?.absoluteURL,
+              let probe = URL(string: "desktop.html", relativeTo: entry)?.absoluteURL else { done(base); return }
+        var req = URLRequest(url: probe, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        req.httpMethod = "GET"
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let ok = (resp as? HTTPURLResponse)?.statusCode == 200 && (data.map { String(decoding: $0.prefix(4096), as: UTF8.self) }?.contains("data-shell") ?? false)
+            NSLog("Wizard: Wizard UX %@ at %@", ok ? "found" : "not found", entry.absoluteString)
+            DispatchQueue.main.async { done(ok ? entry : base) }
+        }.resume()
+    }
+
+    /// Native → page: dispatch a bridge event when the page is Wizard UX and handles it.
+    /// Calls back nil when it isn't (legacy UX, onboarding, still loading) so callers can fall back.
+    /// For wizard:orb it waits for the page's wizard:orb-state answer.
+    func uxSend(_ event: String, _ detail: [String: Any], done: @escaping (String?) -> Void) {
+        let js = """
+        const ux = window.wizardUX;
+        if (!ux || !Array.isArray(ux.events) || !ux.events.includes(name)) return null;
+        if (name !== 'wizard:orb') { window.dispatchEvent(new CustomEvent(name, { detail })); return 'sent'; }
+        return await new Promise(res => {
+          const t = setTimeout(() => res('pending'), 2000);
+          window.addEventListener('wizard:orb-state', e => { clearTimeout(t); res((e.detail && e.detail.state) || 'none'); }, { once: true });
+          window.dispatchEvent(new CustomEvent(name, { detail }));
+        });
+        """
+        web.callAsyncJavaScript(js, arguments: ["name": event, "detail": detail], in: nil, in: .page) { r in
+            switch r {
+            case .success(let v): done(v as? String)
+            case .failure(let e): NSLog("Wizard: bridge %@ failed: %@", event, e.localizedDescription); done(nil)
+            }
+        }
+    }
+
+    /// Is the page in the window Wizard UX (bridge ready)?
+    func uxState(_ done: @escaping ([String: Any]?) -> Void) {
+        web.evaluateJavaScript("window.wizardUX ? JSON.stringify(window.wizardUX) : ''") { r, _ in
+            let s = (r as? String) ?? ""
+            done(s.isEmpty ? nil : (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any])
         }
     }
 
@@ -477,7 +536,21 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: WKNavigationDelegate
 
     var onNavigate: () -> Void = {}
+    /// Origins already checked for Wizard UX this session (so a legacy-only back end isn't probed on every load).
+    var resolvedOrigins: Set<String> = []
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
+        if homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
+            let key = "\(u.scheme ?? "")://\(h):\(u.port ?? 0)"
+            if !resolvedOrigins.contains(key) {
+                resolvedOrigins.insert(key)
+                resolveHome(u) { [weak self] home in
+                    guard let self, home != u else { return }
+                    self.homeURL = home; self.load(home)
+                }
+            }
+        }
         onNavigate()
         loadedAt = Date()
         localRetries = 0
@@ -573,7 +646,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let panel = RecorderPanel.shared
         panel.onExpand = { [weak self] url in
             guard let self, let u = URL(string: url) else { return }
-            self.showMainWindow(); self.controller.load(u)
+            if let o = self.wizardOrigin, u.host == o.host, let c = URLComponents(url: u, resolvingAgainstBaseURL: false) {
+                var p = c.percentEncodedPath; if let q = c.percentEncodedQuery { p += "?" + q }; if let f = c.percentEncodedFragment { p += "#" + f }
+                self.openView(p)
+            } else { self.showMainWindow(); self.controller.load(u) }
         }
         panel.shouldShow = { [weak self] in
             guard let self, NSApp.isActive, self.controller.window?.isVisible == true, self.controller.window?.isMiniaturized == false,
@@ -594,6 +670,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vk = VoiceKeys.shared
         vk.origin = { [weak self] in self?.wizardOrigin }
         vk.orb = { [weak self] start in self?.orb(start) }
+        VoiceKeys.deliverInWizard = { [weak self] text, done in
+            guard let self, NSApp.isActive, self.controller.window?.isKeyWindow == true else { done(false); return }
+            self.controller.uxSend("wizard:dictation", ["text": text]) { done($0 != nil) }
+        }
         vk.install(prompt: false)
 
         statusActions.isRecording = { MeetingRecorder.shared.isRecording }
@@ -614,26 +694,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
+    /// Wizard UX gets a wizard:orb event and answers with its state; the legacy UX is driven through its buttons.
     func orb(_ start: Bool) {
         guard let o = wizardOrigin else { return }
         showMainWindow()
         _ = start
         // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
-        let js = "(() => { const f = document.querySelector('button.voice-fab'); const l = f ? (f.getAttribute('aria-label')||'') : ''; if (f && /Finish and send/.test(l)) { f.click(); return 'sent'; } if (/Opening microphone|Transcribing/.test(l)) return 'busy'; if (f && !f.disabled && /Start voice/.test(l)) { f.click(); return 'voice'; } const n = document.querySelector('button.new-thread-fab'); if (n) { n.click(); return 'new'; } return 'none'; })()"
+        let legacy = "(() => { const f = document.querySelector('button.voice-fab'); const l = f ? (f.getAttribute('aria-label')||'') : ''; if (f && /Finish and send/.test(l)) { f.click(); return 'sent'; } if (/Opening microphone|Transcribing/.test(l)) return 'busy'; if (f && !f.disabled && /Start voice/.test(l)) { f.click(); return 'voice'; } const n = document.querySelector('button.new-thread-fab'); if (n) { n.click(); return 'new'; } return 'none'; })()"
         var tries = 0
+        func retry() {
+            guard tries < 25 else { MeetingLog.log("orb: gave up"); return }
+            tries += 1
+            if tries == 1, start, let u = controller.web.url, u.path.contains("/meetings") || u.path.contains("/files") || u.path.contains("/apps") {
+                controller.loadHome()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: attempt)
+        }
         func attempt() {
-            controller.web.evaluateJavaScript(js) { [weak self] r, _ in
-                let res = (r as? String) ?? "none"
-                MeetingLog.log("orb: \(res)")
-                if res == "none", tries < 25 {
-                    tries += 1
-                    if tries == 1, start, let u = self?.controller.web.url, u.path.contains("/meetings") || u.path.contains("/files") || u.path.contains("/apps") {
-                        self?.controller.load(o)
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: attempt)
+            controller.uxSend("wizard:orb", ["action": "toggle"]) { [weak self] state in
+                guard let self else { return }
+                // Wizard UX answered (voice / sent / busy / none): it owns the outcome.
+                if let state { MeetingLog.log("orb (bridge): \(state)"); return }
+                self.controller.web.evaluateJavaScript(legacy) { r, _ in
+                    let res = (r as? String) ?? "none"
+                    MeetingLog.log("orb (legacy): \(res)")
+                    if res == "none" { retry() }
                 }
             }
         }
+        _ = o
         attempt()
     }
 
@@ -705,7 +794,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let origin = wizardOrigin, let url = URL(string: path, relativeTo: origin)?.absoluteURL,
               url.host == origin.host else { return }
         showMainWindow()
-        controller.load(url)
+        // Wizard UX opens it as a window on its desktop; anything else navigates the page.
+        controller.uxSend("wizard:open", ["path": path]) { [weak self] r in
+            if r == nil { self?.controller.load(url) }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -830,6 +922,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             WizardKey.shared.handle(id: 1, pressed: false)
         case "close-window": controller.window?.performClose(nil)
+        case "ux-state":
+            controller.uxState { ux in
+                let s: [String: Any] = ["wizardUX": ux ?? NSNull(), "url": self.controller.web.url?.absoluteString ?? "",
+                                        "home": self.controller.homeURL?.absoluteString ?? ""]
+                if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) { try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-ux.json")) }
+            }
+        case "ux-open": openView(arg)
+        case "ux-dictation":
+            controller.uxSend("wizard:dictation", ["text": arg]) { r in try? (r ?? "nil").write(toFile: "/tmp/wizard-qa-dictation.txt", atomically: true, encoding: .utf8) }
         case "meeting-new": recordNew(title: arg.isEmpty ? "QA meeting" : arg, eventId: nil)
         case "meeting-stop": MeetingRecorder.shared.stop(finalize: true) { s in
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) { try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-meeting-stop.json")) } }
