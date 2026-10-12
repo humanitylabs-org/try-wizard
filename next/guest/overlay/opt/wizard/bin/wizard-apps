@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Wizard OS factory trim and first-launch app fetches. Runs as the `wizard` user (uid 1000).
+
+  wizard-apps factory [--hermes-image REF]
+      Build time only. Leaves the factory disk with what's needed to reach a first chat: the App Manager stack,
+      the shell, Files, Secret Drop and Hermes. Voice (transcriber), Browser and AI Accounts are uninstalled and
+      their images and data removed; voice comes back on its own after first launch (`fetch-voice`), Browser and
+      AI Accounts install from the App Store or as a dependency the first time they're needed. With
+      --hermes-image the Hermes engine runs that image through a stock Runtipi user-config override.
+  wizard-apps fetch-voice
+      First launch: install the transcriber (engine + model) in the background. Idempotent; retries until done.
+      Writes /var/lib/wizard/voice.json for the onboarding/status pages.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path.home() / "wizard-app-manager"))
+from wam import cli  # noqa: E402
+
+LATER = ["transcriber", "browser", "wizard-ai-accounts"]   # installed after first launch / on first use
+VOICE = "transcriber"
+STATUS = Path("/var/lib/wizard/voice.json")
+
+OVERRIDE = """\
+# Written by Try Wizard's factory build (wizard-apps): the Hermes engine runs the slim Wizard build of the same
+# Hermes release (stock source, packaging only). Remove this file and restart the app to go back to the recipe's image.
+services:
+  hermes-agent-engine:
+    image: {image}
+    pull_policy: missing
+"""
+
+
+def say(*a):
+    print("wizard-apps:", *a, flush=True)
+
+
+def docker(*args, check=False):
+    return subprocess.run(["docker", *args], capture_output=True, text=True, check=check)
+
+
+def installed(c) -> set[str]:
+    return set(cli.installed_ids(c.runtipi()))
+
+
+def factory(hermes_image: str | None) -> None:
+    c = cli.Config()
+    rt = c.runtipi()
+    have = installed(c)
+    for app in LATER:
+        if app in have:
+            say("uninstall", app, json.dumps(cli.uninstall(c, app, force=True)))
+    if hermes_image:
+        for tar in sorted(Path("/var/lib/wizard/images").glob("*.tar")):   # a locally built image, if the build shipped one
+            say("docker load", docker("load", "-i", str(tar), check=True).stdout.strip())
+            subprocess.run(["sudo", "rm", "-f", str(tar)], check=True)
+        if docker("image", "inspect", hermes_image).returncode != 0:
+            say("pull", hermes_image, docker("pull", hermes_image, check=True).stdout.strip().splitlines()[-1:])
+        d = c.runtipi_root / "user-config" / cli.STORE / "hermes-agent"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "docker-compose.yml").write_text(OVERRIDE.format(image=hermes_image))
+        urn = f"hermes-agent:{cli.STORE}"
+        rt.req("POST", f"/app-lifecycle/{urn}/restart", {}, timeout=300)
+        st = rt.wait_status(urn, {"running"}, timeout=900)
+        say("hermes-agent restarted on", hermes_image, "->", st)
+        ps = docker("ps", "--filter", "label=com.docker.compose.service=hermes-agent-engine", "--format", "{{.Image}}").stdout.strip()
+        if hermes_image.split("@")[0] not in ps and hermes_image not in ps:
+            raise SystemExit(f"hermes-agent-engine runs {ps!r}, not {hermes_image}")
+    for app in LATER:   # app data left behind by the uninstall (the Whisper model lives here)
+        p = c.runtipi_root / "app-data" / cli.STORE / app
+        if p.exists():
+            subprocess.run(["sudo", "rm", "-rf", str(p)], check=True)
+    cli.write_registry(c, rt)
+    say("prune", docker("image", "prune", "-af").stdout.strip().splitlines()[-1:])
+    docker("builder", "prune", "-af")
+    say("factory apps:", sorted(installed(c)))
+
+
+def write_status(**kw) -> None:
+    try:
+        STATUS.write_text(json.dumps({"app": VOICE, "updated": int(time.time()), **kw}))
+    except OSError:
+        pass
+
+
+def fetch_voice() -> None:
+    delay = 15
+    while True:
+        try:
+            c = cli.Config()
+            if VOICE in installed(c):
+                write_status(state="ready")
+                say("voice ready")
+                return
+            write_status(state="downloading")
+            say("installing", VOICE)
+            cli.install(c, VOICE)
+            urn = f"{VOICE}:{cli.STORE}"
+            st = c.runtipi().wait_status(urn, {"running"}, timeout=1800)
+            if st == "running":
+                write_status(state="ready")
+                say("voice ready")
+                return
+            write_status(state="retrying", detail=f"status {st}")
+        except SystemExit as e:
+            write_status(state="retrying", detail=str(e)[:200])
+        except Exception as e:  # noqa: BLE001  (network down, App Manager still starting, …)
+            write_status(state="retrying", detail=f"{type(e).__name__}: {str(e)[:200]}")
+        time.sleep(delay)
+        delay = min(delay * 2, 600)
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if args[:1] == ["factory"]:
+        img = args[args.index("--hermes-image") + 1] if "--hermes-image" in args else None
+        factory(img)
+    elif args[:1] == ["fetch-voice"]:
+        fetch_voice()
+    else:
+        print(__doc__)
+        sys.exit(2)

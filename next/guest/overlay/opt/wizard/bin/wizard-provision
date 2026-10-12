@@ -9,6 +9,8 @@ P=/var/lib/wizard/provision.env           # written by build-image.sh: pins
 WAM_COMMIT="${WAM_COMMIT:-}"
 WAM_IMAGE="${WAM_IMAGE:-}"
 OS_SH_URL="${OS_SH_URL:-https://aiwizards.com/os.sh}"
+FACTORY="${FACTORY:-slim}"
+HERMES_IMAGE="${HERMES_IMAGE:-}"
 T0=$(date +%s.%N)
 declare -A T
 stamp() { T[$1]=$(python3 -c "import sys;print(round($(date +%s.%N)-$T0,1))"); echo "== [$(date -u +%T)] $1 at ${T[$1]}s"; }
@@ -63,6 +65,16 @@ docker images --digests --format '{{.Repository}}:{{.Tag}}@{{.Digest}}\t{{.Size}
 docker info --format 'storage driver: {{.Driver}}' | tee -a /var/lib/wizard/provision-images.txt
 du -sh /var/lib/docker /var/lib/containerd 2>/dev/null | tee -a /var/lib/wizard/provision-images.txt
 stamp checked
+# Slim factory: only what reaches a first chat ships in the download (wizard-apps factory).
+if [ "${FACTORY:-slim}" = slim ]; then
+  as_wizard /opt/wizard/bin/wizard-apps factory ${HERMES_IMAGE:+--hermes-image "$HERMES_IMAGE"} || fail "factory trim"
+  as_wizard /home/wizard/.local/bin/wam slots | tee -a /var/lib/wizard/provision-doctor.txt || true
+  as_wizard /home/wizard/.local/bin/wam doctor | tee /var/lib/wizard/provision-doctor.txt || true
+  docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | tee /var/lib/wizard/provision-containers.txt
+  docker images --digests --format '{{.Repository}}:{{.Tag}}@{{.Digest}}\t{{.Size}}' | tee /var/lib/wizard/provision-images.txt
+  du -sh /var/lib/docker | tee -a /var/lib/wizard/provision-images.txt
+  stamp factory
+fi
 /opt/wizard/bin/wizard-shell-port >/dev/null && echo "shell port $(/opt/wizard/bin/wizard-shell-port)"
 
 # ---- strip per-box identity so every Mac gets its own ----

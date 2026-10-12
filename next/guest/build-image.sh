@@ -22,6 +22,10 @@ OUT=$W/out; WORK=$W/work; mkdir -p "$OUT" "$WORK"
 WAM_COMMIT=${WAM_COMMIT:-1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a}
 WAM_IMAGE=${WAM_IMAGE:-ghcr.io/humanitylabs-org/wizard-app-manager@sha256:8afef790d701d8bdd6728187f943c5d4de50cd09da5dc29f245f636af32c1117}
 BUILD_DISK_GB=${BUILD_DISK_GB:-48}
+# Slim factory (default): voice, Browser and AI Accounts are left out of the download (voice installs itself after
+# first launch). FACTORY=full keeps every default app. HERMES_IMAGE pins the Hermes engine image (slim build).
+FACTORY=${FACTORY:-slim}
+HERMES_IMAGE=${HERMES_IMAGE:-}
 VMRUN=$HERE/../mac/tools/vmrun
 STEP=${1:-all}
 t() { date +%s; }
@@ -33,7 +37,9 @@ docker build -q -t wizard-os-base:$VER "$HERE"
 cid=$(docker create wizard-os-base:$VER /bin/true)
 docker export "$cid" > "$WORK/base.tar"; docker rm "$cid" >/dev/null
 rm -rf "$WORK/g"; mkdir -p "$WORK/g"; cp -R "$HERE/overlay" "$WORK/g/overlay"; cp "$HERE/check-image.sh" "$WORK/g/"
-printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" > "$WORK/g/provision.env"
+# A locally built engine image (docker save) rides into the build disk and is loaded during provisioning.
+if [ -n "${HERMES_IMAGE_TAR:-}" ]; then cp "$HERMES_IMAGE_TAR" "$WORK/g/hermes-image.tar"; fi
+printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\nHERMES_IMAGE=%s\nFACTORY=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" "$HERMES_IMAGE" "$FACTORY" > "$WORK/g/provision.env"
 docker run --rm --privileged -e GB=$BUILD_DISK_GB -v "$WORK:/w" alpine:3.21 sh -eu -c '
 apk add -q e2fsprogs tar coreutils shadow file >/dev/null
 R=/r; rm -rf $R; mkdir -p $R
@@ -52,6 +58,7 @@ chroot $R /usr/bin/passwd -l root >/dev/null
 install -d -m 0750 -o 1000 -g 1000 $R/var/lib/wizard
 chmod 0644 $R/etc/docker/daemon.json
 install -m 0644 /w/g/provision.env $R/var/lib/wizard/provision.env
+if [ -f /w/g/hermes-image.tar ]; then install -d -m 0755 $R/var/lib/wizard/images; mv /w/g/hermes-image.tar $R/var/lib/wizard/images/hermes.tar; fi
 mkdir -p $R/home/wizard/runtipi/media && chown -R 1000:1000 $R/home/wizard
 for m in vmw_vsock_virtio_transport virtio_blk virtio_net virtiofs; do echo $m >> $R/etc/initramfs-tools/modules; done
 echo "MODULES=most" > $R/etc/initramfs-tools/conf.d/wizard
@@ -62,7 +69,7 @@ chroot $R /usr/sbin/depmod $KV
 rm -rf $R/usr/lib/firmware/* $R/lib/firmware/* 2>/dev/null || true
 chroot $R /usr/sbin/update-initramfs -c -k $KV >/dev/null 2>&1 || chroot $R /usr/sbin/update-initramfs -u -k $KV
 for u in systemd-networkd systemd-resolved systemd-timesyncd serial-getty@hvc0 wizard-grow wizard-firstboot wizard-media \
-         wizard-setup wizard-vsock@8930 wizard-ux-bridge wizard-ctl wizard-dev wizard-provision; do
+         wizard-setup wizard-vsock@8930 wizard-ux-bridge wizard-ctl wizard-dev wizard-provision wizard-voice; do
   chroot $R /usr/bin/systemctl enable $u >/dev/null 2>&1 || { echo "enable failed: $u"; exit 1; }
 done
 for u in apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer e2scrub_reap.service fstrim.timer getty@tty1.service; do

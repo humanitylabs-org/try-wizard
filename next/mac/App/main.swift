@@ -56,9 +56,36 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     /// A feed names one archive, or the same archive split into ordered parts (each under GitHub's 2 GiB asset
     /// limit). `sha256` is always the hash of the whole archive; each part also carries its own hash.
     struct Part: Decodable { let url: String; let bytes: Int64?; let sha256: String }
+    /// Apps Wizard OS fetches by itself right after first launch (voice), so the space they take is never a surprise.
+    struct Background: Decodable { let label: String; let bytes: Int64?; let installBytes: Int64? }
     struct Feed: Decodable {
         let version: String; let url: String?; let sha256: String; let bytes: Int64?; let installBytes: Int64?
         let parts: [Part]?
+        let background: [Background]?
+        /// Everything Wizard OS will take on this Mac once the background downloads finish.
+        var totalInstallBytes: Int64 { (installBytes ?? (11 << 30)) + (background ?? []).reduce(0) { $0 + ($1.installBytes ?? 0) } }
+    }
+
+    static func gb(_ b: Int64) -> String { String(format: "%.1f GB", Double(b) / 1e9) }
+
+    /// "Wizard OS will use about 6.4 GB on this Mac: 1.1 GB to download now, then 1.3 GB for voice in the background."
+    static func sizeNote(_ f: Feed) -> String {
+        var s = "Wizard OS will use about \(gb(f.totalInstallBytes)) on this Mac"
+        if let b = f.bytes { s += ": \(gb(b)) to download now" }
+        let extra = (f.background ?? []).filter { ($0.bytes ?? 0) > 0 }
+        if !extra.isEmpty {
+            s += ", then " + extra.map { "\(gb($0.bytes ?? 0)) for \($0.label)" }.joined(separator: " and ") + " in the background"
+        }
+        return s + "."
+    }
+
+    /// Read the feed only to say how much space Wizard OS needs (shown before anything downloads).
+    func fetchSizeNote(_ done: @escaping (String?) -> Void) {
+        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 6
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let f = data.flatMap { (resp as? HTTPURLResponse)?.statusCode == 200 ? try? JSONDecoder().decode(Feed.self, from: $0) : nil }
+            DispatchQueue.main.async { done(f.map(Self.sizeNote)) }
+        }.resume()
     }
     private var partURLs: [(url: URL, sha: String)] = []
     private var partIndex = 0
@@ -210,13 +237,13 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
                 do {
                     try? FileManager.default.removeItem(at: Self.staging)
-                    try Self.checkFreeSpace(install: feed.installBytes ?? (11 << 30))
+                    try Self.checkFreeSpace(install: feed.totalInstallBytes)
                     try self.startTar()
                 } catch { self.busy = false; self.onDone?(error); return }
                 self.partURLs = list; self.partIndex = 0; self.partHasher = SHA256()
                 let partSum = (feed.parts ?? []).reduce(Int64(0)) { $0 + ($1.bytes ?? 0) }
                 self.feedBytes = feed.bytes ?? partSum; self.expected = self.feedBytes
-                self.onProgress?("Downloading Wizard OS \(feed.version)…", 0)
+                self.onProgress?("Downloading Wizard OS \(feed.version)… \(Self.sizeNote(feed))", 0)
                 self.session.dataTask(with: list[0].url).resume()
             }
         }.resume()
@@ -637,15 +664,23 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     /// First run on this Mac: where the Wizard keeps its files. The folder is shared into Wizard OS (virtio-fs) as the
     /// apps' user-files folder; app databases stay on the Wizard OS disk.
-    func askFilesFolder() {
+    func askFilesFolder(sizeNote: String? = nil) {
         let home = WizardShared.defaultFilesFolder
-        showOverlay("Keep your Wizard's files in ~/\(home.lastPathComponent)?",
+        let title = "Keep your Wizard's files in ~/\(home.lastPathComponent)?"
+        showOverlay(title,
                     "Your Wizard and its apps put what they make here: Inbox, Documents, Videos, Meetings and Exports. "
-                    + "You can open the folder in Finder any time.",
+                    + "You can open the folder in Finder any time." + (sizeNote.map { "\n\n" + $0 } ?? ""),
                     spinning: false,
                     actions: [("Use ~/\(home.lastPathComponent)", #selector(useDefaultFilesFolder)),
                               ("Choose Folder…", #selector(chooseFilesFolder)),
                               ("Back", #selector(backToChooser))])
+        // Say how much space Wizard OS will take before anything downloads (only on this Mac's first install).
+        if sizeNote == nil && !WizardShared.osInstalled {
+            installer.fetchSizeNote { [weak self] note in
+                guard let self, let note, self.title.stringValue == title, !self.overlay.isHidden else { return }
+                self.askFilesFolder(sizeNote: note)
+            }
+        }
     }
 
     @objc func useDefaultFilesFolder() { setFilesFolder(WizardShared.defaultFilesFolder) }
