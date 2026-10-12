@@ -3,3 +3,4 @@ mac/dist/
 *.tar.xz
 work/
 out/
+mac/tools/vmrun
