@@ -1101,6 +1101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch parts[0] {
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
+        case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
         case "files-folder": controller.setFilesFolder(arg.isEmpty ? WizardShared.defaultFilesFolder : URL(fileURLWithPath: arg))
         case "choose-this-mac-offline":
             // Simulate a Mac that can't reach the download feed.

@@ -45,7 +45,7 @@ if [ -z "$FEED_URL" ]; then
   FEED_URL=http://127.0.0.1:47999/latest.json
   for _ in $(seq 1 40); do curl -fsS -o /dev/null -m 2 "$FEED_URL" && break; sleep 0.25; done   # server up before the app asks
 fi
-echo "feed: $FEED_URL"; curl -fsS -m 20 "$FEED_URL" | head -c 1200; echo; df -h "$HOME" | tail -1
+echo "feed loaded"; curl -fsS -m 20 "$FEED_URL" | python3 -c 'import json,sys; d=json.load(sys.stdin); print({k:d.get(k) for k in ("version","bytes","installBytes","background")})'; df -h "$HOME" | tail -1
 
 echo "== install the app from the DMG"
 MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
@@ -55,7 +55,15 @@ defaults write org.humanitylabs.wizard QAHooks -bool true
 defaults write org.humanitylabs.wizard osFeedURL "$FEED_URL"
 
 echo "== launch, On this Mac"
-open "$APP"; sleep 3
+if [ "${QA_SSH_LAUNCH:-0}" = 1 ]; then
+  # Explicit isolated external-volume QA: SSH owns the removable-volume grant.
+  # This is not proof of Finder/TCC consent on a tester's Mac.
+  "$APP/Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host" > "$EV/direct-host.log" 2>&1 &
+  "$APP/Contents/MacOS/Wizard" > "$EV/direct-app.log" 2>&1 &
+else
+  open "$APP"
+fi
+sleep 3
 bash "$HERE/qa.sh" choose-this-mac; sleep 2
 echo "prompt: $(state)"; snap 1-files-folder-prompt; sleep 1
 echo "== Use ~/Wizard (t0)"
