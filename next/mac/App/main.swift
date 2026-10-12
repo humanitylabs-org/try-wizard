@@ -30,7 +30,9 @@ enum Store {
         return b.indices.contains(activeIndex) ? b[activeIndex] : b.first
     }
     static var osFeedURL: URL {
-        URL(string: d.string(forKey: "osFeedURL") ?? "https://private.wizard001.com/reports/wizard-next/os/latest.json")!
+        // Release feed on Cloudflare R2 (custom domain). QA and testers can point a build elsewhere with
+        // `defaults write org.humanitylabs.wizard osFeedURL <url>`.
+        URL(string: d.string(forKey: "osFeedURL") ?? "https://downloads.aiwizards.com/os/latest.json")!
     }
 }
 
@@ -736,18 +738,29 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         installer.install()
     }
 
-    /// Off the Wizard team network the automatic download isn't reachable: get the file from GitHub instead.
+    /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download from GitHub and download the latest wizard-os-….tar.xz.\n2. Come back here and click Choose Downloaded File.",
+                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download Wizard OS and save the wizard-os-….tar.xz file.\n2. Come back here and click Choose Downloaded File.",
                     spinning: false,
-                    actions: [("Download from GitHub", #selector(openReleasePage)),
+                    actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
                               ("Back", #selector(backToChooser))])
     }
 
+    /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the try-wizard
+    /// releases page if the feed itself can't be read.
     @objc func openReleasePage() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/latest")!)
+        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let f = data.flatMap { (resp as? HTTPURLResponse)?.statusCode == 200 ? try? JSONDecoder().decode(OSInstaller.Feed.self, from: $0) : nil }
+            let names = f.map { $0.parts?.map(\.url) ?? ($0.url.map { [$0] } ?? []) } ?? []
+            let urls = names.compactMap { URL(string: $0, relativeTo: Store.osFeedURL)?.absoluteURL }
+            DispatchQueue.main.async {
+                if urls.isEmpty { NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/latest")!) }
+                else { urls.forEach { NSWorkspace.shared.open($0) } }
+            }
+        }.resume()
     }
 
     @objc func chooseOSFile() {
