@@ -11,9 +11,12 @@
 # Output: $OUT/wizard-os-$VER.tar.xz (+ .sha256), $OUT/provision-$VER.json (timings, pins, doctor output).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-. /Volumes/ThalesMedia/Projects/wizard-desktop/env.sh   # PATH, DOCKER_HOST (colima profile wb), TMPDIR
+# Optional machine-local Docker/PATH setup; other Macs can export their own environment.
+if [ -n "${WIZARD_BUILD_ENV:-}" ]; then . "$WIZARD_BUILD_ENV"; fi
 VER=${VER:-0.2.0}
-W=${W:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020}   # must be inside colima's mount
+W=${W:-$HERE/../../out/wizard-os-build}   # must be inside Docker/colima's shared mount
+BUILD_SOURCE_SHA=${BUILD_SOURCE_SHA:-$(git -C "$HERE" rev-parse HEAD)}
+COLIMA_PROFILE=${COLIMA_PROFILE:-wb}
 OUT=$W/out; WORK=$W/work; mkdir -p "$OUT" "$WORK"
 # Pins (Wizard OS release 0.2.0 + wizard-app-manager main).
 WAM_COMMIT=${WAM_COMMIT:-1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a}
@@ -25,7 +28,7 @@ t() { date +%s; }
 
 if [ "$STEP" = all ] || [ "$STEP" = base ]; then
 echo "== 1. base image"
-colima status -p wb >/dev/null 2>&1 || colima start -p wb
+colima status -p "$COLIMA_PROFILE" >/dev/null 2>&1 || colima start -p "$COLIMA_PROFILE"
 docker build -q -t wizard-os-base:$VER "$HERE"
 cid=$(docker create wizard-os-base:$VER /bin/true)
 docker export "$cid" > "$WORK/base.tar"; docker rm "$cid" >/dev/null
@@ -107,7 +110,12 @@ for f in provision.json provision-doctor.txt provision-containers.txt provision-
   debugfs -R "cat /var/lib/wizard/$f" /w/build.img > /w/$f 2>/dev/null || true
 done
 rm -f /w/rootfs.img; cp --sparse=always /w/build.img /w/rootfs.img
-resize2fs -M /w/rootfs.img >/dev/null 2>&1
+# resize2fs needs a fresh recorded check on the copy. Only fsck 0/1 are acceptable;
+# then require a read-only clean pass (never hide a failed repair).
+rc=0; e2fsck -fy /w/rootfs.img > /w/fsck-copy.txt 2>&1 || rc=$?
+[ "$rc" -le 1 ] || { cat /w/fsck-copy.txt; exit 1; }
+e2fsck -fn /w/rootfs.img >> /w/fsck-copy.txt 2>&1 || { cat /w/fsck-copy.txt; exit 1; }
+resize2fs -M /w/rootfs.img >/dev/null 2>&1 || { echo "resize2fs -M failed"; resize2fs -M /w/rootfs.img; exit 1; }
 BS=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Block size: *//p"); BC=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Block count: *//p")
 # 2 GiB of headroom so the first boot has room before the Mac grows the disk.
 NEW=$(( BC + 2*1024*1024*1024/BS )); resize2fs /w/rootfs.img $NEW >/dev/null 2>&1
@@ -122,7 +130,7 @@ echo "rootfs $(( NEW * BS / 1048576 )) MiB, used $(( (NEW - FREE) * BS / 1048576
 '
 cp "$WORK/provision.json" "$OUT/provision-$VER.json"
 cd "$WORK"
-python3 - "$VER" <<'PY'
+python3 - "$VER" "$BUILD_SOURCE_SHA" <<'PY'
 import json, hashlib, sys, os
 v = sys.argv[1]
 def sha(p):
@@ -132,6 +140,7 @@ def sha(p):
     return h.hexdigest()
 files = ["boot/vmlinux", "boot/initrd", "rootfs.img"]
 m = {"name": "Wizard OS", "version": v, "stack": "wizard-os-0.2-runtipi",
+     "sourceCommit": sys.argv[2],
      "kernel": "boot/vmlinux", "initrd": "boot/initrd", "rootfs": "rootfs.img",
      "cmdline": "console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false",
      "memoryMiB": 6144,

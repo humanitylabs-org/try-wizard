@@ -2,7 +2,8 @@
 # The box's user-files folder (Runtipi media root, what Files and the shell show).
 # On a Mac with a shared folder: the Mac's ~/Wizard arrives over virtio-fs at /var/lib/wizard/mac-files, where every
 # file looks root-owned; bindfs presents it at the media root owned by the guest's uid-1000 `wizard` user (the uid the
-# apps run as), and new files stay owned by the Mac user on the Mac side. Without a share: a plain folder on the VM disk.
+# apps run as) and writable by every app (some run as root without capabilities, e.g. Files); new files stay owned
+# by the Mac user on the Mac side. Without a share: a plain folder on the VM disk.
 set -uo pipefail
 M=/home/wizard/runtipi/media
 S=/var/lib/wizard/mac-files
@@ -10,7 +11,7 @@ mkdir -p "$M" "$S"
 if mountpoint -q "$M"; then fusermount3 -u "$M" 2>/dev/null || umount -l "$M" 2>/dev/null || true; fi
 if mountpoint -q "$S"; then
   # nonempty: the VM disk's own media folder (from the image build) stays underneath, unused.
-  bindfs -o nonempty,allow_other,force-user=wizard,force-group=wizard,perms=u+rwX:g+rwX,chown-ignore,chgrp-ignore,chmod-ignore \
+  bindfs -o nonempty,allow_other,force-user=wizard,force-group=wizard,perms=a+rwX,chown-ignore,chgrp-ignore,chmod-ignore \
     "$S" "$M" || { echo "media: bindfs failed"; exit 1; }
   echo "media: Mac folder at $M (owned by wizard)"
 else

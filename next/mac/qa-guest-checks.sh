@@ -9,13 +9,13 @@ mkdir -p "$EV"; exec > >(tee "$EV/qa-guest-checks.log") 2>&1
 G() { bash "$HERE/qa-guest.sh" "$1"; }
 W() { G "sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 bash -lc $(printf '%q' "$1")"; }
 echo "== versions"
-W 'git -C ~/wizard-app-manager log -1 --format="wizard-app-manager %H %cd"; docker ps --format "{{.Image}}" | sort -u'
+W 'git -C /home/wizard/wizard-app-manager log -1 --format="wizard-app-manager %H %cd"; docker ps --format "{{.Image}}" | sort -u'
 echo "== wam doctor"
-W '~/.local/bin/wam doctor; echo "doctor_exit=$?"'
+W '/home/wizard/.local/bin/wam doctor; echo "doctor_exit=$?"'
 echo "== wam slots"
-W '~/.local/bin/wam slots'
+W '/home/wizard/.local/bin/wam slots'
 echo "== wam install $APP_TO_INSTALL (from the store)"
-W "time ~/.local/bin/wam install $APP_TO_INSTALL; echo install_exit=\$?; ~/.local/bin/wam apps"
+W "time /home/wizard/.local/bin/wam install $APP_TO_INSTALL; echo install_exit=\$?; /home/wizard/.local/bin/wam apps"
 W "docker ps --format '{{.Names}} {{.Status}}' | grep -i ${APP_TO_INSTALL%%-*} || echo 'no container'"
 echo "== Mac folder as the media root"
 G 'mount | grep -E "mac-files|runtipi/media"; ls -lan /home/wizard/runtipi/media; sudo -u wizard touch /home/wizard/runtipi/media/Inbox/from-guest-wizard.txt && echo wizard-can-write'
