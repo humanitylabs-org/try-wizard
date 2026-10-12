@@ -41,7 +41,7 @@ for app in browser wizard-ai-accounts; do
 done
 
 echo "== 4. the agent's own browser tool runtime (Playwright headless shell inside Hermes)"
-BR=$(G 'docker exec hermes-agent_wizardapps-hermes-agent-engine-1 sh -c "cd /opt/hermes && timeout 120 node -e \"const {chromium}=require(\x27playwright\x27);(async()=>{const b=await chromium.launch();const p=await b.newPage();await p.setContent(\x27<title>wizard-ok</title>\x27);console.log(\x27TITLE\x27,await p.title());await b.close()})().catch(e=>{console.error(e);process.exit(1)})\""')
+BR=$(G 'docker exec hermes-agent_wizardapps-hermes-agent-engine-1 sh -c "hs=\$(ls -d /opt/hermes/.playwright/chromium_headless_shell-*/chrome-*/chrome-headless-shell | head -1); timeout 60 \$hs --no-sandbox --disable-gpu --dump-dom \"data:text/html,<title>ok</title><p>TITLE wizard-ok</p>\""')
 echo "$BR"; need 'TITLE wizard-ok' "$BR" "Hermes browser runtime launches Chromium"
 CL=$(G 'docker exec hermes-agent_wizardapps-hermes-agent-engine-1 sh -c "claude --version; test -f /opt/hermes/plugins/model-providers/claude-subscription-directsdk-experimental/plugin.yaml && echo plugin-ok; ls -ld /claude"')
 echo "$CL"; need 'plugin-ok' "$CL" "Claude subscription path present (CLI + DirectSDK plugin + /claude volume)"

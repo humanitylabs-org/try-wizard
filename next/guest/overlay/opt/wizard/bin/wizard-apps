@@ -64,7 +64,11 @@ def factory(hermes_image: str | None) -> None:
         d.mkdir(parents=True, exist_ok=True)
         (d / "docker-compose.yml").write_text(OVERRIDE.format(image=hermes_image))
         urn = f"hermes-agent:{cli.STORE}"
-        rt.req("POST", f"/app-lifecycle/{urn}/restart", {}, timeout=300)
+        # Stop, then start: the override is merged when the app starts. (A restart can report "running" before it
+        # has stopped, so the check below would see the old container.)
+        rt.req("POST", f"/app-lifecycle/{urn}/stop", {}, timeout=300)
+        rt.wait_status(urn, {"stopped"}, timeout=600)
+        rt.req("POST", f"/app-lifecycle/{urn}/start", {}, timeout=300)
         st = rt.wait_status(urn, {"running"}, timeout=900)
         say("hermes-agent restarted on", hermes_image, "->", st)
         ps = docker("ps", "--filter", "label=com.docker.compose.service=hermes-agent-engine", "--format", "{{.Image}}").stdout.strip()

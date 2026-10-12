@@ -12,7 +12,7 @@ User=wizard
 Group=wizard
 Environment=HOME=/home/wizard
 ExecStart=/opt/wizard/bin/wizard-apps fetch-voice
-ExecStopPost=/bin/sh -c 'grep -q "\"ready\"" /var/lib/wizard/voice.json 2>/dev/null && touch /var/lib/wizard/voice-installed || true'
+ExecStopPost=+/bin/sh -c 'grep -q "\"ready\"" /var/lib/wizard/voice.json 2>/dev/null && touch /var/lib/wizard/voice-installed || true'
 Restart=on-failure
 RestartSec=30
 Nice=10
