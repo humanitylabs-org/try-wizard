@@ -26,6 +26,15 @@ PY
 as_wizard() { sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
 
 stamp start
+# Build-time only: if the Mac's NAT DNS proxy doesn't answer (it can wedge on the build Mac), resolve through public
+# DNS for the build. The drop-in is removed with the other build leftovers below, so shipped boxes use their own.
+for _ in $(seq 1 10); do getent hosts github.com >/dev/null && break; sleep 2; done
+if ! getent hosts github.com >/dev/null; then
+  echo "NAT DNS not answering; using public DNS for the build"
+  mkdir -p /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNS=1.1.1.1 8.8.8.8\n' > /etc/systemd/resolved.conf.d/90-wizard-provision.conf
+  systemctl restart systemd-resolved
+fi
 for _ in $(seq 1 60); do curl -fsS -o /dev/null --max-time 5 https://github.com && break; sleep 2; done
 stamp network
 # The real one-liner. Root mode installs Docker, creates/uses the `wizard` user (uid 1000, made by the image),
@@ -83,6 +92,7 @@ rm -f /var/lib/tailscale/tailscaled.state /var/lib/tailscale/*.state
 rm -f /home/wizard/.wizard-os/private-access.json
 truncate -s 0 /etc/machine-id; rm -f /var/lib/dbus/machine-id
 rm -f /etc/ssh/ssh_host_* 2>/dev/null || true
+rm -f /etc/systemd/resolved.conf.d/90-wizard-provision.conf
 apt-get clean; rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 journalctl --rotate >/dev/null 2>&1; journalctl --vacuum-time=1s >/dev/null 2>&1 || true
 stamp done
