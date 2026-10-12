@@ -9,7 +9,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 AS="$HOME/Library/Application Support/Wizard"
 APP="$HOME/Applications/WizardNext/Wizard.app"
 mkdir -p "$EV"; exec > >(tee "$EV/qa-lifecycle.log") 2>&1
-bash "$HERE/qa.sh" state >/dev/null 2>&1  # compiles /tmp/wizard-qa-post
+bash "$HERE/qa.sh" state >/dev/null 2>&1
+# The app writes snapshots to /tmp (writing to an external volume would stop on a macOS privacy prompt).
+snap() { bash "$HERE/qa.sh" "snapshot /tmp/wq-$1.png"; sleep 2; mv -f "/tmp/wq-$1.png" "$EV/$1.png" 2>/dev/null; }
 now() { python3 -c 'import time;print(time.time())'; }
 # Wizard's VM = the Virtualization XPC process started most recently (Colima's is older).
 vmproc() { pgrep -n -f "com.apple.Virtualization.VirtualMachine"; }
@@ -38,7 +40,7 @@ mem() {
 }
 snapshot_data() { # chats, installed apps, files: compared before/after
   local U=http://127.0.0.1:47823
-  echo "chats: $(curl -s -m 10 "$U/wizard/hermes/api/sessions?limit=200" | python3 -c "import json,sys;d=json.load(sys.stdin);s=d.get('sessions') or d.get('data') or [];print(len(s), sorted(x.get('id') for x in s)[:3])" 2>/dev/null)"
+  echo "chats: $(curl -s -m 10 "$U/wizard/hermes/api/sessions?limit=200" | python3 -c "import json,sys;d=json.load(sys.stdin);s=d.get('data') or d.get('sessions') or [];print(len(s), sorted(x.get('id') for x in s)[:3])" 2>/dev/null)"
   echo "apps: $(curl -s -m 10 "$U/wizard/v1/apps" | python3 -c "import json,sys;d=json.load(sys.stdin);print(sorted(a['id'] for a in d.get('apps',[])))" 2>/dev/null)"
   echo "files: $(cd "$HOME/Wizard" 2>/dev/null && ls -1 | tr '\n' ' ')"
 }
@@ -62,7 +64,7 @@ for n in 1 2; do
   for i in $(seq 1 120); do sleep 0.5; grep -q '"stopped"' "$AS/host-status.json" && break; done
   grep state "$AS/host-status.json"; sleep 1
   echo "cold_open_s=$(appopen_until_ux)"; grep -o '"bootSeconds" : [0-9.]*' "$AS/host-status.json"
-  bash "$HERE/qa.sh" "snapshot $EV/cold-open-$n.png"; sleep 1
+  snap cold-open-$n; sleep 1
   osascript -e 'tell application "Wizard" to quit' 2>/dev/null; sleep 2
 done
 sleep 60; echo "== memory after cold boot + 60 s"; mem

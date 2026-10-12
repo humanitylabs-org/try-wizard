@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import ServiceManagement
 import WebKit
 
@@ -35,20 +36,47 @@ enum Store {
 
 // MARK: - Wizard OS installer (download on demand)
 
-final class OSInstaller: NSObject, URLSessionDownloadDelegate {
+final class OSInstaller: NSObject, URLSessionDataDelegate {
     var onProgress: ((String, Double?) -> Void)?
     var onDone: ((Error?) -> Void)?
     private var expectedSHA = ""
     private var version = ""
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+    // Delegate callbacks on a private serial queue: writing into tar blocks there, which throttles the download.
+    private let queue: OperationQueue = { let q = OperationQueue(); q.maxConcurrentOperationCount = 1; return q }()
+    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: queue)
+    private var tar: Process?
+    private var tarIn: FileHandle?
+    private var tarErr: Pipe?
+    private var hasher = SHA256()
+    private var received: Int64 = 0
+    private var expected: Int64 = 0
+    private var lastProgress = Date.distantPast
+    private var failure: Error?
 
-    struct Feed: Decodable { let version: String; let url: String; let sha256: String; let bytes: Int64? }
+    struct Feed: Decodable { let version: String; let url: String; let sha256: String; let bytes: Int64?; let installBytes: Int64? }
+
+    static var staging: URL { WizardShared.supportDir.appendingPathComponent("os-staging", isDirectory: true) }
+
+    /// Free space check before a multi-GB download. The download streams straight into tar, so only the unpacked
+    /// disk (its used blocks; the rest is holes) has to fit.
+    static func checkFreeSpace(install: Int64) throws {
+        let need = install + (1 << 30)
+        let values = try? WizardShared.supportDir.deletingLastPathComponent()
+            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        guard let free = values?.volumeAvailableCapacityForImportantUsage, free < need else { return }
+        throw error(String(format: "Wizard OS needs about %.0f GB of free space on this Mac (%.0f GB free now). Free up some space and try again.",
+                           Double(need) / 1e9, Double(free) / 1e9))
+    }
 
     /// Install from a local wizard-os-*.tar.xz; integrity comes from the per-file hashes in its manifest.
     func install(from file: URL) {
         onProgress?("Setting up Wizard OS from \(file.lastPathComponent)…", nil)
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try Self.unpack(file, sha256: "") }
+            let result = Result {
+                let staging = try Self.freshStaging()
+                try Self.run("/usr/bin/tar", ["-xJf", file.path, "-C", staging.path])
+                try Self.finish(staging)
+            }
             DispatchQueue.main.async {
                 if case .failure(let e) = result { self.onDone?(e) } else { self.onDone?(nil) }
             }
@@ -66,40 +94,74 @@ final class OSInstaller: NSObject, URLSessionDownloadDelegate {
                     self.onDone?(err ?? Self.error("Couldn't reach the Wizard OS download. Check your connection and try again.")); return
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
+                do {
+                    try Self.checkFreeSpace(install: feed.installBytes ?? (11 << 30))
+                    try self.startTar()
+                } catch { self.onDone?(error); return }
                 self.onProgress?("Downloading Wizard OS \(feed.version)…", 0)
-                self.session.downloadTask(with: url).resume()
+                self.session.dataTask(with: url).resume()
             }
         }.resume()
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
-                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        let mb = Double(totalBytesWritten) / 1_048_576, total = Double(totalBytesExpectedToWrite) / 1_048_576
-        onProgress?(String(format: "Downloading Wizard OS %@… %.0f of %.0f MB", version, mb, total),
-                    Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+    /// The download is unpacked while it arrives: bytes go to the SHA-256 and to `tar -xJf -` at the same time.
+    private func startTar() throws {
+        let staging = try Self.freshStaging()
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        p.arguments = ["-xJf", "-", "-C", staging.path]
+        let input = Pipe(), err = Pipe()
+        p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = err
+        try p.run()
+        tar = p; tarIn = input.fileHandleForWriting; tarErr = err
+        hasher = SHA256(); received = 0; expected = 0; failure = nil
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        let fm = FileManager.default
-        let staged = fm.temporaryDirectory.appendingPathComponent("wizard-os-\(UUID().uuidString).tar.xz")
-        do { try fm.moveItem(at: location, to: staged) } catch { onDone?(error); return }
-        if let code = (downloadTask.response as? HTTPURLResponse)?.statusCode, code != 200 {
-            onDone?(Self.error("Download failed (HTTP \(code)).")); return
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            failure = Self.error("Download failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+            completionHandler(.cancel); return
         }
-        onProgress?("Setting up Wizard OS on this Mac…", nil)
-        let sha = expectedSHA
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try Self.unpack(staged, sha256: sha) }
-            try? fm.removeItem(at: staged)
-            DispatchQueue.main.async {
-                if case .failure(let e) = result { self.onDone?(e) } else { self.onDone?(nil) }
-            }
+        expected = response.expectedContentLength
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        hasher.update(data: data)
+        do { try tarIn?.write(contentsOf: data) } catch {
+            failure = Self.error("Unpacking Wizard OS failed. Please try again."); dataTask.cancel(); return
+        }
+        received += Int64(data.count)
+        guard expected > 0, Date().timeIntervalSince(lastProgress) > 0.25 else { return }
+        lastProgress = Date()
+        let mb = Double(received) / 1_048_576, total = Double(expected) / 1_048_576, v = version
+        let frac = Double(received) / Double(expected)
+        DispatchQueue.main.async {
+            self.onProgress?(String(format: "Downloading and unpacking Wizard OS %@… %.0f of %.0f MB", v, mb, total), frac)
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { onDone?(error) }
+        guard task is URLSessionDataTask, let p = tar else { return }   // the feed request has its own handler
+        try? tarIn?.close(); tarIn = nil
+        p.waitUntilExit(); tar = nil
+        let tarText = String(data: tarErr?.fileHandleForReading.readDataToEndOfFile() ?? Data(), encoding: .utf8) ?? ""
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        var result: Error? = failure ?? error
+        if result == nil && digest != expectedSHA { result = Self.error("The Wizard OS download was corrupted. Please try again.") }
+        if result == nil && p.terminationStatus != 0 { result = Self.error("Unpacking Wizard OS failed: \(tarText.suffix(200))") }
+        if let result {
+            try? FileManager.default.removeItem(at: Self.staging)
+            DispatchQueue.main.async { self.onDone?(result) }
+            return
+        }
+        DispatchQueue.main.async { self.onProgress?("Setting up Wizard OS on this Mac…", nil) }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = Result { try Self.finish(Self.staging) }
+            DispatchQueue.main.async {
+                if case .failure(let e) = r { self.onDone?(e) } else { self.onDone?(nil) }
+            }
+        }
     }
 
     static func error(_ s: String) -> NSError { NSError(domain: "Wizard", code: 1, userInfo: [NSLocalizedDescriptionKey: s]) }
@@ -114,6 +176,14 @@ final class OSInstaller: NSObject, URLSessionDownloadDelegate {
         return text
     }
 
+    /// Streaming SHA-256 (CryptoKit): about 5x faster than shasum on multi-GB disk images.
+    static func sha256(of url: URL) throws -> String {
+        let h = try FileHandle(forReadingFrom: url); defer { try? h.close() }
+        var hasher = SHA256()
+        while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     static func verifyManifest(in dir: URL) throws {
         let bad = error("This file isn't a valid Wizard OS image. Download it again from the release page.")
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
@@ -121,20 +191,22 @@ final class OSInstaller: NSObject, URLSessionDownloadDelegate {
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }
-            let got = try run("/usr/bin/shasum", ["-a", "256", dir.appendingPathComponent(rel).path]).split(separator: " ").first.map(String.init) ?? ""
+            let got = try sha256(of: dir.appendingPathComponent(rel))
             guard got == want.lowercased() else { throw bad }
         }
     }
 
-    static func unpack(_ archive: URL, sha256: String) throws {
-        let digest = sha256.isEmpty ? "" : (try run("/usr/bin/shasum", ["-a", "256", archive.path]).split(separator: " ").first.map(String.init) ?? "")
-        guard sha256.isEmpty || digest == sha256 else { throw error("The Wizard OS download was corrupted. Please try again.") }
+    static func freshStaging() throws -> URL {
         let fm = FileManager.default
-        let dest = WizardShared.osDir
-        let staging = WizardShared.supportDir.appendingPathComponent("os-staging", isDirectory: true)
         try? fm.removeItem(at: staging)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        try run("/usr/bin/tar", ["-xJf", archive.path, "-C", staging.path])
+        return staging
+    }
+
+    /// Check the unpacked image, then move it into place (keeping an existing Wizard's disk).
+    static func finish(_ staging: URL) throws {
+        let fm = FileManager.default
+        let dest = WizardShared.osDir
         try verifyManifest(in: staging)
         let rootfs = staging.appendingPathComponent("rootfs.img")
         let disk = staging.appendingPathComponent("disk.img")
@@ -453,6 +525,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     @objc func backToChooser() { showChooser() }
+    @objc func retryInstall() { installOnThisMac() }
     @objc func retry() { begin() }
 
     func installOnThisMac() {
@@ -464,6 +537,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard let self else { return }
             if let err {
                 // A bad picked file says so; an unreachable feed just shows the GitHub steps.
+                if err.localizedDescription.contains("free space") {
+                    self.showOverlay("Not enough space for Wizard OS", err.localizedDescription, spinning: false,
+                                     actions: [("Try Again", #selector(self.retryInstall)), ("Back", #selector(self.backToChooser))])
+                    return
+                }
                 let bad = err.localizedDescription.contains("valid Wizard OS")
                 self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
@@ -596,6 +674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let wizardsMenu = NSMenu(title: "Wizard")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenus()
         installQAHooks()

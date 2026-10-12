@@ -10,7 +10,7 @@ AS="$HOME/Library/Application Support/Wizard"; APP="$HOME/Applications/WizardNex
 mkdir -p "$EV"; exec > >(tee "$EV/qa-update.log") 2>&1
 U=http://127.0.0.1:47823
 data() {
-  echo "chats: $(curl -s -m 10 "$U/wizard/hermes/api/sessions?limit=200" | python3 -c "import json,sys;d=json.load(sys.stdin);s=d.get('sessions') or d.get('data') or [];print(len(s))" 2>/dev/null)"
+  echo "chats: $(curl -s -m 10 "$U/wizard/hermes/api/sessions?limit=200" | python3 -c "import json,sys;d=json.load(sys.stdin);s=d.get('data') or d.get('sessions') or [];print(len(s))" 2>/dev/null)"
   echo "apps: $(curl -s -m 10 "$U/wizard/v1/apps" | python3 -c "import json,sys;d=json.load(sys.stdin);print(sorted(a['id'] for a in d.get('apps',[])))" 2>/dev/null)"
   echo "onboarded: $(curl -s -m 5 http://127.0.0.1:47830/api/state | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['name'],d['done'])" 2>/dev/null)"
 }

@@ -134,6 +134,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     func start() {
         guard vm == nil || state == .stopped || state == .error || state == .notInstalled else { return }
         guard WizardShared.osInstalled else { state = .notInstalled; return }
+        if let free = Self.freeBytes(), free < Self.minFreeToStart {
+            fail(String(format: "Not enough free space on this Mac to run Wizard OS safely (%.1f GB free, needs %.0f GB).",
+                        Double(free) / 1e9, Double(Self.minFreeToStart) / 1e9))
+            return
+        }
         do {
             let config = try makeConfiguration()
             let machine = VZVirtualMachine(configuration: config)
@@ -150,10 +155,31 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                     self.fail("VM failed to start: \(error.localizedDescription)")
                 } else {
                     self.waitUntilReady()
+                    self.watchDiskSpace()
                 }
             }
         } catch {
             fail("VM configuration failed: \(error.localizedDescription)")
+        }
+    }
+
+    // Wizard OS's disk is a sparse file: when the Mac's volume fills up, its writes fail and the guest file system is
+    // damaged. Refuse to start below 2 GB free; shut down cleanly below 1 GB while running.
+    static let minFreeToStart: Int64 = 2_000_000_000
+    static let minFreeRunning: Int64 = 1_000_000_000
+    static func freeBytes() -> Int64? {
+        let v = try? WizardShared.osDir.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+        return v?.volumeAvailableCapacity.map(Int64.init)
+    }
+    private var diskTimer: Timer?
+    private func watchDiskSpace() {
+        diskTimer?.invalidate()
+        diskTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] t in
+            guard let self, self.state == .running || self.state == .starting else { t.invalidate(); return }
+            if let free = Self.freeBytes(), free < Self.minFreeRunning {
+                log(String(format: "only %.2f GB free on this Mac; stopping Wizard OS to protect its disk", Double(free) / 1e9))
+                self.stop { [weak self] in self?.lastError = "Stopped: this Mac is almost out of disk space."; self?.state = .error }
+            }
         }
     }
 
@@ -193,7 +219,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             completion?()
         }
         stopCompletion = done
-        // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 20 s.
+        // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
         socketDevice?.connect(toPort: WizardShared.guestControlPort) { result in
             if case .success(let conn) = result {
                 _ = "poweroff\n".withCString { write(conn.fileDescriptor, $0, 9) }
@@ -202,7 +228,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 try? machine.requestStop()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
             guard !finished else { return }
             log("clean shutdown timed out; forcing stop")
             machine.stop { _ in DispatchQueue.main.async(execute: done) }

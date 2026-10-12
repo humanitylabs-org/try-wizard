@@ -109,7 +109,11 @@ final class Pump {
 final class Runner: NSObject, VZVirtualMachineDelegate {
     let vm: VZVirtualMachine
     init(_ c: VZVirtualMachineConfiguration) { vm = VZVirtualMachine(configuration: c); super.init(); vm.delegate = self }
-    func guestDidStop(_ virtualMachine: VZVirtualMachine) { note("guest powered off"); exit(0) }
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        // Give the framework a moment to finish host-side writes before the process (and its XPC VM) goes away.
+        note("guest powered off"); sync()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { exit(0) }
+    }
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         note("guest stopped with error: \(error.localizedDescription)"); exit(1)
     }
