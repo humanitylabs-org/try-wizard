@@ -48,7 +48,7 @@ defaults delete org.humanitylabs.wizard >/dev/null 2>&1 || true
 defaults write org.humanitylabs.wizard QAHooks -bool true
 open "$APP"; sleep 3
 bash "$HERE/qa.sh" choose-this-mac-offline
-sleep 2; /tmp/wizard-qa-post "files-folder $EV/media-qa"
+sleep 2; /tmp/wizard-qa-post "files-folder $AS/qa-media"
 # Wait for the feed-unavailable screen, not merely for an elapsed delay.
 for i in $(seq 1 60); do
   /tmp/wizard-qa-post state; sleep 1
@@ -56,7 +56,7 @@ for i in $(seq 1 60); do
 done
 python3 -c 'import json;d=json.load(open("/tmp/wizard-qa-state.json"));assert d["title"]=="Get Wizard OS",d;print("FEED_UNAVAILABLE_OK",d["title"])'
 cp /tmp/wizard-qa-state.json "$EV/feed-unavailable.json"
-python3 - "$EV" <<'PY'
+python3 - "$AS" <<'PY'
 import json,pathlib,sys,tarfile
 p=pathlib.Path(sys.argv[1]); b=p/'bad'; b.mkdir(exist_ok=True)
 (b/'rootfs.img').write_bytes(b'corrupt QA data\n')
@@ -64,7 +64,7 @@ p=pathlib.Path(sys.argv[1]); b=p/'bad'; b.mkdir(exist_ok=True)
 with tarfile.open(p/'wizard-os-bad.tar.xz','w:xz') as t:
     for name in ['manifest.json','rootfs.img']: t.add(b/name,arcname=name)
 PY
-/tmp/wizard-qa-post "install-file $EV/wizard-os-bad.tar.xz"; sleep 4
+/tmp/wizard-qa-post "install-file $AS/wizard-os-bad.tar.xz"; sleep 4
 /tmp/wizard-qa-post state; sleep 1
 python3 -c 'import json;d=json.load(open("/tmp/wizard-qa-state.json"));assert "valid Wizard OS image" in d["subtitle"],d;print("CORRUPT_HASH_REJECTED_OK",d["subtitle"])'
 [ ! -e "$AS/os/disk.img" ]
@@ -89,8 +89,8 @@ bash "$HERE/qa-guest.sh" 'cat /opt/wizard/bin/wizard-media' > "$EV/installed-wiz
 cmp "$HERE/../guest/overlay/opt/wizard/bin/wizard-media" "$EV/installed-wizard-media"
 bash "$HERE/qa-guest.sh" 'set -e; sudo -u wizard sh -c "printf uid1000 > /home/wizard/runtipi/media/Inbox/recovered-uid1000.txt"; sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 docker exec -u 0 files_wizardapps-files-1 sh -c "id; printf filesroot > /srv/Inbox/recovered-files-root.txt"; findmnt -T /home/wizard/runtipi/app-data; findmnt -T /home/wizard/runtipi/media; sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 docker inspect files_wizardapps-files-1 --format "{{json .Mounts}}"; test "$(stat -c %d /home/wizard/runtipi/app-data)" = "$(stat -c %d /)"; test "$(stat -c %d /home/wizard/runtipi/media)" != "$(stat -c %d /)"; echo FINAL_ARCHIVE_MEDIA_OK' | tee "$EV/media-check.log"
 grep -q FINAL_ARCHIVE_MEDIA_OK "$EV/media-check.log"
-[ "$(cat "$EV/media-qa/Inbox/recovered-uid1000.txt")" = uid1000 ]
-[ "$(cat "$EV/media-qa/Inbox/recovered-files-root.txt")" = filesroot ]
+[ "$(cat "$AS/qa-media/Inbox/recovered-uid1000.txt")" = uid1000 ]
+[ "$(cat "$AS/qa-media/Inbox/recovered-files-root.txt")" = filesroot ]
 echo MAC_VISIBLE_WRITES_OK
 # 'On another computer' uses the disposable QA guest address, never a live agent.
 /tmp/wizard-qa-post 'connect http://127.0.0.1:47823/wizard-ux/'

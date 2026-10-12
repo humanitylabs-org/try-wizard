@@ -29,9 +29,18 @@ DISK_BEFORE=$(stat -f '%d:%i:%z' "$AS/os/disk.img")
 bash "$HERE/qa.sh" state >/dev/null
 t0=$(python3 -c 'import time;print(time.time())')
 bash "$HERE/qa.sh" "install-file $OS"
-ok=0
+ok=0; reloaded=0
 for i in $(seq 1 600); do
-  sleep 1; /tmp/wizard-qa-post state; sleep 0.2
+  sleep 1
+  # install-file is a QA hook; an already installed guest has no setup callback.
+  # Wait for the verified installer move, then explicitly reopen the existing guest.
+  if [ "$reloaded" = 0 ] && python3 - "$AS" "$t0" <<'PY'
+import pathlib,sys
+p=pathlib.Path(sys.argv[1]); m=p/'os/manifest.json'
+sys.exit(0 if m.exists() and m.stat().st_ctime>float(sys.argv[2]) and not (p/'os-staging').exists() else 1)
+PY
+  then /tmp/wizard-qa-post reload; reloaded=1; fi
+  /tmp/wizard-qa-post state; sleep 0.2
   if python3 - "$t0" <<'PY'
 import json,sys
 d=json.load(open('/tmp/wizard-qa-state.json'))

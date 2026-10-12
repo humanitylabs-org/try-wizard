@@ -68,7 +68,12 @@ install of the final archive, not inferred from an older hotpatched test VM.
 
 The recovered acceptance scripts require explicit success markers, verify disk
 identity and state, and isolate offline QA by saving/restoring the prior support
-folder and preferences. `qa-fresh.sh` is still destructive: use only after backing
+folder and preferences. Same-stack QA explicitly reloads after the installer move:
+`install-file` is a QA hook with no setup callback for an already installed guest,
+not evidence of a complete user-facing OS-update workflow. Direct file installation
+from the external ThalesMedia volume stalled in macOS `open()` before extraction;
+QA used a SHA-verified identical copy in the user's internal cache. External-volume
+file-picker/permission acceptance remains unverified. `qa-fresh.sh` is still destructive: use only after backing
 up an isolated QA environment. Existing Thales pre-candidate state is retained at
 `/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`.
 
