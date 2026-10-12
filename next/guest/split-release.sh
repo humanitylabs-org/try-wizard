@@ -9,8 +9,9 @@
 #   split-release.sh <wizard-os-x.tar.xz> <out dir> [part MiB, default 1900] [url prefix, default relative]
 set -euo pipefail
 OS=${1:?wizard-os tar.xz}; OUT=${2:?out dir}; MIB=${3:-1900}; PREFIX=${4:-}
-# Voice = the transcriber engine image (616 MB compressed, 2.92 GB unpacked, arm64) + the Whisper small model (464 MB).
-BACKGROUND_JSON=${BACKGROUND_JSON:-'[{"label":"voice","bytes":1080000000,"installBytes":3390000000}]'}
+# Voice = local Parakeet (TDT 0.6B v2, INT8): 661 MB model + about 40 MB of Python wheels to download; 0.63 GB model
+# + 0.12 GB wheels on disk. It runs on the Hermes image already on the box (no extra image).
+BACKGROUND_JSON=${BACKGROUND_JSON:-'[{"label":"voice","bytes":705000000,"installBytes":790000000}]'}
 mkdir -p "$OUT"
 NAME=$(basename "$OS")
 VER=$(basename "$OS" .tar.xz | sed 's/^wizard-os-//')
