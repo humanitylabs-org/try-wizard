@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Wizard Desktop front door + first-run onboarding.
+"""Wizard for Mac front door + first-run onboarding (Wizard OS 0.2 stack).
 
-Runs inside Wizard OS as the `wizard` user, next to Hermes (8865) and the
-Wizard UX server (8923). The kiosk browser always opens this server first:
+Runs on the Wizard OS VM host as the `wizard` user (docker group). Everything else is a Runtipi app installed by
+os.sh: Hermes Agent (`hermes-agent`), the Wizard shell with the Agent Service and Wizard UX (`wizard-shell`), Files,
+Transcriber, and so on. The Mac window always opens this server first:
 
-* onboarding incomplete -> the onboarding app (name, brain, verify, first chat)
-* onboarding complete   -> redirect straight into the Wizard UX
+* onboarding incomplete -> the onboarding page (name, brain, wake-up check, first chat)
+* onboarding complete   -> redirect into the Wizard UX served by the wizard-shell app
 
-Brains:
+Brains (applied inside the hermes-agent engine container with stock Hermes code, see hermes_brain.py):
 * free   -> Hermes guest identity on the Nous free tier (zero login)
-* chatgpt-> Hermes' own OpenAI Codex device-code login; the sign-in page opens
-            in the *Mac's* browser through the Wizard Desktop bridge
+* chatgpt-> Hermes' own OpenAI Codex device-code login; the sign-in page opens in the Mac's browser
 * apikey -> Anthropic or OpenRouter key saved to Hermes' .env
 """
 
@@ -34,21 +34,17 @@ ROOT = Path(os.environ.get("WIZARD_ROOT", "/var/lib/wizard"))
 STATE_PATH = ROOT / "setup.json"
 PORTRAIT_PATH = ROOT / "portrait"
 STATIC = Path(__file__).resolve().parent / "static"
+BRAIN_SCRIPT = (Path(__file__).resolve().parent / "hermes_brain.py").read_text()
 HOST = os.environ.get("WIZARD_SETUP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WIZARD_SETUP_PORT", "8930"))
-UX_ORIGIN = os.environ.get("WIZARD_UX_ORIGIN", "http://127.0.0.1:8923")
-# The Mac app reaches the UX through a vsock bridge on this loopback port.
+RUNTIPI = Path(os.environ.get("RUNTIPI_ROOT", "/home/wizard/runtipi"))
+# The wizard-shell app (Agent Service + Wizard UX) on the VM's loopback.
+SHELL_ORIGIN = os.environ.get("WIZARD_SHELL_ORIGIN", "http://127.0.0.1:8796")
+# The Mac app reaches the shell through a vsock bridge on this loopback port.
 PUBLIC_UX_ORIGIN = os.environ.get("WIZARD_PUBLIC_UX_ORIGIN", "http://127.0.0.1:47823")
-HERMES_ORIGIN = os.environ.get("WIZARD_HERMES_ORIGIN", "http://127.0.0.1:8865")
-HERMES_KEY = os.environ.get("WIZARD_HERMES_API_KEY") or os.environ.get("API_SERVER_KEY") or ""
-RESTART_CMD = os.environ.get("WIZARD_HERMES_RESTART_CMD", "sudo -n systemctl restart wizard-hermes.service")
+UX_PATH = "/wizard-ux/"
 OPEN_URL_CMD = os.environ.get("WIZARD_OPEN_URL_CMD", "/opt/wizard/bin/wizard-open-url")
 CODEX_DEVICE_URL = "https://auth.openai.com/codex/device"
-
-API_KEY_PROVIDERS = {
-    "anthropic": {"env": "ANTHROPIC_API_KEY", "base_url": "https://api.anthropic.com", "label": "Anthropic"},
-    "openrouter": {"env": "OPENROUTER_API_KEY", "base_url": "https://openrouter.ai/api/v1", "label": "OpenRouter"},
-}
 
 _state_lock = threading.Lock()
 _codex: dict[str, Any] = {"status": "idle"}
@@ -89,101 +85,62 @@ def public_state() -> dict[str, Any]:
     }
 
 
-# ── Hermes plumbing ────────────────────────────────────────────────────────
+# ── the installed apps ─────────────────────────────────────────────────────
 
 
-def _read_raw_config() -> dict[str, Any]:
-    from hermes_cli.auth import read_raw_config
-    return read_raw_config() or {}
+def app_dir(app_id: str) -> Path | None:
+    for d in sorted(RUNTIPI.glob(f"app-data/*/{app_id}")):
+        return d
+    return None
 
 
-def _write_config(config: dict[str, Any]) -> None:
-    from hermes_cli.auth import atomic_config_write, get_config_path
-    path = get_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_config_write(path, config)
+def app_env(app_id: str) -> dict[str, str]:
+    d = app_dir(app_id)
+    out: dict[str, str] = {}
+    try:
+        for line in (d / "app.env").read_text().splitlines() if d else []:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip("'\"")
+    except OSError:
+        pass
+    return out
 
 
-# The Wizard owns this VM outright: it is the only user, it has passwordless
-# sudo, and the Mac host is the security boundary. Hermes otherwise refuses
-# privileged commands on API sessions because "no human is present to approve".
-WIZARD_MACHINE_DEFAULTS: dict[str, Any] = {
-    "approvals": {"mode": "off", "unattended_mode": "approve"},
-    "terminal": {"cwd": os.environ.get("HOME") or "/home/wizard"},
-}
+def docker(*args: str, stdin: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(["docker", *args], input=stdin, capture_output=True, text=True, timeout=timeout)
 
 
-def apply_machine_defaults(config: dict[str, Any]) -> dict[str, Any]:
-    for section, values in WIZARD_MACHINE_DEFAULTS.items():
-        current = config.get(section)
-        merged = dict(current) if isinstance(current, dict) else {}
-        merged.update(values)
-        config[section] = merged
-    return config
+def engine() -> str:
+    """The container running Hermes itself (the hermes-agent app's engine service)."""
+    r = docker("ps", "--filter", "label=com.docker.compose.service=hermes-agent-engine", "--format", "{{.Names}}")
+    name = r.stdout.strip().splitlines()[0] if r.stdout.strip() else ""
+    if not name:
+        raise RuntimeError("Hermes Agent isn't running yet. Give it a moment and try again.")
+    return name
 
 
-def set_model(provider: str, base_url: str, model: str) -> None:
-    from hermes_cli.auth import _update_config_for_provider
-    _update_config_for_provider(provider, base_url, default_model=model)
-    config = _read_raw_config()
-    model_cfg = dict(config.get("model") or {})
-    model_cfg["default"] = model
-    model_cfg["provider"] = provider
-    config["model"] = model_cfg
-    _write_config(apply_machine_defaults(config))
+def hermes_origin() -> str:
+    r = docker("inspect", engine(), "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}")
+    ips = r.stdout.split()
+    if not ips:
+        raise RuntimeError("Hermes Agent has no network address yet.")
+    return f"http://{ips[0]}:8642"
 
 
-def write_soul(name: str) -> None:
-    from hermes_constants import get_hermes_home
-    soul = get_hermes_home() / "SOUL.md"
-    soul.parent.mkdir(parents=True, exist_ok=True)
-    soul.write_text(
-        f"# {name}\n\n"
-        f"You are {name}, a personal AI wizard living on your own Debian Linux computer "
-        "inside the user's Mac. You have a real shell with passwordless sudo, so you can install "
-        "packages with apt, write and run code, and manage this machine yourself.\n\n"
-        "Be warm, direct, and capable. Prefer doing over describing: when the user asks for "
-        "something you can do on this machine, do it, then report what happened in plain words.\n"
-    )
+def hermes_key() -> str:
+    return app_env("hermes-agent").get("HERMES_API_KEY", "")
 
 
-async def restart_hermes() -> None:
-    if RESTART_CMD:
-        proc = await asyncio.create_subprocess_shell(
-            RESTART_CMD, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-    await wait_hermes_ready(timeout=90)
-
-
-async def wait_hermes_ready(timeout: float = 60) -> bool:
-    deadline = time.monotonic() + timeout
-    headers = {"Authorization": f"Bearer {HERMES_KEY}"}
-    async with aiohttp.ClientSession() as session:
-        while time.monotonic() < deadline:
-            try:
-                async with session.get(f"{HERMES_ORIGIN}/health", headers=headers,
-                                       timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                    if resp.status == 200:
-                        return True
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                pass
-            await asyncio.sleep(1)
-    return False
-
-
-async def hermes(method: str, path: str, body: Any = None, *, timeout: float = 240,
-                 headers: dict[str, str] | None = None) -> tuple[int, Any]:
-    all_headers = {"Authorization": f"Bearer {HERMES_KEY}", "Content-Type": "application/json"}
-    all_headers.update(headers or {})
-    async with aiohttp.ClientSession() as session:
-        async with session.request(method, f"{HERMES_ORIGIN}{path}", headers=all_headers,
-                                   data=None if body is None else json.dumps(body),
-                                   timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-            text = await resp.text()
-            try:
-                return resp.status, json.loads(text)
-            except ValueError:
-                return resp.status, text
+def brain_exec(command: str, payload: dict | None = None, timeout: float = 120) -> dict[str, Any]:
+    """Run hermes_brain.py inside the Hermes container; return its last JSON line."""
+    r = docker("exec", "-i", "-u", "hermes", engine(), "/opt/hermes/.venv/bin/python", "-c", BRAIN_SCRIPT, command,
+               stdin=json.dumps(payload or {}), timeout=timeout)
+    lines = [l for l in r.stdout.splitlines() if l.startswith("{")]
+    result = json.loads(lines[-1]) if lines else {"error": (r.stderr or r.stdout)[-400:] or f"exit {r.returncode}"}
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return result
 
 
 def open_on_mac(url: str) -> bool:
@@ -193,76 +150,96 @@ def open_on_mac(url: str) -> bool:
         return False
 
 
-# ── brain: free tier ──────────────────────────────────────────────────────
+def write_shell_settings(name: str) -> None:
+    """The Agent Service's settings.json (agent name), read by Wizard UX through /wizard/v1/bootstrap."""
+    d = app_dir("wizard-shell")
+    if not d:
+        return
+    path = d / "data" / "wizard-os" / "settings.json"
+    try:
+        settings = json.loads(path.read_text())
+    except (OSError, ValueError):
+        settings = {"schema": 1}
+    settings.setdefault("agent", {})["name"] = name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(settings, indent=1) + "\n")
+    tmp.replace(path)
 
 
-def connect_free() -> dict[str, Any]:
-    from hermes_cli.anon_auth import GUEST_MODEL
-    from hermes_cli.free_tier_bootstrap import run_bootstrap
-    record = run_bootstrap(announce=False)
-    if not getattr(record, "has_identity", False):
-        raise RuntimeError(getattr(record, "error", "") or "The free tier is not available right now.")
-    set_model("nous", "", GUEST_MODEL)
-    return {"kind": "free", "provider": "nous", "model": GUEST_MODEL, "label": "Free starter brain"}
+async def restart_hermes() -> None:
+    await asyncio.to_thread(docker, "restart", "-t", "20", engine(), timeout=120)
+    await wait_hermes_ready(timeout=120)
 
 
-# ── brain: API key ─────────────────────────────────────────────────────────
+async def wait_hermes_ready(timeout: float = 60) -> bool:
+    deadline = time.monotonic() + timeout
+    async with aiohttp.ClientSession() as session:
+        while time.monotonic() < deadline:
+            try:
+                origin = await asyncio.to_thread(hermes_origin)
+                async with session.get(f"{origin}/health", headers={"Authorization": f"Bearer {hermes_key()}"},
+                                       timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        return True
+            except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, subprocess.SubprocessError):
+                pass
+            await asyncio.sleep(1)
+    return False
 
 
-def default_model(provider: str) -> str:
-    from hermes_cli.models import _PROVIDER_MODELS
-    if provider == "openrouter":
-        options = _PROVIDER_MODELS.get("nous") or []
-        return options[0] if options else "anthropic/claude-opus-5.5"
-    options = _PROVIDER_MODELS.get(provider) or []
-    if not options:
-        raise RuntimeError(f"No default model is known for {provider}.")
-    return options[0]
+async def hermes(method: str, path: str, body: Any = None, *, timeout: float = 240,
+                 headers: dict[str, str] | None = None) -> tuple[int, Any]:
+    all_headers = {"Authorization": f"Bearer {hermes_key()}", "Content-Type": "application/json"}
+    all_headers.update(headers or {})
+    origin = await asyncio.to_thread(hermes_origin)
+    return await _request(method, f"{origin}{path}", body, all_headers, timeout)
 
 
-def connect_api_key(provider: str, key: str) -> dict[str, Any]:
-    spec = API_KEY_PROVIDERS.get(provider)
-    if not spec:
-        raise RuntimeError("Choose Anthropic or OpenRouter.")
-    key = key.strip()
-    if len(key) < 20 or any(ch.isspace() for ch in key):
-        raise RuntimeError("That key doesn't look right. Paste the whole key.")
-    from hermes_cli.config import save_env_value
-    save_env_value(spec["env"], key)
-    os.environ[spec["env"]] = key
-    model = default_model(provider)
-    set_model(provider, spec["base_url"], model)
-    return {"kind": "apikey", "provider": provider, "model": model, "label": f"{spec['label']} key"}
+async def shell(method: str, path: str, body: Any = None, *, timeout: float = 60,
+                headers: dict[str, str] | None = None) -> tuple[int, Any]:
+    """The Agent Service API (what Wizard UX itself calls), on the VM's loopback."""
+    all_headers = {"Content-Type": "application/json", **(headers or {})}
+    return await _request(method, f"{SHELL_ORIGIN}{path}", body, all_headers, timeout)
 
 
-# ── brain: ChatGPT (Codex device login) ───────────────────────────────────
+async def _request(method: str, url: str, body: Any, headers: dict[str, str], timeout: float) -> tuple[int, Any]:
+    async with aiohttp.ClientSession() as session:
+        async with session.request(method, url, headers=headers, data=None if body is None else json.dumps(body),
+                                   timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            text = await resp.text()
+            try:
+                return resp.status, json.loads(text)
+            except ValueError:
+                return resp.status, text
+
+
+# ── brain: ChatGPT (Codex device login, inside the Hermes container) ─────
 
 
 def _codex_worker(attempt: str) -> None:
-    from hermes_cli.auth import _save_codex_tokens, _utc_now_z
-    from hermes_cli.auth_codex import (_codex_base_url, _codex_exchange_authorization_code,
-                                       _codex_poll_authorization_code, _codex_request_device_code)
-    from hermes_cli.auth_constants import CODEX_OAUTH_CLIENT_ID
-    issuer = "https://auth.openai.com"
     try:
-        device = _codex_request_device_code(issuer, CODEX_OAUTH_CLIENT_ID)
-        if _codex.get("attempt") != attempt:
-            return
-        _codex.update(status="waiting", userCode=device["user_code"], url=CODEX_DEVICE_URL,
-                      openedOnMac=open_on_mac(CODEX_DEVICE_URL))
-        code = _codex_poll_authorization_code(
-            issuer, device_auth_id=device["device_auth_id"], user_code=device["user_code"],
-            poll_interval=device["interval"])
-        tokens = _codex_exchange_authorization_code(issuer, CODEX_OAUTH_CLIENT_ID, code)
-        if _codex.get("attempt") != attempt:
-            return
-        _save_codex_tokens({"access_token": tokens.get("access_token", ""),
-                            "refresh_token": tokens.get("refresh_token", "")}, _utc_now_z())
-        model = default_model("openai-codex")
-        set_model("openai-codex", _codex_base_url(), model)
-        brain = {"kind": "chatgpt", "provider": "openai-codex", "model": model, "label": "ChatGPT account"}
-        save_state(brain=brain, verified=False)
-        _codex.update(status="signed-in", brain=brain)
+        proc = subprocess.Popen(["docker", "exec", "-i", "-u", "hermes", engine(), "/opt/hermes/.venv/bin/python",
+                                 "-c", BRAIN_SCRIPT, "codex"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        _codex["proc"] = proc
+        for line in proc.stdout:  # type: ignore[union-attr]
+            if _codex.get("attempt") != attempt:
+                proc.kill(); return
+            if not line.startswith("{"):
+                continue
+            msg = json.loads(line)
+            if msg.get("error"):
+                raise RuntimeError(msg["error"])
+            if msg.get("status") == "waiting":
+                _codex.update(status="waiting", userCode=msg["userCode"], url=CODEX_DEVICE_URL,
+                              openedOnMac=open_on_mac(CODEX_DEVICE_URL))
+            elif msg.get("status") == "signed-in":
+                save_state(brain=msg["brain"], verified=False)
+                _codex.update(status="signed-in", brain=msg["brain"])
+        proc.wait()
+        if _codex.get("status") != "signed-in" and _codex.get("attempt") == attempt:
+            raise RuntimeError((proc.stderr.read() if proc.stderr else "")[-300:] or "ChatGPT sign-in stopped.")
     except Exception as error:  # surfaced to the onboarding page
         if _codex.get("attempt") == attempt:
             _codex.update(status="error", error=str(error) or error.__class__.__name__)
@@ -279,7 +256,7 @@ async def index(request: web.Request) -> web.StreamResponse:
     state = load_state()
     if state.get("done") and request.query.get("setup") != "1":
         session_id = state.get("firstSessionId")
-        target = f"{PUBLIC_UX_ORIGIN}/wizard"
+        target = f"{PUBLIC_UX_ORIGIN}{UX_PATH}"
         if session_id and not state.get("firstSessionOpened"):
             save_state(firstSessionOpened=True)
             target += f"?session={session_id}"
@@ -301,7 +278,12 @@ async def post_name(request: web.Request) -> web.Response:
     if not name:
         return json_error("Give your Wizard a name.")
     save_state(name=name)
-    await asyncio.to_thread(write_soul, name)
+    await asyncio.to_thread(write_shell_settings, name)
+    try:
+        await asyncio.to_thread(brain_exec, "soul", {"name": name})
+    except Exception as error:  # Hermes still starting: the name is saved; SOUL.md is written again at finish
+        save_state(soulPending=True)
+        print(f"SOUL.md not written yet: {error}", flush=True)
     return web.json_response(public_state())
 
 
@@ -333,14 +315,15 @@ async def post_brain(request: web.Request) -> web.Response:
             # Right after boot the network can take a few seconds; retry briefly before failing.
             for attempt in range(6):
                 try:
-                    brain = await asyncio.to_thread(connect_free)
+                    brain = await asyncio.to_thread(brain_exec, "free")
                     break
                 except Exception:
                     if attempt == 5:
                         raise
                     await asyncio.sleep(2.5)
         elif kind == "apikey":
-            brain = await asyncio.to_thread(connect_api_key, str(body.get("provider", "")), str(body.get("key", "")))
+            brain = await asyncio.to_thread(brain_exec, "apikey",
+                                            {"provider": str(body.get("provider", "")), "key": str(body.get("key", ""))})
         else:
             return json_error("Unknown brain.")
     except Exception as error:
@@ -359,7 +342,7 @@ async def post_codex_start(_: web.Request) -> web.Response:
 
 
 async def get_codex(_: web.Request) -> web.Response:
-    view = {k: v for k, v in _codex.items() if k != "attempt"}
+    view = {k: v for k, v in _codex.items() if k not in ("attempt", "proc")}
     if _codex.get("status") == "signed-in" and not _codex.get("restarted"):
         _codex["restarted"] = True
         await restart_hermes()
@@ -372,6 +355,9 @@ async def post_codex_open(_: web.Request) -> web.Response:
 
 
 async def post_codex_cancel(_: web.Request) -> web.Response:
+    proc = _codex.get("proc")
+    if proc:
+        proc.kill()
     _codex.clear()
     _codex.update(status="idle")
     return web.json_response({"status": "idle"})
@@ -419,55 +405,33 @@ async def post_verify(_: web.Request) -> web.Response:
 
 
 FIRST_TASK = (
-    "Hi {name}! Show me what you can do on your own computer: install the `figlet` package with "
-    "apt (use sudo apt-get install -y), use it to print your name as a big banner (show it in a code block), then "
-    "tell me in two friendly sentences what kind of machine you live on."
+    "Hi {name}! Tell me in a few friendly sentences who you are and which apps you can use on this computer "
+    "(check your tools), then where my files live."
 )
 
 
 async def post_finish(_: web.Request) -> web.Response:
+    """Open the first chat the way Wizard UX does (through the Agent Service) and start its first run."""
     state = load_state()
     name = state.get("name") or "Wizard"
-    status, session = await hermes("POST", "/api/sessions", {
-        "id": f"wizard_{int(time.time() * 1000)}_{secrets.token_hex(6)}",
-        "source": "wizard-mobile", "title": f"Meet {name}" if not state.get("firstSessionId") else f"Meet {name} ({secrets.token_hex(2)})"}, timeout=30)
+    if state.get("soulPending"):
+        try:
+            await asyncio.to_thread(brain_exec, "soul", {"name": name})
+            save_state(soulPending=False)
+        except Exception:
+            pass
+    status, session = await shell("POST", "/wizard/hermes/api/sessions", {
+        "title": f"Meet {name}" if not state.get("firstSessionId") else f"Meet {name} ({secrets.token_hex(2)})"})
     session_id = _session_id(session)
     if status >= 300 or not session_id:
         return json_error(f"Could not open your first chat ({status}).", 502)
-    status, run = await hermes("POST", "/v1/runs", {
+    status, run = await shell("POST", "/wizard/hermes/v1/runs", {
         "session_id": session_id, "input": FIRST_TASK.format(name=name)},
-        headers={"Idempotency-Key": uuid.uuid4().hex}, timeout=30)
+        headers={"Idempotency-Key": uuid.uuid4().hex})
     if status >= 300:
         return json_error(f"Your Wizard could not start its first task ({status}).", 502)
     save_state(done=True, firstSessionId=session_id, firstSessionOpened=True, finishedAt=time.time())
-    return web.json_response({"target": f"{PUBLIC_UX_ORIGIN}/wizard?session={session_id}", **public_state()})
-
-
-# ── developer diagnostics (only when the Mac owner enabled SSH forwarding) ──
-
-
-def dev_mode() -> bool:
-    try:
-        return "wizard.dev=1" in Path("/proc/cmdline").read_text().split()
-    except OSError:
-        return False
-
-
-async def post_dev_exec(request: web.Request) -> web.Response:
-    if not dev_mode():
-        raise web.HTTPNotFound()
-    body = await request.json()
-    cmd = str(body.get("cmd") or "")
-    if not cmd:
-        return json_error("cmd required")
-    proc = await asyncio.create_subprocess_shell(
-        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=float(body.get("timeout") or 60))
-    except asyncio.TimeoutError:
-        proc.kill()
-        return web.json_response({"rc": -1, "out": "timeout"})
-    return web.json_response({"rc": proc.returncode, "out": out.decode("utf-8", "replace")[-60000:]})
+    return web.json_response({"target": f"{PUBLIC_UX_ORIGIN}{UX_PATH}?session={session_id}", **public_state()})
 
 
 def build_app() -> web.Application:
@@ -486,7 +450,6 @@ def build_app() -> web.Application:
         web.post("/api/brain/chatgpt/cancel", post_codex_cancel),
         web.post("/api/verify", post_verify),
         web.post("/api/finish", post_finish),
-        web.post("/api/dev/exec", post_dev_exec),
         web.static("/static", STATIC),
     ])
     return app

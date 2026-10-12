@@ -1,1 +1,4 @@
 /dev/vda / ext4 defaults,noatime,errors=remount-ro 0 1
+# The Mac's Wizard files folder (~/Wizard by default; Wizard Host shares it with tag wizard-files).
+# wizard-media.service presents it to the apps as /home/wizard/runtipi/media, owned by uid 1000.
+wizard-files /var/lib/wizard/mac-files virtiofs nofail,x-systemd.device-timeout=2s 0 0

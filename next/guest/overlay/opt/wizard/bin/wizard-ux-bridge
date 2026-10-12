@@ -1,0 +1,6 @@
+#!/bin/bash
+# The Mac's 127.0.0.1:47823 reaches vsock 8923; pass it to whichever port Runtipi gave the shell app.
+set -euo pipefail
+port=$(/opt/wizard/bin/wizard-shell-port)
+echo "Wizard UX bridge: vsock 8923 -> 127.0.0.1:$port"
+exec /usr/bin/socat VSOCK-LISTEN:8923,fork,reuseaddr TCP:127.0.0.1:"$port"

@@ -1,13 +1,7 @@
 #!/bin/bash
-# Per-install secrets and ownership. Idempotent; runs before every Wizard service.
+# Per-box state for the onboarding server. Idempotent; runs before it on every boot.
 set -euo pipefail
-install -d -o wizard -g wizard -m 0750 /var/lib/wizard /var/lib/wizard/hermes /var/lib/wizard/ux
-if [[ ! -s /var/lib/wizard/secrets.env ]]; then
-  key=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-  umask 077
-  printf 'WIZARD_HERMES_API_KEY=%s\nAPI_SERVER_KEY=%s\n' "$key" "$key" >/var/lib/wizard/secrets.env
-fi
-chown wizard:wizard /var/lib/wizard/secrets.env
-chmod 0600 /var/lib/wizard/secrets.env
-# Hermes, the UX server, and onboarding all run as the wizard user.
-chown -R wizard:wizard /var/lib/wizard
+install -d -o wizard -g wizard -m 0750 /var/lib/wizard
+chown wizard:wizard /var/lib/wizard
+# The image ships without a machine id (and without Tailscale's node key); systemd makes a fresh one.
+[ -s /etc/machine-id ] || systemd-machine-id-setup >/dev/null 2>&1 || true
