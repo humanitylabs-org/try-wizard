@@ -20,6 +20,8 @@ import asyncio
 import json
 import os
 import secrets
+import stat
+import re
 import subprocess
 import threading
 import time
@@ -48,6 +50,53 @@ CODEX_DEVICE_URL = "https://auth.openai.com/codex/device"
 
 _state_lock = threading.Lock()
 _codex: dict[str, Any] = {"status": "idle"}
+_codex_lock = threading.RLock()
+_codex_lifecycle = asyncio.Lock()
+_voice_retry_lock = asyncio.Lock()
+_voice_retry_at = -float("inf")
+VOICE_PATH = ROOT / "voice.json"
+
+# The CLI's death does NOT stop `docker exec` inside the container. Keep the stock
+# auth script intact, but fence its process with an attempt-scoped lock/kill handshake.
+# A cancellation marker also covers cancel arriving before exec actually starts.
+_CODEX_RUN = r'''
+import fcntl, os, pathlib, sys
+attempt = sys.argv[2]
+base = pathlib.Path('/tmp/wizard-codex-' + attempt)
+with open(str(base) + '.lock', 'w') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if pathlib.Path(str(base) + '.cancel').exists():
+        sys.exit(0)
+    pathlib.Path(str(base) + '.pid').write_text(str(os.getpid()))
+    if pathlib.Path(str(base) + '.cancel').exists():
+        sys.exit(0)
+    source = sys.argv[3]
+    sys.argv = ['hermes_brain.py', 'codex', attempt]
+    exec(compile(source, 'hermes_brain.py', 'exec'), {'__name__': '__main__'})
+'''
+_CODEX_CANCEL = r'''
+import fcntl, os, pathlib, signal, sys, time
+base = pathlib.Path('/tmp/wizard-codex-' + sys.argv[1])
+pathlib.Path(str(base) + '.cancel').touch()
+with open(str(base) + '.lock', 'a') as lock:
+    deadline = time.monotonic() + 6
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            try:
+                pid = int(pathlib.Path(str(base) + '.pid').read_text())
+                # Never kill a reused PID belonging to something else.
+                args = pathlib.Path('/proc/%s/cmdline' % pid).read_bytes().split(b'\0')
+                if sys.argv[1].encode() in args:
+                    os.kill(pid, signal.SIGKILL)
+            except (FileNotFoundError, ProcessLookupError, ValueError):
+                pass
+            if time.monotonic() > deadline:
+                raise RuntimeError('Previous ChatGPT attempt did not stop')
+            time.sleep(.05)
+'''
 
 
 # ── state ──────────────────────────────────────────────────────────────────
@@ -217,32 +266,152 @@ async def _request(method: str, url: str, body: Any, headers: dict[str, str], ti
 # ── brain: ChatGPT (Codex device login, inside the Hermes container) ─────
 
 
+def _codex_current(attempt: str) -> bool:
+    return _codex.get("attempt") == attempt and _codex.get("status") not in ("idle", "cancelling")
+
+
 def _codex_worker(attempt: str) -> None:
+    proc = None
     try:
-        proc = subprocess.Popen(["docker", "exec", "-i", "-u", "hermes", engine(), "/opt/hermes/.venv/bin/python",
-                                 "-c", BRAIN_SCRIPT, "codex"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
-        _codex["proc"] = proc
+        container = engine()
+        with _codex_lock:
+            if not _codex_current(attempt):
+                return
+            proc = subprocess.Popen(["docker", "exec", "-i", "-u", "hermes", container,
+                                     "/opt/hermes/.venv/bin/python", "-c", _CODEX_RUN, "codex", attempt, BRAIN_SCRIPT],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, text=True)
+            _codex.update(proc=proc, container=container)
         for line in proc.stdout:  # type: ignore[union-attr]
-            if _codex.get("attempt") != attempt:
-                proc.kill(); return
             if not line.startswith("{"):
                 continue
             msg = json.loads(line)
-            if msg.get("error"):
-                raise RuntimeError(msg["error"])
-            if msg.get("status") == "waiting":
-                _codex.update(status="waiting", userCode=msg["userCode"], url=CODEX_DEVICE_URL,
-                              openedOnMac=open_on_mac(CODEX_DEVICE_URL))
-            elif msg.get("status") == "signed-in":
-                save_state(brain=msg["brain"], verified=False)
-                _codex.update(status="signed-in", brain=msg["brain"])
+            with _codex_lock:
+                if not _codex_current(attempt):
+                    return
+                if msg.get("error"):
+                    raise RuntimeError("ChatGPT sign-in failed. Try again.")
+                if msg.get("status") == "waiting":
+                    _codex.update(status="waiting", userCode=msg["userCode"], url=CODEX_DEVICE_URL,
+                                  openedOnMac=False)
+                elif msg.get("status") == "signed-in":
+                    save_state(brain=msg["brain"], verified=False)
+                    _codex.update(status="signed-in", brain=msg["brain"])
         proc.wait()
-        if _codex.get("status") != "signed-in" and _codex.get("attempt") == attempt:
-            raise RuntimeError((proc.stderr.read() if proc.stderr else "")[-300:] or "ChatGPT sign-in stopped.")
-    except Exception as error:  # surfaced to the onboarding page
-        if _codex.get("attempt") == attempt:
-            _codex.update(status="error", error=str(error) or error.__class__.__name__)
+        with _codex_lock:
+            if _codex_current(attempt) and _codex.get("status") != "signed-in":
+                raise RuntimeError("ChatGPT sign-in stopped. Try again.")
+    except Exception:
+        with _codex_lock:
+            if _codex_current(attempt):
+                _codex.update(status="error", error="ChatGPT sign-in failed. Try again.")
+    finally:
+        if proc:
+            # Normal completion is reaped here; cancellation reaps after its remote
+            # handshake. Never kill only docker exec and leave stock auth orphaned.
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            if proc.stdout:
+                proc.stdout.close()
+
+
+async def _cancel_codex(attempt: str) -> None:
+    """Caller owns lifecycle lock. Fail closed if remote termination isn't proven."""
+    with _codex_lock:
+        if _codex.get("attempt") != attempt or _codex.get("status") == "idle":
+            return
+        _codex["status"] = "cancelling"
+        container, proc = _codex.get("container"), _codex.get("proc")
+    if container:
+        result = await asyncio.to_thread(docker, "exec", "-u", "hermes", container,
+                                         "/opt/hermes/.venv/bin/python", "-c", _CODEX_CANCEL, attempt, timeout=10)
+        if result.returncode != 0:
+            raise RuntimeError("Could not stop the previous sign-in. Retry cancellation before starting again.")
+    if proc:
+        try:
+            await asyncio.to_thread(proc.wait, timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()  # remote auth has already been proven stopped above
+            await asyncio.to_thread(proc.wait, timeout=2)
+    with _codex_lock:
+        _codex.clear()
+        _codex.update(status="idle", attempt=attempt)
+
+
+def voice_status() -> dict[str, Any]:
+    """Read only bounded public progress, never arbitrary producer fields/logs."""
+    try:
+        fd = os.open(VOICE_PATH, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("not a regular file")
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("status too large")
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("invalid status")
+    except FileNotFoundError:
+        return {"state": "preparing", "stage": "Waiting for local voice preparation", "downloaded": 0, "total": 0}
+    except (OSError, ValueError):
+        return {"state": "error", "stage": "Local voice status unavailable", "downloaded": 0, "total": 0}
+    state = value.get("state")
+    if state == "downloading":  # older image's producer
+        state = "preparing"
+    if state not in ("preparing", "ready", "retrying", "error"):
+        state = "error"
+    # Stage labels are allowlisted summaries: producer detail may contain signed
+    # download URLs or exception text and must not cross the public boundary.
+    detail = str(value.get("stage") or value.get("detail") or "").lower()[:1024]
+    stage = {"preparing": "Preparing local voice", "ready": "Local voice ready",
+             "retrying": "Local voice will retry", "error": "Local voice needs attention"}[state]
+    if state == "preparing":
+        for token, label in (("wheel", "Installing voice dependencies"), ("download", "Downloading voice model"),
+                             ("loading", "Loading voice model"), ("install", "Installing local voice"),
+                             ("starting", "Starting voice engine")):
+            if token in detail:
+                stage = label
+                break
+    def byte_count(key: str) -> int:
+        n = value.get(key, 0)
+        return n if type(n) is int and 0 <= n <= 2**53 else 0
+    return {"state": state, "stage": stage, "downloaded": byte_count("downloaded"), "total": byte_count("total")}
+
+
+async def get_voice_status(_: web.Request) -> web.Response:
+    return web.json_response(await asyncio.to_thread(voice_status), headers={"Cache-Control": "no-store"})
+
+
+async def post_voice_retry(_: web.Request) -> web.Response:
+    global _voice_retry_at
+    # A single command in flight plus a short admission window; systemd itself
+    # coalesces starts while the unit is running. It remains the sole JSON writer.
+    if _voice_retry_lock.locked() or time.monotonic() - _voice_retry_at < 5:
+        return web.json_response({"accepted": True, "alreadyRequested": True}, status=202)
+    async with _voice_retry_lock:
+        _voice_retry_at = time.monotonic()
+        try:
+            result = await asyncio.to_thread(subprocess.run,
+                ["sudo", "-n", "systemctl", "--no-block", "start", "wizard-voice"],
+                capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                raise RuntimeError("start rejected")
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            _voice_retry_at = -float("inf")
+            return json_error("Could not request local voice preparation. Try again.", 503)
+    return web.json_response({"accepted": True}, status=202)
+
+
+@web.middleware
+async def same_origin_mutations(request: web.Request, handler):
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("Origin")
+        if ((origin is not None and origin != f"{request.scheme}://{request.host}")
+                or request.headers.get("Sec-Fetch-Site") == "cross-site"):
+            return json_error("Cross-origin mutations are not allowed.", 403)
+    return await handler(request)
 
 
 # ── HTTP ───────────────────────────────────────────────────────────────────
@@ -308,6 +477,14 @@ async def get_portrait(_: web.Request) -> web.StreamResponse:
 
 
 async def post_brain(request: web.Request) -> web.Response:
+    async with _codex_lifecycle:
+        with _codex_lock:
+            if _codex.get("status") != "idle":
+                return json_error("Cancel ChatGPT sign-in before changing brains.", 409)
+        return await _post_brain(request)
+
+
+async def _post_brain(request: web.Request) -> web.Response:
     body = await request.json()
     kind = body.get("kind")
     try:
@@ -333,34 +510,71 @@ async def post_brain(request: web.Request) -> web.Response:
     return web.json_response(public_state())
 
 
-async def post_codex_start(_: web.Request) -> web.Response:
-    attempt = uuid.uuid4().hex
-    _codex.clear()
-    _codex.update(status="starting", attempt=attempt)
-    threading.Thread(target=_codex_worker, args=(attempt,), daemon=True).start()
-    return web.json_response({"status": "starting"})
+async def post_codex_start(request: web.Request) -> web.Response:
+    attempt = (await request.json()).get("attempt")
+    if not isinstance(attempt, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt):
+        return json_error("A valid sign-in attempt ID is required.")
+    async with _codex_lifecycle:
+        with _codex_lock:
+            if _codex.get("attempt") == attempt:
+                if _codex.get("status") == "idle":
+                    return json_error("This sign-in attempt was cancelled. Start a new attempt.", 409)
+                return web.json_response({"status": _codex["status"], "attempt": attempt})
+            if _codex.get("status") != "idle":
+                return json_error("Cancel the previous sign-in before starting another.", 409)
+            _codex.clear()
+            _codex.update(status="starting", attempt=attempt)
+            threading.Thread(target=_codex_worker, args=(attempt,), daemon=True).start()
+        return web.json_response({"status": "starting", "attempt": attempt})
 
 
-async def get_codex(_: web.Request) -> web.Response:
-    view = {k: v for k, v in _codex.items() if k not in ("attempt", "proc")}
-    if _codex.get("status") == "signed-in" and not _codex.get("restarted"):
-        _codex["restarted"] = True
-        await restart_hermes()
-        view["status"] = "signed-in"
-    return web.json_response(view)
+async def get_codex(request: web.Request) -> web.Response:
+    attempt = request.query.get("attempt")
+    async with _codex_lifecycle:
+        with _codex_lock:
+            if not attempt or _codex.get("attempt") != attempt:
+                return json_error("This sign-in attempt is no longer current.", 409)
+            status = _codex.get("status")
+            needs_open = status == "waiting" and not _codex.get("openRequested")
+            if needs_open:
+                _codex["openRequested"] = True
+            needs_restart = status == "signed-in" and not _codex.get("restarted")
+        if needs_open:
+            opened = await asyncio.to_thread(open_on_mac, CODEX_DEVICE_URL)
+            with _codex_lock:
+                _codex["openedOnMac"] = opened
+        if needs_restart:
+            try:
+                await restart_hermes()
+            except Exception:
+                return json_error("Signed in, but the brain could not restart. Try polling again.", 503)
+            with _codex_lock:
+                _codex["restarted"] = True
+        with _codex_lock:
+            view = {k: _codex[k] for k in ("status", "attempt", "userCode", "url", "openedOnMac", "brain", "error") if k in _codex}
+        return web.json_response(view, headers={"Cache-Control": "no-store"})
 
 
-async def post_codex_open(_: web.Request) -> web.Response:
-    return web.json_response({"opened": await asyncio.to_thread(open_on_mac, CODEX_DEVICE_URL)})
+async def post_codex_open(request: web.Request) -> web.Response:
+    attempt = (await request.json()).get("attempt")
+    async with _codex_lifecycle:
+        with _codex_lock:
+            if not attempt or _codex.get("attempt") != attempt or _codex.get("status") != "waiting":
+                return json_error("This sign-in attempt is no longer waiting.", 409)
+        return web.json_response({"opened": await asyncio.to_thread(open_on_mac, CODEX_DEVICE_URL), "attempt": attempt})
 
 
-async def post_codex_cancel(_: web.Request) -> web.Response:
-    proc = _codex.get("proc")
-    if proc:
-        proc.kill()
-    _codex.clear()
-    _codex.update(status="idle")
-    return web.json_response({"status": "idle"})
+async def post_codex_cancel(request: web.Request) -> web.Response:
+    attempt = (await request.json()).get("attempt")
+    async with _codex_lifecycle:
+        with _codex_lock:
+            if not attempt or _codex.get("attempt") != attempt:
+                return json_error("This sign-in attempt is no longer current.", 409)
+        try:
+            await _cancel_codex(attempt)
+        except Exception:
+            return json_error("Could not stop the previous sign-in. Try again.", 503)
+        return web.json_response({"status": "idle", "attempt": attempt})
 
 
 def _session_id(payload: Any) -> str | None:
@@ -437,8 +651,10 @@ async def post_finish(_: web.Request) -> web.Response:
 
 
 def build_app() -> web.Application:
-    app = web.Application(client_max_size=8 * 1024 * 1024)
+    app = web.Application(client_max_size=8 * 1024 * 1024, middlewares=[same_origin_mutations])
     app.add_routes([
+        web.get("/api/voice/status", get_voice_status),
+        web.post("/api/voice/retry", post_voice_retry),
         web.get("/", index),
         web.get("/healthz", healthz),
         web.get("/api/state", get_state),
