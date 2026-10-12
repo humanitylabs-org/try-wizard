@@ -143,11 +143,14 @@ const $$ = (s) => [...document.querySelectorAll(s)]
 let state = {}
 let brainKind = null
 let codexTimer = null
+let codexGeneration = 0
+let codexAttempt = sessionStorage.getItem('wizardCodexAttempt')
+let codexQueue = Promise.resolve()
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  if (!res.ok) { const error = new Error(data.error || `Request failed (${res.status})`); error.status = res.status; throw error }
   return data
 }
 
@@ -195,47 +198,108 @@ $$('.choice').forEach((btn) => btn.addEventListener('click', () => {
   else stopCodex()
 }))
 
-async function startCodex() {
-  stopCodex()
+function invalidateCodex() {
+  ++codexGeneration
+  clearTimeout(codexTimer); codexTimer = null
+  return codexGeneration
+}
+async function cancelCodexAttempt() {
+  if (!codexAttempt) return
+  const attempt = codexAttempt
+  try { await api('/api/brain/chatgpt/cancel', { method: 'POST', body: JSON.stringify({ attempt }) }) }
+  catch (err) { if (err.status !== 409) throw err }
+  if (codexAttempt === attempt) { codexAttempt = null; sessionStorage.removeItem('wizardCodexAttempt') }
+}
+function queueCodex(action, generation) {
+  // Never overlap cancel/start requests. Keep failed cancellation's attempt so
+  // the next action retries cleanup instead of leaving a stock auth worker alive.
+  codexQueue = codexQueue.catch(() => {}).then(action)
+  codexQueue.catch((err) => {
+    if (generation !== codexGeneration) return
+    $('#err2').textContent = err.message
+    $('#next2').textContent = 'Try again'; $('#next2').disabled = false
+  })
+  return codexQueue
+}
+function startCodex() {
+  const generation = invalidateCodex()
   $('#codexNote').textContent = 'Getting a sign-in code…'
   $('#codexCode').classList.add('hidden'); $('#codexHelp').classList.add('hidden'); $('#codexReopen').classList.add('hidden')
-  try { await api('/api/brain/chatgpt/start', { method: 'POST' }) } catch (err) { $('#err2').textContent = err.message; return }
-  codexTimer = setInterval(pollCodex, 1500)
+  return queueCodex(async () => {
+    await cancelCodexAttempt()
+    if (generation !== codexGeneration) return
+    const attempt = crypto.randomUUID().replaceAll('-', '')
+    codexAttempt = attempt
+    sessionStorage.setItem('wizardCodexAttempt', attempt)
+    await api('/api/brain/chatgpt/start', { method: 'POST', body: JSON.stringify({ attempt }) })
+    if (generation !== codexGeneration) { await cancelCodexAttempt(); return }
+    codexTimer = setTimeout(() => pollCodex(attempt, generation), 0)
+  }, generation)
 }
 function stopCodex() {
-  if (codexTimer) { clearInterval(codexTimer); codexTimer = null; api('/api/brain/chatgpt/cancel', { method: 'POST' }).catch(() => {}) }
+  const generation = invalidateCodex()
+  return queueCodex(cancelCodexAttempt, generation)
 }
-async function pollCodex() {
+async function pollCodex(attempt, generation) {
+  const current = () => generation === codexGeneration && codexAttempt === attempt && brainKind === 'chatgpt'
+  if (!current()) return
   let s
-  try { s = await api('/api/brain/chatgpt') } catch { return }
+  try { s = await api(`/api/brain/chatgpt?attempt=${encodeURIComponent(attempt)}`) }
+  catch (err) {
+    if (!current()) return
+    if (err.status === 409) {
+      $('#err2').textContent = 'This sign-in is no longer current. Try again.'
+      $('#next2').textContent = 'Try again'; $('#next2').disabled = false
+      return
+    }
+    $('#codexNote').textContent = 'Waiting for the sign-in service…'
+    codexTimer = setTimeout(() => pollCodex(attempt, generation), 1500)
+    return
+  }
+  if (!current() || s.attempt !== attempt) return
   if (s.status === 'waiting') {
     $('#codexNote').textContent = 'Your sign-in code:'
     $('#codexCode').textContent = s.userCode
     $('#codexCode').classList.remove('hidden'); $('#codexHelp').classList.remove('hidden'); $('#codexReopen').classList.remove('hidden')
-    if (!s.openedOnMac) $('#codexHelp').innerHTML = 'On your Mac, open <b>auth.openai.com/codex/device</b>, sign in, and enter this code. This page continues on its own.'
+    $('#codexHelp').innerHTML = s.openedOnMac
+      ? 'We opened <b>auth.openai.com/codex/device</b> in your Mac browser. Sign in and enter this code. This page continues on its own.'
+      : 'On your Mac, open <b>auth.openai.com/codex/device</b>, sign in, and enter this code. This page continues on its own.'
   } else if (s.status === 'signed-in') {
-    clearInterval(codexTimer); codexTimer = null
+    codexTimer = null
     $('#codexNote').textContent = 'Signed in.'
     show(3)
-  } else if (s.status === 'error') {
-    clearInterval(codexTimer); codexTimer = null
-    $('#err2').textContent = s.error || 'Sign-in failed. Try again.'
+    return
+  } else if (s.status === 'error' || s.status === 'idle' || s.status === 'cancelling') {
+    codexTimer = null
+    $('#err2').textContent = s.error || 'Sign-in stopped. Try again.'
     $('#next2').textContent = 'Try again'; $('#next2').disabled = false
+    return
   }
+  codexTimer = setTimeout(() => pollCodex(attempt, generation), 1500)
 }
-$('#codexReopen').addEventListener('click', () => api('/api/brain/chatgpt/open', { method: 'POST' }).catch(() => {}))
+$('#codexReopen').addEventListener('click', () => {
+  const attempt = codexAttempt
+  if (attempt) api('/api/brain/chatgpt/open', { method: 'POST', body: JSON.stringify({ attempt }) }).catch(() => {})
+})
 $('#key').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#next2').click() })
 
 $('#next2').addEventListener('click', async () => {
   $('#err2').textContent = ''
   if (brainKind === 'chatgpt') { $('#next2').textContent = 'Waiting for sign-in…'; $('#next2').disabled = true; startCodex(); return }
   const btn = $('#next2'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Connecting'
+  const kind = brainKind
+  const stopped = stopCodex()
+  const generation = codexGeneration
   try {
-    const body = brainKind === 'apikey' ? { kind: 'apikey', provider: $('#provider').value, key: $('#key').value } : { kind: 'free' }
-    state = await api('/api/brain', { method: 'POST', body: JSON.stringify(body) })
+    await stopped
+    if (generation !== codexGeneration || kind !== brainKind) return
+    const body = kind === 'apikey' ? { kind: 'apikey', provider: $('#provider').value, key: $('#key').value } : { kind: 'free' }
+    const connected = await api('/api/brain', { method: 'POST', body: JSON.stringify(body) })
+    if (generation !== codexGeneration || kind !== brainKind) return
+    state = connected
     show(3)
-  } catch (err) { $('#err2').textContent = err.message }
-  btn.disabled = false; btn.textContent = 'Connect'
+  } catch (err) { if (generation === codexGeneration) $('#err2').textContent = err.message }
+  if (generation === codexGeneration) { btn.disabled = false; btn.textContent = 'Connect' }
 })
 
 // 3. Verify

@@ -508,6 +508,37 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
+// MARK: - Local voice presentation (Foundation-only; tested separately)
+
+struct LocalVoiceStatus: Decodable {
+    let state: String
+    let stage: String
+    let downloaded: Int64
+    let total: Int64
+
+    var isReady: Bool { state == "ready" }
+    var canRetry: Bool { ["preparing", "retrying", "error"].contains(state) }
+    var summary: String {
+        let heading: String
+        switch state {
+        case "ready": heading = "Local voice ready"
+        case "preparing": heading = "Preparing local voice"
+        case "retrying": heading = "Local voice retrying"
+        default: heading = "Local voice needs attention"
+        }
+        var parts = [heading]
+        if !stage.isEmpty && stage != heading { parts.append(stage) }
+        if total > 0 && downloaded >= 0 {
+            // Model download is not total preparation: even 100% is not ready
+            // until the producer confirms engine/model health.
+            let bytes = ByteCountFormatter.string(fromByteCount: downloaded, countStyle: .file)
+            let size = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+            parts.append("Model: \(bytes) / \(size)")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 // MARK: - Window
 
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
@@ -520,6 +551,19 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     var buttons: [NSButton] = []
     var loadedAt: Date?
     let installer = OSInstaller()
+    private let voiceBar = NSView()
+    private let voiceLabel = NSTextField(wrappingLabelWithString: "")
+    private let voiceRetry = NSButton(title: "Retry", target: nil, action: nil)
+    private var voiceHeight: NSLayoutConstraint!
+    private var voiceTimer: Timer?
+    private var voiceTask: URLSessionDataTask?
+    private var voiceGeneration = UUID()
+    private var voiceRetryPending = false
+    var localVoiceQAState: [String: Any] {
+        ["visible": !voiceBar.isHidden, "summary": voiceLabel.stringValue,
+         "retryEnabled": voiceRetry.isEnabled, "retryPending": voiceRetryPending,
+         "polling": voiceTimer != nil]
+    }
 
     init() {
         let cfg = WKWebViewConfiguration()
@@ -549,13 +593,31 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         root.wantsLayer = true
         root.layer?.backgroundColor = window.backgroundColor.cgColor
         window.contentView = root
+        voiceBar.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(voiceBar)
+        voiceHeight = voiceBar.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([voiceBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                                     voiceBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                                     voiceBar.bottomAnchor.constraint(equalTo: root.bottomAnchor), voiceHeight])
+        voiceBar.isHidden = true
+        voiceLabel.font = .systemFont(ofSize: 12)
+        voiceLabel.maximumNumberOfLines = 3
+        voiceLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        voiceRetry.target = self; voiceRetry.action = #selector(retryLocalVoice)
+        voiceRetry.bezelStyle = .rounded
+        for v in [voiceLabel, voiceRetry] { v.translatesAutoresizingMaskIntoConstraints = false; voiceBar.addSubview(v) }
+        NSLayoutConstraint.activate([voiceLabel.leadingAnchor.constraint(equalTo: voiceBar.leadingAnchor, constant: 14),
+                                     voiceLabel.centerYAnchor.constraint(equalTo: voiceBar.centerYAnchor),
+                                     voiceLabel.trailingAnchor.constraint(equalTo: voiceRetry.leadingAnchor, constant: -10),
+                                     voiceRetry.trailingAnchor.constraint(equalTo: voiceBar.trailingAnchor, constant: -14),
+                                     voiceRetry.centerYAnchor.constraint(equalTo: voiceBar.centerYAnchor)])
         for v in [web, overlay] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
             NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                                          v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                                          v.topAnchor.constraint(equalTo: root.topAnchor),
-                                         v.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+                                         v.bottomAnchor.constraint(equalTo: voiceBar.topAnchor)])
         }
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = window.backgroundColor.cgColor
@@ -611,9 +673,80 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         }
     }
 
+    // The bar belongs to the native window, not onboarding's WK page. It stays
+    // visible after /api/finish redirects into Wizard UX, including ready state.
+    private func clearLocalVoice() {
+        voiceGeneration = UUID()
+        voiceTimer?.invalidate(); voiceTimer = nil
+        voiceTask?.cancel(); voiceTask = nil
+        voiceRetryPending = false
+        voiceBar.isHidden = true; voiceHeight.constant = 0
+        voiceLabel.stringValue = ""; voiceLabel.toolTip = nil
+        voiceRetry.isEnabled = false
+    }
+
+    private func startLocalVoice() {
+        clearLocalVoice()
+        guard Store.active?.kind == .thisMac else { return }
+        voiceBar.isHidden = false; voiceHeight.constant = 64
+        voiceLabel.stringValue = "Checking local voice preparation…"
+        pollLocalVoice()
+        voiceTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.pollLocalVoice() }
+    }
+
+    private func voiceURL(_ path: String) -> URL {
+        URL(string: path, relativeTo: WizardShared.localSetupURL)!.absoluteURL
+    }
+
+    private func pollLocalVoice() {
+        guard Store.active?.kind == .thisMac, !voiceBar.isHidden, voiceTask == nil, !voiceRetryPending else { return }
+        let generation = voiceGeneration
+        var request = URLRequest(url: voiceURL("/api/voice/status"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        voiceTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            let status = data.flatMap { (response as? HTTPURLResponse)?.statusCode == 200
+                ? try? JSONDecoder().decode(LocalVoiceStatus.self, from: $0) : nil }
+            DispatchQueue.main.async {
+                guard let self, self.voiceGeneration == generation, Store.active?.kind == .thisMac else { return }
+                self.voiceTask = nil
+                self.voiceLabel.stringValue = status?.summary ?? "Local voice status unavailable — Retry to request preparation."
+                self.voiceLabel.toolTip = self.voiceLabel.stringValue
+                self.voiceRetry.isEnabled = status?.canRetry ?? true
+            }
+        }
+        voiceTask?.resume()
+    }
+
+    @objc private func retryLocalVoice() {
+        guard Store.active?.kind == .thisMac, !voiceBar.isHidden, !voiceRetryPending else { return }
+        // Fence a pre-retry GET response as well as responses from old backends.
+        voiceTask?.cancel(); voiceTask = nil
+        voiceGeneration = UUID()
+        let generation = voiceGeneration
+        voiceRetryPending = true; voiceRetry.isEnabled = false
+        voiceLabel.stringValue = "Requesting local voice preparation…"
+        var request = URLRequest(url: voiceURL("/api/voice/retry"), timeoutInterval: 8)
+        request.httpMethod = "POST"
+        voiceTask = URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+            let accepted = (response as? HTTPURLResponse)?.statusCode == 202
+            DispatchQueue.main.async {
+                guard let self, self.voiceGeneration == generation, Store.active?.kind == .thisMac else { return }
+                self.voiceTask = nil; self.voiceRetryPending = false
+                self.voiceLabel.stringValue = accepted ? "Preparation requested — waiting for local voice status."
+                    : "Could not request local voice preparation. Try again."
+                self.voiceLabel.toolTip = self.voiceLabel.stringValue
+                self.voiceRetry.isEnabled = true
+                // A queued systemd start is never labelled ready. Poll the sole
+                // producer again on the timer, without manufacturing progress.
+            }
+        }
+        voiceTask?.resume()
+    }
+
     // MARK: Flow
 
     func begin() {
+        clearLocalVoice()
         guard let backend = Store.active else { showChooser(); return }
         switch backend.kind {
         case .thisMac:
@@ -627,6 +760,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func showChooser() {
+        clearLocalVoice()
         showOverlay("Where should Wizard live?",
                     "Wizard is your own AI with its own computer. Run it on this Mac, or connect to a Wizard you already have on another computer.",
                     spinning: false,
@@ -774,14 +908,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func connectLocal() {
+        startLocalVoice()
         let started = Date()
         HostControl.ensureRunning()
         HostControl.send("start")
         var shown = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
-            if elapsed > 0.6 && !shown { shown = true; self?.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
+            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
+            if elapsed > 0.6 && !shown { shown = true; self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
         }, done: { [weak self] ok in
-            guard let self else { return }
+            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
@@ -988,6 +1124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     "subtitle": controller.subtitle.stringValue, "url": controller.web.url?.absoluteString ?? "",
                                     "loadedAt": controller.loadedAt?.timeIntervalSince1970 ?? 0,
                                     "frame": NSStringFromRect(controller.window?.frame ?? .zero),
+                                    "localVoice": controller.localVoiceQAState,
                                     "backends": Store.backends.map { $0.name }, "active": Store.activeIndex]
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-state.json"))
