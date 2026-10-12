@@ -1,49 +1,128 @@
-# Wizard for Mac (next)
+# Wizard for Mac 0.2.2 candidate
 
-The 0.2 line splits Wizard into two pieces:
+This is an **unreleased, bundled baseline candidate**, not a stable promotion. The
+separate shell/service split (PR #24, Proposed) has another owner; this branch does
+not implement it or change the App installation lane.
 
-- **Wizard.app** (front end): a native macOS app with the Wizard UX in a WebKit window. About 2 MB. It never contains a VM; it connects to a Wizard OS back end.
-- **Wizard OS** (back end): a headless Debian 13 system with Hermes Agent, the onboarding server and the Wizard UX server. It runs on Apple's Virtualization.framework, managed by **Wizard Host**, a menu-bar login item embedded in Wizard.app. It keeps running when the window is closed.
+## What runs where
 
-On first launch the app asks *Where should Wizard live?*
+- **Wizard.app**: a native AppKit/WebKit window, about 2 MB to download. It contains
+  no Linux disk. The embedded **Wizard Host** login item runs the local VM and keeps
+  it alive after the window closes.
+- **Wizard OS 0.2.0**: headless Debian 13 arm64, Docker/Runtipi and Wizard App Manager,
+  with wizard-shell (currently both UX and Agent Service), Hermes Agent, Files,
+  Browser, Transcriber, Secret Drop and AI Accounts. `os.sh` provisions these during
+  the image build. WAM is pinned to `1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a`.
+- **User files**: the chosen Mac folder (default `~/Wizard`) is shared by virtio-fs
+  and presented as `/home/wizard/runtipi/media` through bindfs. UID 1000 and Files'
+  capability-restricted root can write there. This folder is intentionally writable
+  by the guest apps; it is not a per-app access-control boundary. Application data,
+  databases, onboarding, credentials and chats stay on the guest disk.
 
-1. **On this Mac**: downloads Wizard OS (about 270 MB, checked against a SHA-256 hash), unpacks it into `~/Library/Application Support/Wizard/os`, and starts it in the background. The automatic download comes from the Wizard team's private network; anyone else gets a *Get Wizard OS* screen that opens this repo's latest release and installs the downloaded `wizard-os-*.tar.xz`.
-2. **On another computer**: paste the address of an existing Wizard (tailnet or LAN). No VM is installed.
+On first launch choose **On this Mac**, then the files folder. The app downloads
+and hashes an OS archive, or offers **Get Wizard OS → Choose Downloaded File…** if
+its private feed cannot be reached. **On another computer** connects to an existing
+Wizard URL without installing a VM. Do not point acceptance tests at a production
+agent. Free onboarding uses an anonymous Nous starter identity and `nous/welcome`,
+not the owner's subscription; no API key is embedded in the image.
 
-The *Wizard* menu can switch between Wizards, add another one, install Wizard OS from a downloaded file, or restart the local Wizard OS.
+## Requirements and measurements
 
-## Layout
+Apple Silicon, macOS **14 or later**. Build tools: Xcode command-line tools, Docker
+(via Colima), Python 3 and `xz`. Use a Docker-shared build directory. A 16 GB Mac is
+recommended for the complete local stack, especially alongside other applications.
 
-| Path | What |
+Measured on Thales (M-series Mac mini, macOS 26); these supersede the earlier
+270 MB / sub-GB-memory figures for the smaller bundled-Hermes prototype:
+
+| Item | Full 0.2 stack candidate |
 | --- | --- |
-| `mac/App/main.swift` | Wizard.app: window, backend chooser, Wizard OS installer, `wizardNative` WebKit bridge |
-| `mac/Host/main.swift` | Wizard Host: Virtualization.framework VM, vsock→loopback bridges (47823 UX, 47830 onboarding), menu-bar icon, status file |
-| `mac/Shared/Shared.swift` | Paths, ports and the control protocol shared by both |
-| `mac/build.sh` | Builds both bundles with `swiftc`, ad-hoc signs them (Host gets `com.apple.security.virtualization`), and makes the DMG |
-| `guest/Dockerfile`, `guest/build-image.sh` | Builds the Wizard OS image (kernel, initrd, ext4 rootfs, manifest) inside Docker and packages it as `wizard-os-<ver>.tar.xz` |
-| `guest/overlay/` | Wizard services, systemd units, onboarding server |
-| `mac/qa-*.sh` | Acceptance scripts run on a real Mac (fresh install, offline install, lifecycle and memory, published-artifact end to end) |
+| App DMG | 1,932,064 bytes (ad-hoc signed; not notarized) |
+| OS download | Approximately 2.9 GB compressed |
+| Unpacked factory disk | Approximately 13.2 GB logical, 10.3 GB allocated including boot files |
+| Installed disk | 64 GiB sparse maximum; actual allocation grows with use |
+| VM allocation | 4 vCPUs, **6 GiB RAM** |
+| Measured VM footprint | 3,276–3,568 MB; RSS 4,458–4,965 MB |
+| Warm window open | 0.35–0.41 s |
+| Cold open | 7.38–8.16 s |
+| Fresh download → onboarding window | 126.4 s on the tested local feed |
+| Fresh launch → first chat reply | 174.9 s, including scripted onboarding |
 
-## Measured on an M-series Mac mini (macOS 26), vs Try Wizard 0.1.2
+Plan for **at least 12 GB free** for the streamed download installation, plus room
+for future app/file growth. Downloading an archive separately also consumes its
+approximately 2.9 GB; allow at least **15 GB free** for the file-install route.
+The download path streams to tar rather than holding a second compressed copy;
+its guard uses the manifest's allocated install bytes plus 1 GiB. The file route
+does not currently perform that preflight. Updates temporarily unpack a new factory
+disk even when retaining the existing disk, so need comparable free headroom.
 
-| | 0.2.0 | 0.1.2 |
-| --- | --- | --- |
-| App download | 1.9 MB | 1.9 GB |
-| Open with Wizard OS running | 0.3 s | n/a (VM boots every launch) |
-| Open from fully stopped | 2.5–4.3 s | 7.3 s |
-| VM memory footprint | ~0.65–0.8 GB | ~3.7 GB |
-| Guest image (compressed) | 269 MB | ~1.8 GB |
+## Updates and acceptance boundaries
+
+Quit the QA app and its Host before replacing the app, then drag/replace and reopen.
+App replacement retains the support directory and guest disk. Installing a
+**same-stack** OS archive also retains the existing disk and changes only boot
+files/manifest; **it does not migrate overlay fixes into an existing guest**.
+A different-stack disk is kept as `disk-previous.img` instead; this is not a tested
+0.1→0.2 state migration. The corrected media permissions are verified on a fresh
+install of the final archive, not inferred from an older hotpatched test VM.
+
+The recovered acceptance scripts require explicit success markers, verify disk
+identity and state, and isolate offline QA by saving/restoring the prior support
+folder and preferences. `qa-fresh.sh` is still destructive: use only after backing
+up an isolated QA environment. Existing Thales pre-candidate state is retained at
+`/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`.
+
+**Known blocker:** the fresh Hermes agent does not have the installed apps' MCP
+tools, and the gateway bridge cannot fetch their MCP URLs. WAM doctor and app
+installation succeed, but that is not proof the agent can use them. The owning
+App installation lane must resolve this; no WAM/service or parked per-app PR #15
+changes are included here. Previous isolated Nous welcome onboarding/first-chat
+QA is evidence; no additional paid/live model run is required for packaging QA.
+
+The external **published-artifact acceptance gate remains deferred until approval**.
+No assets, download page, release, merge or live cutover are authorized by this
+candidate. The approximately 2.9 GB archive also exceeds GitHub's 2 GiB per-asset
+limit: distribution needs an approved alternative before it is shareable. Physical
+keyboard/clipboard behavior, human OAuth and teammate release-download acceptance
+are not established by these headless checks.
 
 ## Build
 
+```bash
+# Apple Silicon Mac; Docker daemon must expose this checkout and W.
+export W="$PWD/out/wizard-os-build"
+# Optional machine-local environment (not required by the source):
+# export WIZARD_BUILD_ENV=/path/to/your/docker-env.sh
+# export COLIMA_PROFILE=wb
+bash next/guest/build-image.sh           # base → provision → pack
+bash next/mac/build.sh                   # Wizard.app, Wizard-0.2.2.dmg
+# If building from a source export without .git, set BUILD_SOURCE_SHA explicitly.
 ```
-# on an Apple Silicon Mac with Docker (colima) and Xcode
-bash next/guest/build-image.sh      # -> out/wizard-os-<ver>.tar.xz
-bash next/mac/build.sh              # -> mac/dist/Wizard.app, Wizard-<ver>.dmg
-```
 
-The guest build expects the existing Try Wizard runtime bundle (Hermes + Node + Wizard UX) at `out/wizard-runtime.tgz`.
+No `wizard-runtime.tgz` input is required for this stack. Provisioning needs network
+access to `aiwizards.com/os.sh`, the Wizard app index and container registries.
+The build checks clean ext4 filesystems before packaging; the manifest records
+per-file SHA-256, allocated install bytes and `sourceCommit`. `pack` can reuse an
+offline provisioned disk, but changes to the overlay must be injected and checked
+beforehand (or rebuild from base). Never accept a failed fsck through `|| true`.
 
-## Always-on plan
+All sustained build/VM acceptance work for this project runs on Thales, queued
+behind `/Volumes/ThalesMedia/AndroidBuilds/worker.lock`; Telos is the source/control
+plane. The measured timings are observations, not promises on another machine.
 
-The roadmap for running Wizard 24/7 on owned hardware, and for moving Archimedes onto Thales, lives in [docs/always-on-wizard-plan.md](../docs/always-on-wizard-plan.md). Track it through the `always-on` issues.
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `mac/App/main.swift` | Native window, backend chooser, OS installer and WebKit bridge |
+| `mac/Host/main.swift` | Virtualization.framework VM, loopback bridges, status and Host control |
+| `mac/Shared/Shared.swift` | Shared paths/ports; UX 47823, onboarding 47830, QA dev shell 47900 |
+| `mac/build.sh` | Swift build, ad-hoc signing and DMG |
+| `guest/build-image.sh` | Base, in-VM provisioning, checked sparse-image packaging |
+| `guest/overlay/` | Guest services, media mount, onboarding and setup |
+| `mac/qa-update.sh` | Same-stack archive update with strict disk/state assertions |
+| `mac/qa-offline-install.sh` | Opt-in, saved/restored file-install and local-remote QA |
+| `mac/qa-lifecycle.sh`, `mac/qa-guest-checks.sh` | Lifecycle, memory, WAM and guest checks |
+
+The always-on roadmap remains in
+[docs/always-on-wizard-plan.md](../docs/always-on-wizard-plan.md).
