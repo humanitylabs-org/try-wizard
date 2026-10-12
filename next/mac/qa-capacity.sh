@@ -8,8 +8,18 @@ EV=${1:?evidence directory}
 mkdir -p "$EV"
 python3 - "$EV" <<'PY'
 from pathlib import Path
-import sys
+import sys, tempfile
 p=Path(sys.argv[1]); source=Path('App/main.swift').read_text()
+qa=Path(tempfile.mkdtemp(prefix='WizardCapacityQA-', dir=Path.home()/'Library/Caches'))
+(qa/'os').mkdir(); (qa/'os/disk.img').write_bytes(b'preserve-capacity-sentinel')
+(qa/'os-staging').mkdir()
+# Compile the production installer unchanged against an isolated real low-space
+# support directory; never point this destructive regression at the live guest.
+shared=Path('Shared/Shared.swift').read_text()
+shared=shared.replace('return base.appendingPathComponent("Wizard", isDirectory: true)',
+                      'return URL(fileURLWithPath: '+__import__('json').dumps(str(qa))+', isDirectory: true)')
+(p/'Shared.swift').write_text(shared)
+(p/'qa-support-path').write_text(str(qa))
 prefix=source.split('// MARK: - Host control')[0]
 # The next top-level section follows the installer; derive it from HostControl.
 if 'enum HostControl' in prefix:
@@ -46,5 +56,5 @@ print("PRODUCTION_FILE_INSTALL_CAPACITY_OK free=\(free) rejection=\(message)")
 '''
 (p/'main.swift').write_text(prefix+test)
 PY
-xcrun swiftc -O Shared/Shared.swift "$EV/main.swift" -framework AppKit -framework WebKit -framework ServiceManagement -o "$EV/check-capacity"
+xcrun swiftc -O "$EV/Shared.swift" "$EV/main.swift" -framework AppKit -framework WebKit -framework ServiceManagement -o "$EV/check-capacity"
 "$EV/check-capacity" | tee "$EV/qa-capacity.log"

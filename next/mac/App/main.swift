@@ -129,7 +129,6 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         if let problem = Self.partsProblem(files) { onDone?(Self.error(problem)); return }
         onProgress?("Setting up Wizard OS from \(files.count == 1 ? first.lastPathComponent : "\(files.count) files")…", nil)
         do {
-            try? FileManager.default.removeItem(at: Self.staging)   // a crashed earlier install mustn't eat the space check
             // Reject insufficient capacity before creating staging or touching the current OS.
             try Self.checkFreeSpace(install: 0)
             try startTar()
@@ -160,10 +159,17 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 set(.reading)
                 defer { try? h.close() }
                 do {
-                    while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty {
-                        do { try self.tarIn?.write(contentsOf: chunk) }
-                        catch { break }   // tar stopped early: let completeTar report tar's own error
-                        done += Int64(chunk.count)
+                    while true {
+                        // FileHandle bridges autoreleased NSData. Drain per chunk,
+                        // not at the end of a multi-GB background install.
+                        let count: Int = try autoreleasepool {
+                            guard let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty else { return 0 }
+                            do { try self.tarIn?.write(contentsOf: chunk) }
+                            catch { return 0 } // completeTar reports tar's error
+                            return chunk.count
+                        }
+                        if count == 0 { break }
+                        done += Int64(count)
                         if total > 0, Date().timeIntervalSince(last) > 0.25 {
                             last = Date()
                             let frac = Double(done) / Double(total), mb = Double(done) / 1_048_576, all = Double(total) / 1_048_576
@@ -241,7 +247,6 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
                 do {
-                    try? FileManager.default.removeItem(at: Self.staging)
                     try Self.checkFreeSpace(install: feed.totalInstallBytes)
                     try self.startTar()
                 } catch { self.busy = false; self.onDone?(error); return }
@@ -361,7 +366,11 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     static func sha256(of url: URL) throws -> String {
         let h = try FileHandle(forReadingFrom: url); defer { try? h.close() }
         var hasher = SHA256()
-        while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        while try autoreleasepool(invoking: {
+            guard let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty else { return false }
+            hasher.update(data: chunk)
+            return true
+        }) {}
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
