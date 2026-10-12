@@ -142,9 +142,23 @@ final class OSInstaller: NSObject, URLSessionDownloadDelegate {
         // Sparse 64 GB disk: only blocks Wizard actually writes take space on the Mac.
         let h = try FileHandle(forWritingTo: disk); try h.truncate(atOffset: 64 << 30); try h.close()
         if fm.fileExists(atPath: dest.path) {
-            // Keep the existing disk (the Wizard's memory and files); only replace boot files.
+            // Keep the existing disk (the Wizard's memory, chats and installed apps); only replace boot files.
+            // A disk from a different stack (0.1/0.2 bundled Hermes vs the Runtipi-based Wizard OS) can't boot the new
+            // kernel's system, so it's kept beside it as disk-previous.img instead and the new disk is used.
             let old = dest.appendingPathComponent("disk.img")
-            if fm.fileExists(atPath: old.path) { try fm.removeItem(at: disk); try fm.moveItem(at: old, to: disk) }
+            func stack(_ dir: URL) -> String {
+                let m = (try? Data(contentsOf: dir.appendingPathComponent("manifest.json")))
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                return (m?["stack"] as? String) ?? "bundled-hermes"
+            }
+            if fm.fileExists(atPath: old.path) {
+                if stack(dest) == stack(staging) {
+                    try fm.removeItem(at: disk); try fm.moveItem(at: old, to: disk)
+                } else {
+                    let keep = staging.appendingPathComponent("disk-previous.img")
+                    try? fm.removeItem(at: keep); try fm.moveItem(at: old, to: keep)
+                }
+            }
             if let mac = try? Data(contentsOf: dest.appendingPathComponent("mac-address")) {
                 try mac.write(to: staging.appendingPathComponent("mac-address"))
             }
@@ -353,6 +367,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         guard let backend = Store.active else { showChooser(); return }
         switch backend.kind {
         case .thisMac:
+            guard WizardShared.filesFolder != nil else { askFilesFolder(); return }
             guard WizardShared.osInstalled else { installOnThisMac(); return }
             connectLocal()
         case .remote:
@@ -399,6 +414,44 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         begin()
     }
 
+    /// First run on this Mac: where the Wizard keeps its files. The folder is shared into Wizard OS (virtio-fs) as the
+    /// apps' user-files folder; app databases stay on the Wizard OS disk.
+    func askFilesFolder() {
+        let home = WizardShared.defaultFilesFolder
+        showOverlay("Keep your Wizard's files in ~/\(home.lastPathComponent)?",
+                    "Your Wizard and its apps put what they make here: Inbox, Documents, Videos, Meetings and Exports. "
+                    + "You can open the folder in Finder any time.",
+                    spinning: false,
+                    actions: [("Use ~/\(home.lastPathComponent)", #selector(useDefaultFilesFolder)),
+                              ("Choose Folder…", #selector(chooseFilesFolder)),
+                              ("Back", #selector(backToChooser))])
+    }
+
+    @objc func useDefaultFilesFolder() { setFilesFolder(WizardShared.defaultFilesFolder) }
+
+    @objc func chooseFilesFolder() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose the folder for your Wizard's files"
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setFilesFolder(url)
+    }
+
+    func setFilesFolder(_ url: URL) {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try WizardShared.setFilesFolder(url)
+        } catch {
+            showOverlay("Couldn't use that folder", error.localizedDescription, spinning: false,
+                        actions: [("Choose Folder…", #selector(chooseFilesFolder)), ("Back", #selector(backToChooser))])
+            return
+        }
+        // A running Wizard OS picks the share up on its next start.
+        if WizardShared.osInstalled { HostControl.send("restart") }
+        begin()
+    }
+
     @objc func backToChooser() { showChooser() }
     @objc func retry() { begin() }
 
@@ -424,7 +477,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Off the Wizard team network the automatic download isn't reachable: get the file from GitHub instead.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download from GitHub and download wizard-os-0.1.0.tar.xz (about 270 MB).\n2. Come back here and click Choose Downloaded File.",
+                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download from GitHub and download the latest wizard-os-….tar.xz.\n2. Come back here and click Choose Downloaded File.",
                     spinning: false,
                     actions: [("Download from GitHub", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
@@ -615,6 +668,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wizardsMenu.addItem(withTitle: "Connect to Another Computer…", action: #selector(addRemote), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Install Wizard OS from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
     }
 
@@ -631,6 +685,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let arg = parts.count > 1 ? parts[1] : ""
         switch parts[0] {
         case "choose-this-mac": addThisMac()
+        case "reload": controller.begin()
+        case "files-folder": controller.setFilesFolder(arg.isEmpty ? WizardShared.defaultFilesFolder : URL(fileURLWithPath: arg))
         case "choose-this-mac-offline":
             // Simulate a Mac that can't reach the download feed.
             UserDefaults.standard.set("http://127.0.0.1:9/none.json", forKey: "osFeedURL"); addThisMac()
@@ -687,6 +743,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func addThisMac() { controller.chooseThisMac(); rebuildWizardMenu() }
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
+    @objc func showFilesFolder() {
+        if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
+    }
 }
 
 let app = NSApplication.shared

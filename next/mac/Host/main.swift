@@ -255,13 +255,19 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         let boot = VZLinuxBootLoader(kernelURL: dir.appendingPathComponent("boot/vmlinux"))
         boot.initialRamdiskURL = dir.appendingPathComponent("boot/initrd")
         boot.commandLine = (manifest["cmdline"] as? String) ?? "console=hvc0 root=/dev/vda rw quiet"
+        // Developer/QA only: with ~/Library/Application Support/Wizard/dev-shell present, the guest opens a root shell on
+        // vsock 9200, bridged to 127.0.0.1:47900 (used by mac/qa-guest.sh for `wam doctor` and friends).
+        if WizardShared.devShell { boot.commandLine += " wizard.dev=1" }
 
         let c = VZVirtualMachineConfiguration()
         c.bootLoader = boot
         let cores = ProcessInfo.processInfo.processorCount
         c.cpuCount = max(VZVirtualMachineConfiguration.minimumAllowedCPUCount, min(4, max(2, cores / 2)))
+        // Wizard OS 0.2 runs Docker, Runtipi and the default apps: give it the manifest's memory (6 GiB) on Macs with
+        // 16 GB or more, 4 GiB otherwise. Pages the guest never touches cost the Mac nothing.
         let physical = ProcessInfo.processInfo.physicalMemory
-        let want: UInt64 = physical >= (16 << 30) ? (4 << 30) : (3 << 30)
+        let wantMiB = UInt64((manifest["memoryMiB"] as? Int) ?? 4096)
+        let want: UInt64 = physical >= (16 << 30) ? (wantMiB << 20) : (min(wantMiB, 4096) << 20)
         c.memorySize = min(max(want, VZVirtualMachineConfiguration.minimumAllowedMemorySize), VZVirtualMachineConfiguration.maximumAllowedMemorySize)
 
         let disk = try VZDiskImageStorageDeviceAttachment(url: dir.appendingPathComponent("disk.img"), readOnly: false,
@@ -276,6 +282,15 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.socketDevices = [VZVirtioSocketDeviceConfiguration()]
         c.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
         c.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
+
+        // The Wizard's files folder (~/Wizard by default) is the guest's Runtipi media root (virtio-fs tag wizard-files).
+        if let folder = WizardShared.filesFolder {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let fs = VZVirtioFileSystemDeviceConfiguration(tag: WizardShared.filesShareTag)
+            fs.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: folder, readOnly: false))
+            c.directorySharingDevices = [fs]
+            log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
+        }
 
         let consoleURL = WizardShared.logsDir.appendingPathComponent("console.log")
         FileManager.default.createFile(atPath: consoleURL.path, contents: nil)
@@ -349,6 +364,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         vm.onChange = { [weak self] in self?.refresh() }
         bridges = [LoopbackBridge(hostPort: WizardShared.uxPort, guestPort: WizardShared.guestUXPort, vm: vm),
                    LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm)]
+        if WizardShared.devShell {
+            bridges.append(LoopbackBridge(hostPort: WizardShared.devShellPort, guestPort: WizardShared.guestDevShellPort, vm: vm))
+        }
         bridges.forEach { $0.start() }
 
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(command(_:)),

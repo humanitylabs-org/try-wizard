@@ -6,12 +6,15 @@ enum WizardShared {
     static let appBundleID = "org.humanitylabs.wizard"
 
     /// Mac loopback ports bridged into Wizard OS over vsock.
-    static let uxPort: UInt16 = 47823      // -> guest 8923 (Wizard UX)
+    static let uxPort: UInt16 = 47823      // -> guest 8923 -> the wizard-shell app (Agent Service + Wizard UX)
     static let setupPort: UInt16 = 47830   // -> guest 8930 (front door / onboarding)
     static let guestUXPort: UInt32 = 8923
     static let guestSetupPort: UInt32 = 8930
     static let guestControlPort: UInt32 = 9100
     static let hostOpenURLPort: UInt32 = 9101
+    static let devShellPort: UInt16 = 47900       // -> guest 9200, only when `dev-shell` exists (QA)
+    static let guestDevShellPort: UInt32 = 9200
+    static var devShell: Bool { FileManager.default.fileExists(atPath: supportDir.appendingPathComponent("dev-shell").path) }
 
     static var supportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -20,6 +23,23 @@ enum WizardShared {
     static var osDir: URL { supportDir.appendingPathComponent("os", isDirectory: true) }
     static var logsDir: URL { supportDir.appendingPathComponent("logs", isDirectory: true) }
     static var statusFile: URL { supportDir.appendingPathComponent("host-status.json") }
+
+    /// The Mac folder shared into Wizard OS as its user-files folder (Runtipi media root). Chosen on first run;
+    /// nil = not chosen yet (the guest then keeps files on its own disk).
+    static let filesShareTag = "wizard-files"
+    static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
+    static var defaultFilesFolder: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Wizard", isDirectory: true) }
+    static var filesFolder: URL? {
+        guard let d = try? Data(contentsOf: filesFolderFile),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let p = o["path"] as? String, !p.isEmpty else { return nil }
+        return URL(fileURLWithPath: p, isDirectory: true)
+    }
+    static func setFilesFolder(_ url: URL) throws {
+        try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        let d = try JSONSerialization.data(withJSONObject: ["path": url.path], options: [.prettyPrinted])
+        try d.write(to: filesFolderFile, options: .atomic)
+    }
 
     static var localSetupURL: URL { URL(string: "http://127.0.0.1:\(setupPort)/")! }
     static var localHealthURL: URL { URL(string: "http://127.0.0.1:\(setupPort)/healthz")! }
