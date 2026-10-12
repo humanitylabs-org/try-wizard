@@ -2,8 +2,8 @@
 # Build Wizard.app (front end) with Wizard Host.app (back-end runner) embedded as a login item.
 # Runs on Thales. Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
 set -euo pipefail
-VER=${VER:-0.2.2}
-BUILD=${BUILD:-1}
+VER=${VER:-0.2.3}
+BUILD=${BUILD:-3}
 cd "$(dirname "$0")"
 SRC=$PWD
 OUT=$SRC/dist

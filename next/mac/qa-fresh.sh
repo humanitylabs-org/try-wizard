@@ -5,7 +5,7 @@
 #   Wizard OS boots -> onboarding page in the window -> name + free brain + wake-up check -> first chat (opened through
 #   the wizard-shell app, as Wizard UX does) -> wait for the agent's reply. Prints every timing.
 #
-#   qa-fresh.sh <Wizard-x.dmg> <wizard-os-x.tar.xz> [evidence dir]
+#   qa-fresh.sh <Wizard-x.dmg> <wizard-os-x.tar.xz> [evidence dir]     (env FEED_URL / FEED_DIR: see feed below)
 set -u
 DMG=${1:?dmg}; OS=${2:?wizard-os tar.xz}; EV=${3:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/evidence/fresh}
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,23 +26,32 @@ rm -rf "$AS/os" "$AS/os-staging" "$AS/logs" "$AS/host-status.json" "$AS/files-fo
 defaults delete org.humanitylabs.wizard >/dev/null 2>&1 || true
 mkdir -p "$AS"; touch "$AS/dev-shell"     # QA only: root shell into the guest (qa-guest.sh)
 
-echo "== feed: serve $(basename "$OS") over local http"
-FEED=$(mktemp -d); ln -s "$OS" "$FEED/$(basename "$OS")"
-SHA=$(shasum -a 256 "$OS" | cut -d' ' -f1); BYTES=$(stat -f %z "$OS")
-VER=$(basename "$OS" .tar.xz | sed 's/^wizard-os-//')
-INST=$(tar -xqOf "$OS" manifest.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('installBytes') or 'null')" 2>/dev/null || echo null)
-printf '{"version":"%s","url":"%s","sha256":"%s","bytes":%s,"installBytes":%s}\n' "$VER" "$(basename "$OS")" "$SHA" "$BYTES" "$INST" > "$FEED/latest.json"
-cat "$FEED/latest.json"; df -h "$HOME" | tail -1
-(cd "$FEED" && exec python3 -m http.server 47999 --bind 127.0.0.1 >/dev/null 2>&1) & HTTPD=$!
-trap 'kill $HTTPD 2>/dev/null' EXIT
-echo "image $(basename "$OS") $BYTES bytes sha256 $SHA"
+# Feed: FEED_URL=<https://…/latest.json> downloads from a real host (no local server); FEED_DIR=<dir> serves an
+# existing feed folder (split parts + latest.json from split-release.sh); otherwise serve the single archive.
+FEED_URL=${FEED_URL:-}
+if [ -z "$FEED_URL" ]; then
+  if [ -n "${FEED_DIR:-}" ]; then
+    FEED=$FEED_DIR; echo "== feed: serve $FEED over local http"
+  else
+    echo "== feed: serve $(basename "$OS") over local http"
+    FEED=$(mktemp -d); ln -s "$OS" "$FEED/$(basename "$OS")"
+    SHA=$(shasum -a 256 "$OS" | cut -d' ' -f1); BYTES=$(stat -f %z "$OS")
+    VER=$(basename "$OS" .tar.xz | sed 's/^wizard-os-//')
+    INST=$(tar -xqOf "$OS" manifest.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('installBytes') or 'null')" 2>/dev/null || echo null)
+    printf '{"version":"%s","url":"%s","sha256":"%s","bytes":%s,"installBytes":%s}\n' "$VER" "$(basename "$OS")" "$SHA" "$BYTES" "$INST" > "$FEED/latest.json"
+  fi
+  (cd "$FEED" && exec python3 -m http.server 47999 --bind 127.0.0.1 >/dev/null 2>&1) & HTTPD=$!
+  trap 'kill $HTTPD 2>/dev/null' EXIT
+  FEED_URL=http://127.0.0.1:47999/latest.json
+fi
+echo "feed: $FEED_URL"; curl -fsS -m 20 "$FEED_URL" | head -c 1200; echo; df -h "$HOME" | tail -1
 
 echo "== install the app from the DMG"
 MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
 rm -rf "$APP"; mkdir -p "$(dirname "$APP")"; ditto "$MNT/Wizard.app" "$APP"; hdiutil detach -quiet "$MNT"
 codesign --verify --deep --strict "$APP" && echo "codesign (ad-hoc) ok"; du -sh "$APP"
 defaults write org.humanitylabs.wizard QAHooks -bool true
-defaults write org.humanitylabs.wizard osFeedURL "http://127.0.0.1:47999/latest.json"
+defaults write org.humanitylabs.wizard osFeedURL "$FEED_URL"
 
 echo "== launch, On this Mac"
 open "$APP"; sleep 3

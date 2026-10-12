@@ -53,7 +53,17 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var lastProgress = Date.distantPast
     private var failure: Error?
 
-    struct Feed: Decodable { let version: String; let url: String; let sha256: String; let bytes: Int64?; let installBytes: Int64? }
+    /// A feed names one archive, or the same archive split into ordered parts (each under GitHub's 2 GiB asset
+    /// limit). `sha256` is always the hash of the whole archive; each part also carries its own hash.
+    struct Part: Decodable { let url: String; let bytes: Int64?; let sha256: String }
+    struct Feed: Decodable {
+        let version: String; let url: String?; let sha256: String; let bytes: Int64?; let installBytes: Int64?
+        let parts: [Part]?
+    }
+    private var partURLs: [(url: URL, sha: String)] = []
+    private var partIndex = 0
+    private var partHasher = SHA256()
+    private var feedBytes: Int64 = 0
 
     static var staging: URL { WizardShared.supportDir.appendingPathComponent("os-staging", isDirectory: true) }
 
@@ -71,21 +81,66 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                            Double(need) / 1e9, Double(free) / 1e9))
     }
 
-    /// Install from a local wizard-os-*.tar.xz; integrity comes from the per-file hashes in its manifest.
-    func install(from file: URL) {
-        onProgress?("Setting up Wizard OS from \(file.lastPathComponent)…", nil)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result {
-                // Reject insufficient capacity before creating staging or touching the current OS.
-                try Self.checkFreeSpace(install: 0)
-                let staging = try Self.freshStaging()
-                try Self.run("/usr/bin/tar", ["-xJf", file.path, "-C", staging.path])
-                try Self.finish(staging)
-            }
-            DispatchQueue.main.async {
-                if case .failure(let e) = result { self.onDone?(e) } else { self.onDone?(nil) }
-            }
+    /// Install from a local wizard-os-*.tar.xz (or its ordered parts); integrity comes from the per-file hashes in
+    /// its manifest. The app reads the file itself and streams it into tar, so the read happens in the process the
+    /// user chose the file in. Files on external drives need macOS's "Removable Volumes" permission; if macOS holds
+    /// the read waiting for that answer, say so instead of sitting on "Checking…" forever.
+    func install(from file: URL) { install(from: [file]) }
+
+    func install(from files: [URL]) {
+        let files = files.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        guard let first = files.first else { return }
+        onProgress?("Setting up Wizard OS from \(files.count == 1 ? first.lastPathComponent : "\(files.count) files")…", nil)
+        do {
+            // Reject insufficient capacity before creating staging or touching the current OS.
+            try Self.checkFreeSpace(install: 0)
+            try startTar()
+        } catch { onDone?(error); return }
+        let started = NSLock(); var reading = false
+        let volume = (try? first.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "that drive"
+        let onBootVolume = (try? first.resourceValues(forKeys: [.volumeIsRootFileSystemKey]).volumeIsRootFileSystem) ?? true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.permissionWait) { [weak self] in
+            started.lock(); let r = reading; started.unlock()
+            guard !r, let self else { return }
+            self.onProgress?(Self.permissionMessage(volume: volume, external: !onBootVolume), nil)
         }
+        DispatchQueue.global(qos: .userInitiated).async {
+            var failure: Error?
+            var done: Int64 = 0
+            let total = files.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+            var last = Date.distantPast
+            for file in files where failure == nil {
+                do {
+                    let h = try FileHandle(forReadingFrom: file)   // blocks here while macOS asks for drive access
+                    defer { try? h.close() }
+                    started.lock(); reading = true; started.unlock()
+                    while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty {
+                        try self.tarIn?.write(contentsOf: chunk)
+                        done += Int64(chunk.count)
+                        if total > 0, Date().timeIntervalSince(last) > 0.25 {
+                            last = Date()
+                            let frac = Double(done) / Double(total), mb = Double(done) / 1_048_576, all = Double(total) / 1_048_576
+                            DispatchQueue.main.async {
+                                self.onProgress?(String(format: "Unpacking Wizard OS… %.0f of %.0f MB", mb, all), frac)
+                            }
+                        }
+                    }
+                } catch {
+                    failure = Self.error("Couldn't read \(file.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            self.completeTar(error: failure, expectedDigest: nil)
+        }
+    }
+
+    static var permissionWait: TimeInterval {
+        let v = UserDefaults.standard.double(forKey: "permissionWaitSeconds"); return v > 0 ? v : 8
+    }
+
+    static func permissionMessage(volume: String, external: Bool) -> String {
+        external
+            ? "Waiting for macOS to let Wizard read files on “\(volume)”. Click Allow if macOS asks, or turn on Wizard in System Settings › Privacy & Security › Files and Folders › Removable Volumes. You can also move the file into your Downloads folder and choose it again."
+            : "Waiting for macOS to let Wizard read this file. Click Allow if macOS asks, or move the file into your Downloads folder and choose it again."
     }
 
     func install() {
@@ -95,7 +150,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
             DispatchQueue.main.async {
                 guard let data, (resp as? HTTPURLResponse)?.statusCode == 200,
                       let feed = try? JSONDecoder().decode(Feed.self, from: data),
-                      let url = URL(string: feed.url, relativeTo: Store.osFeedURL) else {
+                      let list = Self.downloadList(feed) else {
                     self.onDone?(err ?? Self.error("Couldn't reach the Wizard OS download. Check your connection and try again.")); return
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
@@ -103,8 +158,10 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                     try Self.checkFreeSpace(install: feed.installBytes ?? (11 << 30))
                     try self.startTar()
                 } catch { self.onDone?(error); return }
+                self.partURLs = list; self.partIndex = 0; self.partHasher = SHA256()
+                self.feedBytes = feed.bytes ?? 0; self.expected = self.feedBytes
                 self.onProgress?("Downloading Wizard OS \(feed.version)…", 0)
-                self.session.dataTask(with: url).resume()
+                self.session.dataTask(with: list[0].url).resume()
             }
         }.resume()
     }
@@ -121,18 +178,30 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         hasher = SHA256(); received = 0; expected = 0; failure = nil
     }
 
+    /// One archive, or its parts in order. Part hashes are checked one by one, the whole archive at the end.
+    static func downloadList(_ feed: Feed) -> [(url: URL, sha: String)]? {
+        if let parts = feed.parts, !parts.isEmpty {
+            let list = parts.compactMap { p in URL(string: p.url, relativeTo: Store.osFeedURL).map { ($0, p.sha256.lowercased()) } }
+            return list.count == parts.count ? list : nil
+        }
+        guard let u = feed.url, let url = URL(string: u, relativeTo: Store.osFeedURL) else { return nil }
+        return [(url, "")]
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             failure = Self.error("Download failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
             completionHandler(.cancel); return
         }
-        expected = response.expectedContentLength
+        // One archive: its length is the total. Parts: the feed's total, or (without one) the sum seen so far.
+        if partURLs.count <= 1 { expected = response.expectedContentLength }
+        else if feedBytes <= 0 { expected += max(response.expectedContentLength, 0) }
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        hasher.update(data: data)
+        hasher.update(data: data); partHasher.update(data: data)
         do { try tarIn?.write(contentsOf: data) } catch {
             failure = Self.error("Unpacking Wizard OS failed. Please try again."); dataTask.cancel(); return
         }
@@ -147,13 +216,31 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard task is URLSessionDataTask, let p = tar else { return }   // the feed request has its own handler
+        guard task is URLSessionDataTask, tar != nil else { return }   // the feed request has its own handler
+        if failure == nil, error == nil, partURLs.count > 1 {
+            let want = partURLs[partIndex].sha
+            let got = partHasher.finalize().map { String(format: "%02x", $0) }.joined()
+            if got != want { failure = Self.error("Part \(partIndex + 1) of the Wizard OS download was corrupted. Please try again.") }
+            else if partIndex + 1 < partURLs.count {
+                partIndex += 1; partHasher = SHA256()
+                session.dataTask(with: partURLs[partIndex].url).resume()
+                return
+            }
+        }
+        completeTar(error: failure ?? error, expectedDigest: expectedSHA)
+    }
+
+    /// Close tar's input and finish: check tar, the whole-archive hash (downloads), then move the OS into place.
+    private func completeTar(error: Error?, expectedDigest: String?) {
+        guard let p = tar else { return }
         try? tarIn?.close(); tarIn = nil
         p.waitUntilExit(); tar = nil
         let tarText = String(data: tarErr?.fileHandleForReading.readDataToEndOfFile() ?? Data(), encoding: .utf8) ?? ""
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        var result: Error? = failure ?? error
-        if result == nil && digest != expectedSHA { result = Self.error("The Wizard OS download was corrupted. Please try again.") }
+        var result: Error? = error
+        if result == nil, let want = expectedDigest {
+            let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            if digest != want { result = Self.error("The Wizard OS download was corrupted. Please try again.") }
+        }
         if result == nil && p.terminationStatus != 0 { result = Self.error("Unpacking Wizard OS failed: \(tarText.suffix(200))") }
         if let result {
             try? FileManager.default.removeItem(at: Self.staging)
@@ -573,12 +660,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     @objc func chooseOSFile() {
         let panel = NSOpenPanel()
-        panel.message = "Choose the wizard-os-….tar.xz file you downloaded"
-        panel.allowedContentTypes = []; panel.allowsOtherFileTypes = true
+        panel.message = "Choose the wizard-os-….tar.xz file you downloaded (select every part if it came in parts)"
+        panel.allowedContentTypes = []; panel.allowsOtherFileTypes = true; panel.allowsMultipleSelection = true
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        guard panel.runModal() == .OK, let file = panel.url else { return }
-        showOverlay("Setting up Wizard on this Mac", "Checking \(file.lastPathComponent)…", progress: nil)
-        installer.install(from: file)
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        showOverlay("Setting up Wizard on this Mac", "Checking \(panel.urls.count == 1 ? panel.urls[0].lastPathComponent : "\(panel.urls.count) files")…", progress: nil)
+        installer.install(from: panel.urls)
     }
 
     func connectLocal() {
@@ -776,8 +863,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set("http://127.0.0.1:9/none.json", forKey: "osFeedURL"); addThisMac()
         case "install-file":
             // Same path as "Choose Wizard OS File…" after the user picks a file.
-            controller.showOverlay("Setting up Wizard on this Mac", "Checking \(URL(fileURLWithPath: arg).lastPathComponent)…", progress: nil)
-            controller.installer.install(from: URL(fileURLWithPath: arg))
+            // Several files (parts) are separated by "|".
+            let urls = arg.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
+            controller.showOverlay("Setting up Wizard on this Mac", "Checking \(urls.first?.lastPathComponent ?? "")…", progress: nil)
+            controller.installer.install(from: urls)
         case "connect":
             var list = Store.backends.filter { $0.url != arg }
             list.append(Backend(kind: .remote, name: URL(string: arg)?.host ?? arg, url: arg))
