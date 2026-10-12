@@ -57,13 +57,16 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
 
     static var staging: URL { WizardShared.supportDir.appendingPathComponent("os-staging", isDirectory: true) }
 
-    /// Free space check before a multi-GB download. The download streams straight into tar, so only the unpacked
-    /// disk (its used blocks; the rest is holes) has to fit.
+    /// macOS extraction can allocate more than the Linux factory disk's used blocks.
+    /// Full-stack QA needs at least 16 GiB available for staging and recovery.
     static func checkFreeSpace(install: Int64) throws {
-        let need = install + (1 << 30)
-        let values = try? WizardShared.supportDir.deletingLastPathComponent()
+        let need = max(install + (1 << 30), 16 << 30)
+        let values = try WizardShared.supportDir.deletingLastPathComponent()
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        guard let free = values?.volumeAvailableCapacityForImportantUsage, free < need else { return }
+        guard let free = values.volumeAvailableCapacityForImportantUsage else {
+            throw error("Couldn't check free disk space for Wizard OS. Try again before installing.")
+        }
+        guard free < need else { return }
         throw error(String(format: "Wizard OS needs about %.0f GB of free space on this Mac (%.0f GB free now). Free up some space and try again.",
                            Double(need) / 1e9, Double(free) / 1e9))
     }
@@ -73,6 +76,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         onProgress?("Setting up Wizard OS from \(file.lastPathComponent)…", nil)
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result {
+                // Reject insufficient capacity before creating staging or touching the current OS.
+                try Self.checkFreeSpace(install: 0)
                 let staging = try Self.freshStaging()
                 try Self.run("/usr/bin/tar", ["-xJf", file.path, "-C", staging.path])
                 try Self.finish(staging)

@@ -1,4 +1,4 @@
-# Recovered Wizard for Mac 0.2.2 candidate acceptance
+# Try Wizard 0.2.2 candidate acceptance
 
 **Candidate only: draft PR, no merge/publish/download-page/live cutover.**
 
@@ -9,13 +9,15 @@ All paths below are on Thales under
 
 | Artifact | Path | Bytes | SHA-256 |
 | --- | --- | ---: | --- |
-| Mac app | `src/next/mac/dist/Wizard-0.2.2.dmg` | 1932064 | `fdeacaf6eef36289fc4cc2d41b5ff6948fdd2351f7d7f28aa4479cb27f13e8be` |
+| Mac app | `src/next/mac/dist/Wizard-0.2.2.dmg` | 1932043 | `5134a9079b13b84251ebd3b790f513fc80548da9e0bbe2496878bee7813deca4` |
 | Corrected guest | `out/wizard-os-0.2.0.tar.xz` | 2878433116 | `662d517880633fd5af8c0c4f7f1c8743ec81b048fe351f889968ecdf8dd6ef36` |
 
 Archive implementation source and manifest `sourceCommit`:
 `63e1cf67c7627e7677a8f27ec80f48ad2c4d172f`. Later commits change tests/docs only.
-The existing DMG was retained; Mac Swift source is unchanged from the recovered
-`a1f77f9` checkpoint. App replacement from that DMG passed deep/strict codesign.
+The parent rebuilt the DMG as build 2 after adding the production capacity guard.
+Deep/strict codesign passed. Previous app-replacement/lifecycle checks apply to
+build 1; no new full install is claimed for build 2 because internal storage
+is below the required floor.
 The factory image was reused, with an APFS clone preserved as
 `work/build-before-recovered.img`. The corrected `wizard-media` was installed into
 the **offline factory disk**, read back byte-for-byte, then repacked. The old
@@ -89,12 +91,16 @@ exhausted internal storage during extraction (`No space left on device`); it did
 repeat was stopped, its task-owned incomplete `os-staging` (8305737728 allocated
 bytes) removed, and the prior guest returned to health; no prior disk/checkpoint
 was deleted. Internal free space returned to 7.9 GiB. Both QA scripts now reject
-less than 16 GiB before mutation. Production file-install lacks a free-space
-preflight, and the stream guard uses Linux allocated bytes, not a proven Mac
-extraction floor. No fully green final repeated-update result is claimed.
+less than 16 GiB before mutation. The parent added a production file-install preflight before staging and raised
+the download preflight to a 16-GiB minimum, with fail-closed capacity lookup.
+The production installer regression ran on Thales using its real low-space
+volume: `PRODUCTION_FILE_INSTALL_CAPACITY_OK`, 7612145664 bytes free, no disk or
+staging mutation. Evidence: `evidence/parent-capacity/qa-capacity.log`; script
+`next/mac/qa-capacity.sh` compiles the actual production installer. The app
+rebuild emitted `BUILD_OK`. A fresh sufficient-capacity repeat remains unverified. No fully green final repeated-update result is claimed.
 After recovery, exact chats/apps/onboarding and disk identity matched the saved
 state and the native window loaded (`AFTER_ENOSPC_DISK_STATE_WINDOW_RECOVERY_OK`).
-Both final guards were executed and rejected 8448270336 free bytes before mutation
+Both QA guards were executed and rejected 8448270336 free bytes before mutation
 (`CAPACITY_GUARDS_VERIFIED`). No repeated heavy job remains queued by this lane.
 
 ## Blockers and deferred gates
@@ -107,6 +113,7 @@ Both final guards were executed and rejected 8448270336 free bytes before mutati
   no split implementation or stable promotion in this branch.
 - Archive exceeds GitHub's 2 GiB per-asset limit. Distribution needs an approved
   alternative; current feed/release assets are not validated for this candidate.
+- External-volume file installation remains unverified after its stalled attempt.
 - **External published-artifact acceptance remains deferred until approval.**
   No assets were published and old `qa-e2e-published.sh` was not run against a live
   release. Physical keyboard/clipboard, human OAuth, teammate download acceptance,
