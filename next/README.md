@@ -48,12 +48,16 @@ Measured on Thales (M-series Mac mini, macOS 26); these supersede the earlier
 | Fresh download → onboarding window | 126.4 s on the tested local feed |
 | Fresh launch → first chat reply | 174.9 s, including scripted onboarding |
 
-Plan for **at least 12 GB free** for the streamed download installation, plus room
+Reserve **at least 16 GiB free** for installation/update extraction, plus room
 for future app/file growth. Downloading an archive separately also consumes its
-approximately 2.9 GB; allow at least **15 GB free** for the file-install route.
+approximately 2.9 GB; reserve that in addition (roughly **19 GiB total**).
 The download path streams to tar rather than holding a second compressed copy;
-its guard uses the manifest's allocated install bytes plus 1 GiB. The file route
-does not currently perform that preflight. Updates temporarily unpack a new factory
+its guard uses the manifest's allocated install bytes plus 1 GiB. That estimate
+is not a proven Mac capacity floor; the file route lacks a production preflight.
+A repeated QA update exhausted internal storage while retained QA disks coexisted
+with extraction; staging was removed and the original QA guest recovered. The QA
+scripts now require 16 GiB free, but production low-space handling remains a
+candidate limitation. Updates temporarily unpack a new factory
 disk even when retaining the existing disk, so need comparable free headroom.
 
 ## Updates and acceptance boundaries

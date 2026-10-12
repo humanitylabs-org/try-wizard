@@ -6,6 +6,15 @@ OS=${1:?wizard-os tar.xz}; EV=${2:-$HOME/wizard-qa/update}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 AS="$HOME/Library/Application Support/Wizard"; APP="$HOME/Applications/WizardNext/Wizard.app"
 mkdir -p "$EV"; exec > >(tee "$EV/qa-update.log") 2>&1
+# Retained QA disks/checkpoints coexist with the incoming factory extraction.
+# Reject low headroom before launching tar; do not consume the host's last bytes.
+python3 - "$AS" <<'PY'
+import shutil,sys
+free=shutil.disk_usage(sys.argv[1]).free
+need=16 << 30
+if free < need:
+    raise SystemExit(f'QA_UPDATE_BLOCKED_CAPACITY: {free} bytes free; require {need} bytes')
+PY
 U=http://127.0.0.1:47823
 snapshot() {
   python3 - "$U" <<'PY'

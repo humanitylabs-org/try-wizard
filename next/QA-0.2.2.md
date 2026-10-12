@@ -81,6 +81,22 @@ and full-stack resource requirements are documented in `README.md`.
   `/Users/thales/Library/Application Support/Wizard-recovered-offline-1791810135`.
 - Prior QA app retained in `evidence/recovered/Wizard-before.app`.
 
+## Final repeated-update capacity failure
+
+After `RECOVERED_QA_ALL_OK`, a repeat intended to exercise automatic QA-hook reload
+exhausted internal storage during extraction (`No space left on device`); it did
+**not** pass. Retained QA disks/checkpoints and new extraction coexisted. The
+repeat was stopped, its task-owned incomplete `os-staging` (8305737728 allocated
+bytes) removed, and the prior guest returned to health; no prior disk/checkpoint
+was deleted. Internal free space returned to 7.9 GiB. Both QA scripts now reject
+less than 16 GiB before mutation. Production file-install lacks a free-space
+preflight, and the stream guard uses Linux allocated bytes, not a proven Mac
+extraction floor. No fully green final repeated-update result is claimed.
+After recovery, exact chats/apps/onboarding and disk identity matched the saved
+state and the native window loaded (`AFTER_ENOSPC_DISK_STATE_WINDOW_RECOVERY_OK`).
+Both final guards were executed and rejected 8448270336 free bytes before mutation
+(`CAPACITY_GUARDS_VERIFIED`). No repeated heavy job remains queued by this lane.
+
 ## Blockers and deferred gates
 
 - **Blocking app-agent integration:** fresh Hermes does not see installed app MCP

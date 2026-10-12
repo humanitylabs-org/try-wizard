@@ -7,6 +7,12 @@ OS=${1:?archive}; EV=${2:?evidence dir}; HERE="$(cd "$(dirname "$0")" && pwd)"
 AS="$HOME/Library/Application Support/Wizard"; APP="$HOME/Applications/WizardNext/Wizard.app"
 SAVED="$AS-recovered-saved-$(date +%s)"; RETAINED="$AS-recovered-offline-$(date +%s)"
 mkdir -p "$EV"; exec > >(tee "$EV/qa-offline-install.log") 2>&1
+python3 - "$AS" <<'PY'
+import shutil,sys
+free=shutil.disk_usage(sys.argv[1]).free
+if free < 16 << 30:
+    raise SystemExit(f'QA_OFFLINE_BLOCKED_CAPACITY: {free} bytes free; require 16 GiB')
+PY
 stop_qa() {
   python3 - "$APP" <<'PY'
 import os,signal,subprocess,sys,time
