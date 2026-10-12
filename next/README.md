@@ -1,4 +1,4 @@
-# Wizard for Mac 0.2.2 candidate
+# Try Wizard 0.2.3 candidate (Wizard for Mac)
 
 This is an **unreleased, bundled baseline candidate**, not a stable promotion. The
 separate shell/service split (PR #24, Proposed) has another owner; this branch does
@@ -20,8 +20,8 @@ not implement it or change the App installation lane.
   databases, onboarding, credentials and chats stay on the guest disk.
 
 On first launch choose **On this Mac**, then the files folder. The app downloads
-and hashes an OS archive, or offers **Get Wizard OS → Choose Downloaded File…** if
-its private feed cannot be reached. **On another computer** connects to an existing
+and hashes the OS archive, or offers **Get Wizard OS → Choose Downloaded File…** if
+its feed cannot be reached. **On another computer** connects to an existing
 Wizard URL without installing a VM. Do not point acceptance tests at a production
 agent. Free onboarding uses an anonymous Nous starter identity and `nous/welcome`,
 not the owner's subscription; no API key is embedded in the image.
@@ -37,8 +37,8 @@ Measured on Thales (M-series Mac mini, macOS 26); these supersede the earlier
 
 | Item | Full 0.2 stack candidate |
 | --- | --- |
-| App DMG | 1,932,064 bytes (ad-hoc signed; not notarized) |
-| OS download | Approximately 2.9 GB compressed |
+| App DMG | about 1.9 MB (ad-hoc signed; not notarized) |
+| OS download | 2,878,433,116 bytes, published as two parts (1.99 GB + 0.89 GB) |
 | Unpacked factory disk | Approximately 13.2 GB logical, 10.3 GB allocated including boot files |
 | Installed disk | 64 GiB sparse maximum; actual allocation grows with use |
 | VM allocation | 4 vCPUs, **6 GiB RAM** |
@@ -51,14 +51,29 @@ Measured on Thales (M-series Mac mini, macOS 26); these supersede the earlier
 Reserve **at least 16 GiB free** for installation/update extraction, plus room
 for future app/file growth. Downloading an archive separately also consumes its
 approximately 2.9 GB; reserve that in addition (roughly **19 GiB total**).
-The download path streams to tar rather than holding a second compressed copy;
-its guard uses the manifest's allocated install bytes plus 1 GiB. That estimate
-is not a proven Mac capacity floor; the file route lacks a production preflight.
-A repeated QA update exhausted internal storage while retained QA disks coexisted
-with extraction; staging was removed and the original QA guest recovered. The QA
-scripts now require 16 GiB free, but production low-space handling remains a
-candidate limitation. Updates temporarily unpack a new factory
-disk even when retaining the existing disk, so need comparable free headroom.
+Both install routes stream into tar rather than holding a second compressed copy,
+and both refuse to start with less than 16 GiB free (or the manifest's install
+bytes plus 1 GiB, whichever is larger), before anything is staged. A leftover
+staging folder from an interrupted install is removed before that check. Updates
+temporarily unpack a new factory disk even when retaining the existing disk, so
+they need the same headroom.
+
+## Distribution: parts under GitHub's 2 GiB limit
+
+`guest/split-release.sh <archive> <out dir>` cuts the archive into ordered
+`….tar.xz.partNN` files under 2 GiB and writes `latest.json` listing each part's
+size and SHA-256 plus the whole archive's SHA-256. The app downloads the parts in
+order into one tar stream, checks each part's hash as it ends and the whole hash at
+the end, so the result is identical to the single archive. Upload every part and
+`latest.json` to one release (or any static host) and point the feed at it.
+
+People who download by hand select **every part at once** in Choose Downloaded
+File…; the app sorts them, refuses a mix of a full archive and parts, a missing part,
+or parts from two downloads, and streams them in. The app reads the files itself, so
+a file on an external drive asks macOS's **Removable Volumes** permission for the
+app; while macOS holds that read the window says so and how to allow it (network
+drives name **Network Volumes**). Nothing on the current Wizard changes until the
+new image has unpacked and checked.
 
 ## Updates and acceptance boundaries
 
@@ -70,16 +85,15 @@ A different-stack disk is kept as `disk-previous.img` instead; this is not a tes
 0.1→0.2 state migration. The corrected media permissions are verified on a fresh
 install of the final archive, not inferred from an older hotpatched test VM.
 
-The recovered acceptance scripts require explicit success markers, verify disk
-identity and state, and isolate offline QA by saving/restoring the prior support
-folder and preferences. Same-stack QA explicitly reloads after the installer move:
-`install-file` is a QA hook with no setup callback for an already installed guest,
-not evidence of a complete user-facing OS-update workflow. Direct file installation
-from the external ThalesMedia volume stalled in macOS `open()` before extraction;
-QA used a SHA-verified identical copy in the user's internal cache. External-volume
-file-picker/permission acceptance remains unverified. `qa-fresh.sh` is still destructive: use only after backing
-up an isolated QA environment. Existing Thales pre-candidate state is retained at
-`/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`.
+The acceptance scripts require explicit success markers, verify disk identity and
+state, and isolate offline QA by saving/restoring the prior support folder and
+preferences. Same-stack QA explicitly reloads after the installer move: `install-file`
+is a QA hook with no setup callback for an already installed guest, not evidence of a
+complete user-facing OS-update workflow. `qa-fresh.sh` (env `FEED_URL` / `FEED_DIR`),
+`qa-file-parts.sh` and `qa-capacity.sh` are destructive to the local QA Wizard: back it
+up first. Thales QA state is retained under
+`/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`
+and `…/backup-qa-checkpoints-20261012`. See `QA-0.2.3.md` for what ran.
 
 **Known blocker:** the fresh Hermes agent does not have the installed apps' MCP
 tools, and the gateway bridge cannot fetch their MCP URLs. WAM doctor and app
@@ -88,12 +102,10 @@ App installation lane must resolve this; no WAM/service or parked per-app PR #15
 changes are included here. Previous isolated Nous welcome onboarding/first-chat
 QA is evidence; no additional paid/live model run is required for packaging QA.
 
-The external **published-artifact acceptance gate remains deferred until approval**.
-No assets, download page, release, merge or live cutover are authorized by this
-candidate. The approximately 2.9 GB archive also exceeds GitHub's 2 GiB per-asset
-limit: distribution needs an approved alternative before it is shareable. Physical
-keyboard/clipboard behavior, human OAuth and teammate release-download acceptance
-are not established by these headless checks.
+Not done here: notarization (needs the Apple Developer account), publishing the
+parts to a release (needs James's go-ahead; the private repo's releases would also
+need a token or a public host for strangers), physical keyboard/clipboard and human
+OAuth, and 0.1→0.2 state migration.
 
 ## Build
 
@@ -104,7 +116,8 @@ export W="$PWD/out/wizard-os-build"
 # export WIZARD_BUILD_ENV=/path/to/your/docker-env.sh
 # export COLIMA_PROFILE=wb
 bash next/guest/build-image.sh           # base → provision → pack
-bash next/mac/build.sh                   # Wizard.app, Wizard-0.2.2.dmg
+bash next/mac/build.sh                   # Wizard.app, Wizard-0.2.3.dmg
+bash next/guest/split-release.sh out/wizard-os-0.2.0.tar.xz out/feed   # parts + latest.json
 # If building from a source export without .git, set BUILD_SOURCE_SHA explicitly.
 ```
 
@@ -131,6 +144,9 @@ plane. The measured timings are observations, not promises on another machine.
 | `guest/overlay/` | Guest services, media mount, onboarding and setup |
 | `mac/qa-update.sh` | Same-stack archive update with strict disk/state assertions |
 | `mac/qa-offline-install.sh` | Opt-in, saved/restored file-install and local-remote QA |
+| `guest/split-release.sh` | Parts under 2 GiB + `latest.json` feed |
+| `mac/qa-file-parts.sh` | Parts file install: missing part refused, external-drive permission notice, internal install |
+| `mac/qa-capacity.sh` | Low-space refusal by the real installer, no state touched |
 | `mac/qa-lifecycle.sh`, `mac/qa-guest-checks.sh` | Lifecycle, memory, WAM and guest checks |
 
 The always-on roadmap remains in

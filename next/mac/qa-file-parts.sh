@@ -25,6 +25,7 @@ fresh_app() {
   /tmp/wizard-qa-post "files-folder $HOME/Wizard"; sleep 6
   echo "start: $(st)"
 }
+stop; rm -rf "$AS/os" "$AS/os-staging"   # this QA replaces the local QA Wizard OS; back it up first
 python3 - "$AS" <<'PY' || exit 1
 import shutil,sys,os
 os.makedirs(sys.argv[1],exist_ok=True)
@@ -37,6 +38,15 @@ echo "== install app from $DMG"
 MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
 stop; rm -rf "$APP"; mkdir -p "$(dirname "$APP")"; ditto "$MNT/Wizard.app" "$APP"; hdiutil detach -quiet "$MNT"
 codesign --verify --deep --strict "$APP" && echo "codesign ok $(defaults read "$APP/Contents/Info" CFBundleShortVersionString)"
+
+echo "== phase 0: a missing part is refused before anything is staged"
+fresh_app
+/tmp/wizard-qa-post "install-file $P1"
+for i in $(seq 1 20); do s=$(st); case "$s" in *"Part 00 is missing"*) break;; esac; sleep 0.5; done
+echo "missing part: $s"
+case "$s" in *"Part 00 is missing"*) ;; *) echo "FAIL: missing part not refused"; exit 1;; esac
+[ -e "$AS/os-staging" ] && { echo "FAIL: staging created for a refused selection"; exit 1; }
+echo "MISSING_PART_REFUSED_OK"
 
 echo "== phase 1: parts on $(df "$EXT" | tail -1 | awk '{print $NF}')"
 fresh_app

@@ -63,8 +63,9 @@ seen=""
 while :; do
   s=$(state); [ "$s" != "$seen" ] && { echo "$(since $T0)s $s"; seen="$s"; }
   case "$s" in *"Setting up"*) [ -f "$EV/2-download.png" ] || snap 2-download;; esac
+  [ $(( ${PROG_N:=0} % 60 )) = 0 ] && python3 -c "import json;print('   progress:', json.load(open('/tmp/wizard-qa-state.json')).get('subtitle',''))" 2>/dev/null; PROG_N=$((PROG_N+1))
   case "$s" in True*) break;; *"didn"*|*"Get Wizard OS"*|*"Couldn"*) echo "FAIL: $s"; exit 1;; esac
-  python3 -c "import time,sys;sys.exit(0 if time.time()-$T0<900 else 1)" || { echo "FAIL: timeout"; exit 1; }
+  python3 -c "import time,sys;sys.exit(0 if time.time()-$T0<${QA_TIMEOUT:-900} else 1)" || { echo "FAIL: timeout"; exit 1; }
   sleep 0.5
 done
 T_WINDOW=$(since $T0); echo "onboarding_in_window_s=$T_WINDOW"

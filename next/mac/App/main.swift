@@ -64,6 +64,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var partIndex = 0
     private var partHasher = SHA256()
     private var feedBytes: Int64 = 0
+    /// Set while an install runs; cleared just before onDone fires.
+    private(set) var busy = false
 
     static var staging: URL { WizardShared.supportDir.appendingPathComponent("os-staging", isDirectory: true) }
 
@@ -88,34 +90,47 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     func install(from file: URL) { install(from: [file]) }
 
     func install(from files: [URL]) {
+        // One install at a time: the download and file paths share tar and the staging folder.
+        guard !busy else { onProgress?("Wizard OS is already being set up…", nil); return }
         let files = files.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         guard let first = files.first else { return }
+        if let problem = Self.partsProblem(files) { onDone?(Self.error(problem)); return }
         onProgress?("Setting up Wizard OS from \(files.count == 1 ? first.lastPathComponent : "\(files.count) files")…", nil)
         do {
+            try? FileManager.default.removeItem(at: Self.staging)   // a crashed earlier install mustn't eat the space check
             // Reject insufficient capacity before creating staging or touching the current OS.
             try Self.checkFreeSpace(install: 0)
             try startTar()
         } catch { onDone?(error); return }
-        let started = NSLock(); var reading = false
-        let volume = (try? first.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "that drive"
-        let onBootVolume = (try? first.resourceValues(forKeys: [.volumeIsRootFileSystemKey]).volumeIsRootFileSystem) ?? true
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.permissionWait) { [weak self] in
-            started.lock(); let r = reading; started.unlock()
-            guard !r, let self else { return }
-            self.onProgress?(Self.permissionMessage(volume: volume, external: !onBootVolume), nil)
-        }
+        busy = true
+        // The read state decides whether the permission notice may show: only while still waiting to open the file.
+        enum ReadState { case waiting, reading, finished }
+        let lock = NSLock(); var state = ReadState.waiting
+        func set(_ s: ReadState) { lock.lock(); state = s; lock.unlock() }
         DispatchQueue.global(qos: .userInitiated).async {
+            let where_ = Self.locationKind(first)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.permissionWait) { [self] in
+                lock.lock(); let st = state; lock.unlock()
+                guard st == .waiting else { return }
+                self.onProgress?(Self.permissionMessage(volume: where_.name, kind: where_.kind), nil)
+            }
             var failure: Error?
             var done: Int64 = 0
             let total = files.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
             var last = Date.distantPast
             for file in files where failure == nil {
+                let h: FileHandle
+                do { h = try FileHandle(forReadingFrom: file) }   // blocks here while macOS asks for drive access
+                catch {
+                    failure = Self.error("Couldn't read \(file.lastPathComponent): \(error.localizedDescription)")
+                    break
+                }
+                set(.reading)
+                defer { try? h.close() }
                 do {
-                    let h = try FileHandle(forReadingFrom: file)   // blocks here while macOS asks for drive access
-                    defer { try? h.close() }
-                    started.lock(); reading = true; started.unlock()
                     while let chunk = try h.read(upToCount: 8 << 20), !chunk.isEmpty {
-                        try self.tarIn?.write(contentsOf: chunk)
+                        do { try self.tarIn?.write(contentsOf: chunk) }
+                        catch { break }   // tar stopped early: let completeTar report tar's own error
                         done += Int64(chunk.count)
                         if total > 0, Date().timeIntervalSince(last) > 0.25 {
                             last = Date()
@@ -129,21 +144,59 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                     failure = Self.error("Couldn't read \(file.lastPathComponent): \(error.localizedDescription)")
                 }
             }
+            set(.finished)
             self.completeTar(error: failure, expectedDigest: nil)
         }
+    }
+
+    /// Selected files must be one archive, or the ordered parts of one archive (name.part00, name.part01, … with no
+    /// gaps). A lone part other than part00 is a missing part too.
+    static func partsProblem(_ files: [URL]) -> String? {
+        let partRE = #"\.part[0-9]{2}$"#
+        guard files.count > 1 || files.contains(where: { $0.lastPathComponent.range(of: partRE, options: .regularExpression) != nil })
+        else { return nil }
+        var prefix: String?
+        for (i, f) in files.enumerated() {
+            let name = f.lastPathComponent
+            guard let r = name.range(of: partRE, options: .regularExpression) else {
+                return "Choose either one wizard-os-….tar.xz file, or every part of it (….part00, ….part01, …), not a mix."
+            }
+            let base = String(name[..<r.lowerBound]), num = Int(name[r].dropFirst(5)) ?? -1
+            if prefix == nil { prefix = base }
+            guard base == prefix else { return "Those parts come from different Wizard OS downloads. Choose the parts of one download." }
+            guard num == i else { return "Part \(String(format: "%02d", i)) is missing. Choose every part of the download." }
+        }
+        return nil
+    }
+
+    enum LocationKind { case internalDisk, removable, network }
+    static func locationKind(_ url: URL) -> (name: String, kind: LocationKind) {
+        let v = try? url.resourceValues(forKeys: [.volumeNameKey, .volumeIsInternalKey, .volumeIsLocalKey,
+                                                  .volumeIsRemovableKey, .volumeIsEjectableKey])
+        let name = v?.volumeName ?? "that drive"
+        if v?.volumeIsLocal == false { return (name, .network) }
+        if v?.volumeIsInternal == false || v?.volumeIsRemovable == true || v?.volumeIsEjectable == true { return (name, .removable) }
+        return (name, .internalDisk)
     }
 
     static var permissionWait: TimeInterval {
         let v = UserDefaults.standard.double(forKey: "permissionWaitSeconds"); return v > 0 ? v : 8
     }
 
-    static func permissionMessage(volume: String, external: Bool) -> String {
-        external
-            ? "Waiting for macOS to let Wizard read files on “\(volume)”. Click Allow if macOS asks, or turn on Wizard in System Settings › Privacy & Security › Files and Folders › Removable Volumes. You can also move the file into your Downloads folder and choose it again."
-            : "Waiting for macOS to let Wizard read this file. Click Allow if macOS asks, or move the file into your Downloads folder and choose it again."
+    static func permissionMessage(volume: String, kind: LocationKind) -> String {
+        switch kind {
+        case .removable:
+            return "Waiting for macOS to let Wizard read files on “\(volume)”. Click Allow if macOS asks, or turn on Wizard in System Settings › Privacy & Security › Files and Folders › Removable Volumes. You can also move the file into your Downloads folder and choose it again."
+        case .network:
+            return "Waiting for macOS to let Wizard read files on “\(volume)”. Click Allow if macOS asks, or turn on Wizard in System Settings › Privacy & Security › Files and Folders › Network Volumes. You can also copy the file into your Downloads folder and choose it again."
+        case .internalDisk:
+            return "Waiting for macOS to let Wizard read this file. Click Allow if macOS asks, or move the file into your Downloads folder and choose it again."
+        }
     }
 
     func install() {
+        guard !busy else { onProgress?("Wizard OS is already being set up…", nil); return }
+        busy = true   // held from here: the feed request can take seconds and must not race a file install
         onProgress?("Finding the latest Wizard OS…", nil)
         var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
         session.dataTask(with: req) { data, resp, err in
@@ -151,15 +204,18 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 guard let data, (resp as? HTTPURLResponse)?.statusCode == 200,
                       let feed = try? JSONDecoder().decode(Feed.self, from: data),
                       let list = Self.downloadList(feed) else {
+                    self.busy = false
                     self.onDone?(err ?? Self.error("Couldn't reach the Wizard OS download. Check your connection and try again.")); return
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
                 do {
+                    try? FileManager.default.removeItem(at: Self.staging)
                     try Self.checkFreeSpace(install: feed.installBytes ?? (11 << 30))
                     try self.startTar()
-                } catch { self.onDone?(error); return }
+                } catch { self.busy = false; self.onDone?(error); return }
                 self.partURLs = list; self.partIndex = 0; self.partHasher = SHA256()
-                self.feedBytes = feed.bytes ?? 0; self.expected = self.feedBytes
+                let partSum = (feed.parts ?? []).reduce(Int64(0)) { $0 + ($1.bytes ?? 0) }
+                self.feedBytes = feed.bytes ?? partSum; self.expected = self.feedBytes
                 self.onProgress?("Downloading Wizard OS \(feed.version)…", 0)
                 self.session.dataTask(with: list[0].url).resume()
             }
@@ -173,7 +229,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         p.arguments = ["-xJf", "-", "-C", staging.path]
         let input = Pipe(), err = Pipe()
         p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = err
-        try p.run()
+        do { try p.run() } catch { try? FileManager.default.removeItem(at: staging); throw error }
         tar = p; tarIn = input.fileHandleForWriting; tarErr = err
         hasher = SHA256(); received = 0; expected = 0; failure = nil
     }
@@ -244,13 +300,14 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         if result == nil && p.terminationStatus != 0 { result = Self.error("Unpacking Wizard OS failed: \(tarText.suffix(200))") }
         if let result {
             try? FileManager.default.removeItem(at: Self.staging)
-            DispatchQueue.main.async { self.onDone?(result) }
+            DispatchQueue.main.async { self.busy = false; self.onDone?(result) }
             return
         }
         DispatchQueue.main.async { self.onProgress?("Setting up Wizard OS on this Mac…", nil) }
         DispatchQueue.global(qos: .userInitiated).async {
             let r = Result { try Self.finish(Self.staging) }
             DispatchQueue.main.async {
+                self.busy = false
                 if case .failure(let e) = r { self.onDone?(e) } else { self.onDone?(nil) }
             }
         }
