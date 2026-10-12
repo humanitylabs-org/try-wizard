@@ -137,10 +137,35 @@ def shared_vm_terminal(c, rt) -> None:
 
 
 def write_status(**kw) -> None:
+    STATUS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATUS.with_name(f".{STATUS.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"app": VOICE, "updated": int(time.time()), **kw}))
+    tmp.replace(STATUS)
+
+
+def voice_health(data: Path) -> dict:
+    """Installed/running is not model readiness; verify both public engine contracts."""
     try:
-        STATUS.write_text(json.dumps({"app": VOICE, "updated": int(time.time()), **kw}))
-    except OSError:
-        pass
+        cid = engine_container(VOICE)
+        ip = docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", cid).stdout.split()[0]
+        origin = f"http://{ip}:8000"
+        try:
+            with urllib.request.urlopen(f"{origin}/health", timeout=10) as r:
+                h = json.load(r)
+        except urllib.error.HTTPError as e:
+            h = json.loads(e.read() or b"{}")
+        if h.get("status") == "ok":
+            with urllib.request.urlopen(f"{origin}/v1/models", timeout=10) as r:
+                models = json.load(r)
+            if not any(m.get("id") == VOICE_MODEL for m in models.get("data", [])):
+                return {"stage": "waiting for the selected model"}
+        return h
+    except Exception as e:
+        try:
+            stage = json.loads((data / "preparation.json").read_text())
+            return {"stage": stage.get("stage", "starting engine"), "error": stage.get("error")}
+        except (OSError, ValueError):
+            return {"stage": f"starting engine ({type(e).__name__})"}
 
 
 def fetch_voice() -> None:
@@ -148,10 +173,7 @@ def fetch_voice() -> None:
     while True:
         try:
             c = cli.Config()
-            if VOICE in installed(c):
-                write_status(state="ready")
-                say("voice ready")
-                return
+            write_status(state="preparing", detail="checking local voice")
             image = HERMES_IMAGE_FILE.read_text().strip() if HERMES_IMAGE_FILE.exists() else ""
             if not image:
                 raise SystemExit("no Hermes image recorded (/var/lib/wizard/hermes-image)")
@@ -160,34 +182,24 @@ def fetch_voice() -> None:
             (d / "docker-compose.yml").write_text(VOICE_OVERRIDE.format(image=image))
             data = c.runtipi_root / "app-data" / cli.STORE / VOICE / "data" / "voice"
             subprocess.run(["sudo", "install", "-d", "-o", "1000", "-g", "1000", "-m", "0755", str(data)], check=True)
-            write_status(state="downloading", downloaded=0, total=VOICE_TOTAL)
+            write_status(state="preparing", downloaded=0, total=VOICE_TOTAL, detail="installing voice runtime")
             urn = f"{VOICE}:{cli.STORE}"
             if VOICE not in installed(c):
                 say("installing", VOICE, "with", VOICE_MODEL)
                 cli.install(c, VOICE, {"TRANSCRIBER_MODEL": VOICE_MODEL})
-            st = c.runtipi().wait_status(urn, {"running"}, timeout=1800)
-            if st != "running":
-                write_status(state="retrying", detail=f"status {st}")
-                raise SystemExit(f"{VOICE} is {st}")
-            # The app is up; the engine reports its own progress while it fetches the model.
+            elif not docker("ps", "-q", "--filter", "label=com.docker.compose.service=transcriber-engine").stdout.strip():
+                c.runtipi().req("POST", f"/app-lifecycle/{urn}/start", {}, timeout=300)
+            # Probe the actual engine, even if the lifecycle registry has not caught up after a restart.
+            # Container existence and Runtipi's cached running state are neither necessary nor sufficient readiness.
             subprocess.run(["sudo", "chown", "-R", "1000:1000", str(data)], check=True)
             t0 = time.time()
             while time.time() - t0 < 6 * 3600:
-                h = {}
-                try:
-                    cid = engine_container(VOICE)
-                    ip = docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", cid).stdout.split()[0]
-                    with urllib.request.urlopen(f"http://{ip}:8000/health", timeout=10) as r:
-                        h = json.load(r)
-                except urllib.error.HTTPError as e:
-                    h = json.loads(e.read() or b"{}")
-                except Exception as e:  # noqa: BLE001
-                    h = {"stage": f"waiting for the engine ({type(e).__name__})"}
+                h = voice_health(data)
                 if h.get("status") == "ok":
                     write_status(state="ready", downloaded=VOICE_TOTAL, total=VOICE_TOTAL, model=VOICE_MODEL)
                     say("voice ready")
                     return
-                write_status(state="downloading", downloaded=h.get("downloaded", 0), total=VOICE_TOTAL,
+                write_status(state="retrying" if h.get("error") else "preparing", downloaded=h.get("downloaded", 0), total=VOICE_TOTAL,
                              detail=h.get("error") or h.get("stage"))
                 time.sleep(5)
             raise SystemExit("voice engine did not become ready")
@@ -204,6 +216,8 @@ if __name__ == "__main__":
     if args[:1] == ["factory"]:
         img = args[args.index("--hermes-image") + 1] if "--hermes-image" in args else None
         factory(img)
+    elif args[:1] == ["voice-preparing"]:
+        write_status(state="preparing", detail="checking local voice")
     elif args[:1] == ["fetch-voice"]:
         fetch_voice()
     else:

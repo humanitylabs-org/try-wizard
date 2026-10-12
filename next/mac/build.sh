@@ -3,7 +3,7 @@
 # Runs on Thales. Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
 set -euo pipefail
 VER=${VER:-0.2.4}
-BUILD=${BUILD:-5}
+BUILD=${BUILD:-6}
 cd "$(dirname "$0")"
 SRC=$PWD
 OUT=$SRC/dist

@@ -5,7 +5,7 @@
 #      route (Agent Service -> Transcriber MCP front -> engine): compressed (webm), long (>30 s), silence
 #   3. the agent's shell is this VM: Hermes runs commands and writes files here over its ssh terminal backend, and
 #      builds + runs a small app through the agent (hermes -z, the free brain chosen in onboarding)
-#   4. Browser and AI Accounts install on first use; the Hermes browser runtime and Claude CLI are present
+#   4. Browser and AI Accounts install explicitly on demand; the Hermes browser runtime and Claude CLI are present
 #   5. RAM with voice up
 #   qa-slim.sh [evidence dir]
 set -u
@@ -47,7 +47,7 @@ done
 
 echo "== 3. the agent's shell is this VM"
 R=$(G "docker exec -u 1000:1000 -e HERMES_HOME=/opt/data $HE sh -c 'grep -A8 \"^terminal:\" /opt/data/config.yaml'")
-echo "$R"; need 'backend: ssh' "$R" "Hermes terminal backend is ssh to the VM"
+echo "$R"; need 'backend: "\?ssh' "$R" "Hermes terminal backend is ssh to the VM"
 R=$(G "docker exec -u 1000:1000 $HE ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -i /opt/data/.ssh-vm/id_ed25519 wizard@wizard-vm 'hostname; id -un; which git python3 docker; sudo -n true && echo sudo-ok'")
 echo "$R"; need 'sudo-ok' "$R" "agent key reaches wizard@wizard-vm with sudo and the VM's tools"
 S=$(date +%s)
@@ -57,10 +57,10 @@ V=$(W 'head -5 ~/projects/hello-wizard/app.py; curl -s -m 5 http://127.0.0.1:876
 echo "$V"; need 'hello from the wizard vm' "$V" "agent built and ran a small app in the VM (file and process are on the VM)"
 W 'pkill -f hello-wizard/app.py || true'
 
-echo "== 4. Browser and AI Accounts install on first use"
+echo "== 4. Browser and AI Accounts install explicitly on demand"
 for app in browser wizard-ai-accounts; do
   R=$(W "s=\$(date +%s); /home/wizard/.local/bin/wam install $app >/dev/null 2>&1; echo install_exit=\$? seconds=\$(( \$(date +%s)-s )); /home/wizard/.local/bin/wam apps | grep -w $app")
-  echo "$R"; need 'install_exit=0' "$R" "$app installs on first use"
+  echo "$R"; need 'install_exit=0' "$R" "$app installs explicitly on demand"
 done
 BR=$(G "docker exec $HE sh -c 'hs=\$(ls -d /opt/hermes/.playwright/chromium_headless_shell-*/chrome-*/chrome-headless-shell | head -1); timeout 60 \$hs --no-sandbox --disable-gpu --dump-dom \"data:text/html,<p>CHROMIUM_OK</p>\"'")
 need 'CHROMIUM_OK' "$BR" "Hermes browser runtime renders a page"
@@ -69,4 +69,4 @@ echo "$CL"; need 'Claude Code' "$CL" "Claude CLI in Hermes (login lives on the s
 
 echo "== 5. RAM and disk with everything up"
 G 'free -m; df -B1 / | tail -1; docker stats --no-stream --format "{{.Name}}\t{{.MemUsage}}" | sort -k2 -h | tail -14'
-[ $ok = 1 ] && echo "QA_SLIM_OK" || echo "QA_SLIM_FAIL"
+if [ $ok = 1 ]; then echo "QA_SLIM_OK"; else echo "QA_SLIM_FAIL"; exit 1; fi

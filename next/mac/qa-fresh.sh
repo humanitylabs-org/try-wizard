@@ -43,6 +43,7 @@ if [ -z "$FEED_URL" ]; then
   (cd "$FEED" && exec python3 -m http.server 47999 --bind 127.0.0.1 >/dev/null 2>&1) & HTTPD=$!
   trap 'kill $HTTPD 2>/dev/null' EXIT
   FEED_URL=http://127.0.0.1:47999/latest.json
+  for _ in $(seq 1 40); do curl -fsS -o /dev/null -m 2 "$FEED_URL" && break; sleep 0.25; done   # server up before the app asks
 fi
 echo "feed: $FEED_URL"; curl -fsS -m 20 "$FEED_URL" | head -c 1200; echo; df -h "$HOME" | tail -1
 

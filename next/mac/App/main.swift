@@ -30,9 +30,9 @@ enum Store {
         return b.indices.contains(activeIndex) ? b[activeIndex] : b.first
     }
     static var osFeedURL: URL {
-        // Release feed on Cloudflare R2 (custom domain). QA and testers can point a build elsewhere with
+        // GitHub release feed. QA and testers can point a build elsewhere with
         // `defaults write org.humanitylabs.wizard osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? "https://downloads.aiwizards.com/os/latest.json")!
+        URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/latest/download/latest.json")!
     }
 }
 
@@ -102,7 +102,10 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     /// Full-stack QA needs at least 16 GiB available for staging and recovery.
     static func checkFreeSpace(install: Int64) throws {
         let need = max(install + (1 << 30), 16 << 30)
-        let values = try WizardShared.supportDir.deletingLastPathComponent()
+        // Check the volume receiving staging, including an explicitly relocated support directory.
+        let destination = WizardShared.supportDir.resolvingSymlinksInPath()
+        let probe = FileManager.default.fileExists(atPath: destination.path) ? destination : destination.deletingLastPathComponent()
+        let values = try probe
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let free = values.volumeAvailableCapacityForImportantUsage else {
             throw error("Couldn't check free disk space for Wizard OS. Try again before installing.")
