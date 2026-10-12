@@ -183,7 +183,7 @@ def fetch_voice() -> None:
                     h = json.loads(e.read() or b"{}")
                 except Exception as e:  # noqa: BLE001
                     h = {"stage": f"waiting for the engine ({type(e).__name__})"}
-                if h.get("status") == "ready":
+                if h.get("status") == "ok":
                     write_status(state="ready", downloaded=VOICE_TOTAL, total=VOICE_TOTAL, model=VOICE_MODEL)
                     say("voice ready")
                     return

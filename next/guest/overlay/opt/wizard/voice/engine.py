@@ -5,8 +5,8 @@ istupakov/parakeet-tdt-0.6b-v2-onnx @ 0bbb45a, INT8 encoder/decoder, onnx-asr on
 20-30 s pieces at the quietest point. Runs in the Transcriber app's engine container on the Hermes image already on
 the box (it has Python 3.13 and ffmpeg), so voice adds the model and three Python wheels, not another image.
 
-  GET  /health                      200 {"status":"ready"} | 503 {"status":"preparing", ...progress}
-  GET  /v1/models                   the model, once ready
+  GET  /health                      200 {"status":"ok","provider":"local",...} | 503 {"status":"preparing", ...progress}
+  GET  /v1/models                   the model, once ready (503 before, so Wizard shows the mic only when voice works)
   POST /v1/audio/transcriptions     multipart: file, model?, response_format? (json|text|verbose_json)
 
 First start downloads the model (pinned revision, every file checked against its SHA-256) into /data; the Python
@@ -116,7 +116,7 @@ def prepare() -> None:
             # Warm up so the first real request isn't the slow one.
             import numpy as np
             model.recognize(np.zeros(RATE, dtype=np.float32))
-            state.update(status="ready", stage="ready")
+            state.update(status="ok", stage="ready")
             log("ready")
             return
         except Exception as e:
@@ -194,18 +194,21 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
+        ready = state["status"] == "ok"
         if self.path in ("/health", "/healthz"):
-            return self.send(200 if state["status"] == "ready" else 503, {**state, "model": MODEL_ID})
+            return self.send(200 if ready else 503, {**state, "provider": "local", "model": MODEL_ID})
         if self.path.startswith("/v1/models"):
-            data = [{"id": MODEL_ID, "object": "model", "owned_by": "istupakov", "task": "automatic-speech-recognition",
-                     "language": ["en"]}] if state["status"] == "ready" else []
-            return self.send(200, {"object": "list", "data": data})
+            if not ready:
+                return self.send(503, {"error": {"message": "voice is still being prepared", **state}})
+            return self.send(200, {"object": "list", "data": [{
+                "id": MODEL_ID, "object": "model", "owned_by": "istupakov", "task": "automatic-speech-recognition",
+                "language": ["en"]}]})
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
         if not self.path.startswith("/v1/audio/transcriptions"):
             return self.send(404, {"error": "not found"})
-        if state["status"] != "ready":
+        if state["status"] != "ok":
             return self.send(503, {"error": {"message": "voice is still being prepared", **state}})
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0 or n > MAX_UPLOAD:
@@ -235,11 +238,12 @@ class H(BaseHTTPRequestHandler):
         if fmt == "text":
             return self.send(200, text, "text/plain; charset=utf-8")
         if fmt == "verbose_json":
-            out = {"task": "transcribe", "language": "en", "duration": round(dur, 2), "text": text, "segments": segments}
+            out = {"task": "transcribe", "language": "en", "duration": round(dur, 2), "text": text, "segments": segments,
+                   "provider": "local", "model": MODEL_ID}
             if any(v == "word" for k, v in fields.items() if k.startswith("timestamp_granularities")):
                 out["words"] = words
             return self.send(200, out)
-        self.send(200, {"text": text})
+        self.send(200, {"text": text, "provider": "local", "model": MODEL_ID})
 
 
 if __name__ == "__main__":
