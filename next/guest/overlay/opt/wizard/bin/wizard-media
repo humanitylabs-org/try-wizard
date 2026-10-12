@@ -9,7 +9,8 @@ S=/var/lib/wizard/mac-files
 mkdir -p "$M" "$S"
 if mountpoint -q "$M"; then fusermount3 -u "$M" 2>/dev/null || umount -l "$M" 2>/dev/null || true; fi
 if mountpoint -q "$S"; then
-  bindfs -o allow_other,force-user=wizard,force-group=wizard,perms=u+rwX:g+rwX,chown-ignore,chgrp-ignore,chmod-ignore \
+  # nonempty: the VM disk's own media folder (from the image build) stays underneath, unused.
+  bindfs -o nonempty,allow_other,force-user=wizard,force-group=wizard,perms=u+rwX:g+rwX,chown-ignore,chgrp-ignore,chmod-ignore \
     "$S" "$M" || { echo "media: bindfs failed"; exit 1; }
   echo "media: Mac folder at $M (owned by wizard)"
 else

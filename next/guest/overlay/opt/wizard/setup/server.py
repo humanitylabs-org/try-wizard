@@ -420,11 +420,13 @@ async def post_finish(_: web.Request) -> web.Response:
             save_state(soulPending=False)
         except Exception:
             pass
-    status, session = await shell("POST", "/wizard/hermes/api/sessions", {
-        "title": f"Meet {name}" if not state.get("firstSessionId") else f"Meet {name} ({secrets.token_hex(2)})"})
-    session_id = _session_id(session)
-    if status >= 300 or not session_id:
+    # Same shape as a new chat from Wizard UX (live.js/outbox.js): a `wizard_` id and source wizard-mobile, so the
+    # Agent Service lists it in Chats.
+    session_id = f"wizard_{int(time.time() * 1000)}_{uuid.uuid4().hex[:12]}"
+    status, session = await shell("POST", "/wizard/hermes/api/sessions", {"source": "wizard-mobile", "id": session_id})
+    if status >= 300:
         return json_error(f"Could not open your first chat ({status}).", 502)
+    await shell("PATCH", f"/wizard/hermes/api/sessions/{session_id}", {"title": f"Meet {name}"})
     status, run = await shell("POST", "/wizard/hermes/v1/runs", {
         "session_id": session_id, "input": FIRST_TASK.format(name=name)},
         headers={"Idempotency-Key": uuid.uuid4().hex})

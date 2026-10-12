@@ -17,7 +17,7 @@ write_report() {
   python3 - "$1" "${2:-}" <<PY
 import json, sys
 t = {$(for k in "${!T[@]}"; do printf '"%s": %s, ' "$k" "${T[$k]}"; done)}
-json.dump({"result": sys.argv[1], "error": sys.argv[2], "seconds": t, "wam_commit": "$(git -C /home/wizard/wizard-app-manager rev-parse HEAD 2>/dev/null)",
+json.dump({"result": sys.argv[1], "error": sys.argv[2], "seconds": t, "wam_commit": "$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD 2>/dev/null)",
            "wam_image": "$WAM_IMAGE"}, open("/var/lib/wizard/provision.json", "w"), indent=2)
 PY
 }
@@ -34,7 +34,7 @@ WAM_IMAGE="$WAM_IMAGE" WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/nul
 stamp os_sh
 # Pin: os.sh installs whatever main is today; if main moved past the pinned commit, re-run install.sh there.
 if [ -n "$WAM_COMMIT" ]; then
-  head=$(git -C /home/wizard/wizard-app-manager rev-parse HEAD)
+  head=$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD)
   if [ "$head" != "$WAM_COMMIT" ]; then
     echo "wizard-app-manager main is $head; pinning $WAM_COMMIT"
     as_wizard git -C /home/wizard/wizard-app-manager checkout -q "$WAM_COMMIT" || fail "checkout $WAM_COMMIT"
@@ -60,6 +60,8 @@ as_wizard /home/wizard/.local/bin/wam apps || true
 as_wizard /home/wizard/.local/bin/wam doctor | tee /var/lib/wizard/provision-doctor.txt || true
 docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | tee /var/lib/wizard/provision-containers.txt
 docker images --digests --format '{{.Repository}}:{{.Tag}}@{{.Digest}}\t{{.Size}}' | tee /var/lib/wizard/provision-images.txt
+docker info --format 'storage driver: {{.Driver}}' | tee -a /var/lib/wizard/provision-images.txt
+du -sh /var/lib/docker /var/lib/containerd 2>/dev/null | tee -a /var/lib/wizard/provision-images.txt
 stamp checked
 /opt/wizard/bin/wizard-shell-port >/dev/null && echo "shell port $(/opt/wizard/bin/wizard-shell-port)"
 

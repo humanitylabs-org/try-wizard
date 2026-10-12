@@ -29,7 +29,7 @@ colima status -p wb >/dev/null 2>&1 || colima start -p wb
 docker build -q -t wizard-os-base:$VER "$HERE"
 cid=$(docker create wizard-os-base:$VER /bin/true)
 docker export "$cid" > "$WORK/base.tar"; docker rm "$cid" >/dev/null
-rm -rf "$WORK/g"; mkdir -p "$WORK/g"; cp -R "$HERE/overlay" "$WORK/g/overlay"
+rm -rf "$WORK/g"; mkdir -p "$WORK/g"; cp -R "$HERE/overlay" "$WORK/g/overlay"; cp "$HERE/check-image.sh" "$WORK/g/"
 printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" > "$WORK/g/provision.env"
 docker run --rm --privileged -e GB=$BUILD_DISK_GB -v "$WORK:/w" alpine:3.21 sh -eu -c '
 apk add -q e2fsprogs tar coreutils shadow file >/dev/null
@@ -47,6 +47,7 @@ chroot $R /usr/sbin/useradd -m -u 1000 -U -G sudo -s /bin/bash -c Wizard wizard
 chroot $R /usr/bin/passwd -l wizard >/dev/null
 chroot $R /usr/bin/passwd -l root >/dev/null
 install -d -m 0750 -o 1000 -g 1000 $R/var/lib/wizard
+chmod 0644 $R/etc/docker/daemon.json
 install -m 0644 /w/g/provision.env $R/var/lib/wizard/provision.env
 mkdir -p $R/home/wizard/runtipi/media && chown -R 1000:1000 $R/home/wizard
 for m in vmw_vsock_virtio_transport virtio_blk virtio_net virtiofs; do echo $m >> $R/etc/initramfs-tools/modules; done
@@ -96,9 +97,12 @@ fi
 
 if [ "$STEP" = all ] || [ "$STEP" = pack ]; then
 echo "== 3. shrink, manifest, compress"
+cp "$HERE/check-image.sh" "$WORK/g/"
 docker run --rm --privileged -v "$WORK:/w" debian:trixie bash -euc '
 apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs zerofree >/dev/null
-e2fsck -fy /w/build.img >/dev/null || [ $? -le 1 ]
+# The provisioned disk must come back clean: any repair here means writes were lost in the VM.
+e2fsck -fn /w/build.img > /w/fsck-build.txt 2>&1 || { echo "build.img is not clean:"; tail -20 /w/fsck-build.txt; exit 1; }
+echo "build.img fsck clean"
 for f in provision.json provision-doctor.txt provision-containers.txt provision-images.txt; do
   debugfs -R "cat /var/lib/wizard/$f" /w/build.img > /w/$f 2>/dev/null || true
 done
@@ -110,7 +114,11 @@ NEW=$(( BC + 2*1024*1024*1024/BS )); resize2fs /w/rootfs.img $NEW >/dev/null 2>&
 zerofree /w/rootfs.img
 truncate -s $(( NEW * BS )) /w/rootfs.img
 e2fsck -fn /w/rootfs.img >/dev/null && echo fsck-clean
-echo "rootfs $(( NEW * BS / 1048576 )) MiB"
+apt-get install -y -qq python3 >/dev/null
+bash /w/g/check-image.sh /w/rootfs.img
+FREE=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Free blocks: *//p")
+echo $(( (NEW - FREE) * BS )) > /w/used-bytes
+echo "rootfs $(( NEW * BS / 1048576 )) MiB, used $(( (NEW - FREE) * BS / 1048576 )) MiB"
 '
 cp "$WORK/provision.json" "$OUT/provision-$VER.json"
 cd "$WORK"
@@ -127,6 +135,8 @@ m = {"name": "Wizard OS", "version": v, "stack": "wizard-os-0.2-runtipi",
      "kernel": "boot/vmlinux", "initrd": "boot/initrd", "rootfs": "rootfs.img",
      "cmdline": "console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false",
      "memoryMiB": 6144,
+     # Space the unpacked image takes on the Mac (used blocks; the rest of rootfs.img unpacks as holes).
+     "installBytes": int(open("used-bytes").read()) + os.path.getsize("boot/vmlinux") + os.path.getsize("boot/initrd"),
      "files": {p: sha(p) for p in files}, "sizes": {p: os.path.getsize(p) for p in files}}
 try: m["provision"] = json.load(open("provision.json"))
 except Exception: pass
@@ -134,7 +144,10 @@ json.dump(m, open("manifest.json", "w"), indent=2); print(json.dumps({k: m[k] fo
 PY
 echo "compress"; s=$(t)
 rm -f "$OUT/wizard-os-$VER.tar.xz"
-tar -cf - manifest.json boot rootfs.img | xz -T0 -6 > "$OUT/wizard-os-$VER.tar.xz"
+# GNU tar with sparse entries: the free space of rootfs.img (zeroed above) becomes holes, so the Mac's tar
+# (libarchive) writes only the used blocks when it unpacks. That roughly halves the disk needed to install.
+docker run --rm -v "$WORK:/w:ro" debian:trixie tar -C /w --sparse --hole-detection=raw -cf - manifest.json boot rootfs.img \
+  | xz -T0 -6 > "$OUT/wizard-os-$VER.tar.xz"
 echo "compressed in $(( $(t) - s ))s"
 shasum -a 256 "$OUT/wizard-os-$VER.tar.xz" | tee "$OUT/wizard-os-$VER.tar.xz.sha256"
 ls -la "$OUT"
