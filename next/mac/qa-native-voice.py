@@ -29,7 +29,7 @@ def wait(check,seconds=60):
     raise AssertionError(s)
 
 s=wait(lambda s:s['overlayHidden'] and s['localVoice']['visible'] and 'Local voice ready' in s['localVoice']['summary'])
-assert '/wizard-ux/' in s['url'], s
+assert '/wizard-os-home/' in s['url'], s
 print('PASS native-ready-after-onboarding',s['localVoice'])
 cid=guest('docker ps -q --filter label=com.docker.compose.service=transcriber-engine').strip()
 assert len(cid)==12 and all(c in '0123456789abcdef' for c in cid)
@@ -45,7 +45,7 @@ finally:
 s=wait(lambda s:'Local voice ready' in s['localVoice']['summary'])
 print('PASS native-retry-recovers',s['localVoice'])
 # Remote here is the SAME disposable guest URL, never James\'s daily service.
-command('connect http://127.0.0.1:48023/wizard-ux/')
+command('connect http://127.0.0.1:48023/wizard-os-home/')
 s=wait(lambda s:not s['localVoice']['visible'] and not s['localVoice']['polling'])
 assert s['localVoice']['summary']=='',s
 print('PASS remote-clears-local-voice')
