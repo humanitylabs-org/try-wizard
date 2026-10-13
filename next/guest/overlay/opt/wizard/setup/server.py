@@ -41,10 +41,10 @@ HOST = os.environ.get("WIZARD_SETUP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WIZARD_SETUP_PORT", "8930"))
 RUNTIPI = Path(os.environ.get("RUNTIPI_ROOT", "/home/wizard/runtipi"))
 # The wizard-shell app (Agent Service + Wizard UX) on the VM's loopback.
-SHELL_ORIGIN = os.environ.get("WIZARD_SHELL_ORIGIN", "http://127.0.0.1:8796")
+SHELL_ORIGIN = os.environ.get("WIZARD_SHELL_ORIGIN", "http://127.0.0.1:8924")
 # The Mac app reaches the shell through a vsock bridge on this loopback port.
-PUBLIC_UX_ORIGIN = os.environ.get("WIZARD_PUBLIC_UX_ORIGIN", "http://127.0.0.1:47823")
-UX_PATH = "/wizard-ux/"
+PUBLIC_UX_ORIGIN = os.environ.get("WIZARD_PUBLIC_UX_ORIGIN", "http://127.0.0.1:48023")
+UX_PATH = "/wizard-os-home/"
 OPEN_URL_CMD = os.environ.get("WIZARD_OPEN_URL_CMD", "/opt/wizard/bin/wizard-open-url")
 CODEX_DEVICE_URL = "https://auth.openai.com/codex/device"
 

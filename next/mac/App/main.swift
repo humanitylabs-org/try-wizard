@@ -33,7 +33,7 @@ enum Store {
     static var osFeedURL: URL {
         // GitHub release feed. QA and testers can point a build elsewhere with
         // `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/latest/download/latest.json")!
+        URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-20261013/latest.json")!
     }
 }
 
@@ -379,6 +379,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let bad = error("This file isn't a valid Wizard OS image. Download it again from the release page.")
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              m["version"] as? String == "0.3.0",
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }
@@ -874,12 +875,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// apps' user-files folder; app databases stay on the Wizard OS disk.
     func askFilesFolder(sizeNote: String? = nil) {
         let home = WizardShared.defaultFilesFolder
-        let title = "Keep your Wizard's files in ~/\(home.lastPathComponent)?"
+        let title = "Choose where your Wizard keeps its files"
         showOverlay(title,
-                    "Your Wizard and its apps put what they make here: Inbox, Documents, Videos, Meetings and Exports. "
+                    "Default: \(home.path)\nYour Wizard and its apps put what they make here: Inbox, Documents, Videos, Meetings and Exports. "
                     + "You can open the folder in Finder any time." + (sizeNote.map { "\n\n" + $0 } ?? ""),
                     spinning: false,
-                    actions: [("Use ~/\(home.lastPathComponent)", #selector(useDefaultFilesFolder)),
+                    actions: [("Use Default Folder", #selector(useDefaultFilesFolder)),
                               ("Choose Folder…", #selector(chooseFilesFolder)),
                               ("Back", #selector(backToChooser))])
         // Say how much space Wizard OS will take before anything downloads (only on this Mac's first install).
@@ -947,7 +948,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "1. Click Download Wizard OS and save the wizard-os-….tar.xz file.\n2. Come back here and click Choose Downloaded File.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Your GitHub download may require signing in in your browser. Other guest versions are not compatible with this build.",
                     spinning: false,
                     actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
@@ -963,7 +964,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             let names = f.map { $0.parts?.map(\.url) ?? ($0.url.map { [$0] } ?? []) } ?? []
             let urls = names.compactMap { URL(string: $0, relativeTo: Store.osFeedURL)?.absoluteURL }
             DispatchQueue.main.async {
-                if urls.isEmpty { NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/latest")!) }
+                if urls.isEmpty { NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/tag/mac-mvp-20261013")!) }
                 else { urls.forEach { NSWorkspace.shared.open($0) } }
             }
         }.resume()
