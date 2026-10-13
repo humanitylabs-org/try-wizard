@@ -638,6 +638,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        // Private preview packaging may provide an exact first-open destination. Preserve every
+        // saved Wizard; select this preview once, then leave future backend choices to the user.
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "WizardPreviewURL") as? String,
+           let url = URL(string: raw), url.scheme == "https", url.host != nil,
+           UserDefaults.standard.string(forKey: "configuredPreviewURL") != raw {
+            var list = Store.backends.filter { $0.url != raw }
+            list.append(Backend(kind: .remote, name: "Desktop keys preview", url: raw))
+            Store.backends = list; Store.activeIndex = list.count - 1
+            UserDefaults.standard.set(raw, forKey: "configuredPreviewURL")
+        }
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

@@ -43,6 +43,10 @@ plist "$APP/Contents/Info.plist" "Wizard" org.humanitylabs.wizard Wizard \
   '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
 plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
+if [[ -n "${PREVIEW_URL:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Add :WizardPreviewURL string $PREVIEW_URL" "$APP/Contents/Info.plist"
+fi
+
 if [[ -f assets/Wizard.icns ]]; then
   cp assets/Wizard.icns "$APP/Contents/Resources/Wizard.icns"
   cp assets/Wizard.icns "$HOST/Contents/Resources/Wizard.icns"

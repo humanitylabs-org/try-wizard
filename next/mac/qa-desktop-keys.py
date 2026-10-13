@@ -31,13 +31,22 @@ backup=OUT/'defaults.plist';saved=run('defaults','export',DOMAIN,str(backup),che
 try:
  for k,v in [('QAHooks','true'),('LegacyUX','false'),('voiceKeysEnabled','false')]:run('defaults','write',DOMAIN,k,'-bool',v)
  proc=sp.Popen([str(APP/'Contents/MacOS/Wizard')],stdout=(OUT/'app.log').open('w'),stderr=sp.STDOUT)
- time.sleep(2);qa('connect '+URL);end=time.monotonic()+50
+ time.sleep(2)
+ packaged=plistlib.loads((APP/'Contents/Info.plist').read_bytes()).get('WizardPreviewURL')
+ if packaged!=URL:qa('connect '+URL)
+ end=time.monotonic()+50
  while time.monotonic()<end:
   try:
    if ev('!!window.__wux && !!window.__wux.live.ok')=='1':break
   except AssertionError:pass
   time.sleep(.4)
  else:raise AssertionError('native desktop did not load')
+ if packaged==URL:
+  ok(ev('location.href.startsWith('+json.dumps(URL)+')')=='1','private native preview opens directly on the exact desktop at first launch')
+  old=plistlib.loads(backup.read_bytes()) if saved else {}
+  current=plistlib.loads(run('defaults','export',DOMAIN,'-').stdout.encode())
+  old_list=json.loads(old.get('backends',b'[]'));new_list=json.loads(current.get('backends',b'[]'))
+  ok(all(x in new_list for x in old_list if x.get('url')!=URL),'preview bootstrap preserves every previously saved Wizard')
  ev("for(const d of __wux.ws)for(const id of [...d.wins])__wux.closeWin(id);__wux.goWs(0);while(__wux.ws.length>1){__wux.goWs(__wux.ws.length-1);__wux.closeDesktop();}true")
  key('t');ok(ev('__wux.ws.length===2 && __wux.cur===1')=='1','native Command-T menu opens exactly one desktop inside Wizard')
  key('t,repeat');ok(ev('__wux.ws.length===2')=='1','native autorepeat creates no duplicate desktop')
@@ -78,7 +87,7 @@ finally:
   try:proc.wait(timeout=8)
   except sp.TimeoutExpired:proc.kill();proc.wait()
  if saved:
-  run('defaults','import',DOMAIN,str(backup));current=plistlib.loads(run('defaults','export',DOMAIN,'-').stdout.encode());assert current==plistlib.loads(backup.read_bytes()),'defaults restore mismatch';backup.unlink()
+  run('defaults','delete',DOMAIN);run('defaults','import',DOMAIN,str(backup));current=plistlib.loads(run('defaults','export',DOMAIN,'-').stdout.encode());assert current==plistlib.loads(backup.read_bytes()),'defaults restore mismatch';backup.unlink()
  else:run('defaults','delete',DOMAIN,check=False)
  lock.close()
 if receipt:
