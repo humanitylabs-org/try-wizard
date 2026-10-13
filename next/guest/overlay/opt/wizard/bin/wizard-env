@@ -4,4 +4,4 @@ export WIZARD_ROOT=/var/lib/wizard
 export RUNTIPI_ROOT=/home/wizard/runtipi
 export PATH=/home/wizard/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # The Mac app reaches the shell (Wizard UX) through the vsock bridge on this loopback origin.
-export WIZARD_PUBLIC_UX_ORIGIN="${WIZARD_PUBLIC_UX_ORIGIN:-http://127.0.0.1:47823}"
+export WIZARD_PUBLIC_UX_ORIGIN="${WIZARD_PUBLIC_UX_ORIGIN:-http://127.0.0.1:48023}"

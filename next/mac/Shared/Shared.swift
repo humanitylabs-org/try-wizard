@@ -2,23 +2,27 @@ import Foundation
 
 /// Contract shared by the Wizard app (front end) and Wizard Host (back-end runner).
 enum WizardShared {
-    static let hostBundleID = "org.humanitylabs.wizard.host"
-    static let appBundleID = "org.humanitylabs.wizard"
+    static let hostBundleID = "org.humanitylabs.wizard.mvp.host"
+    static let appBundleID = "org.humanitylabs.wizard.mvp"
 
     /// Mac loopback ports bridged into Wizard OS over vsock.
-    static let uxPort: UInt16 = 47823      // -> guest 8923 -> the wizard-shell app (Agent Service + Wizard UX)
-    static let setupPort: UInt16 = 47830   // -> guest 8930 (front door / onboarding)
+    static let uxPort: UInt16 = 48023      // -> guest 8923 -> the wizard-shell app (Agent Service + Wizard UX)
+    static let setupPort: UInt16 = 48030   // -> guest 8930 (front door / onboarding)
     static let guestUXPort: UInt32 = 8923
     static let guestSetupPort: UInt32 = 8930
     static let guestControlPort: UInt32 = 9100
     static let hostOpenURLPort: UInt32 = 9101
-    static let devShellPort: UInt16 = 47900       // -> guest 9200, only when `dev-shell` exists (QA)
+    static let devShellPort: UInt16 = 48000       // -> guest 9200, only when `dev-shell` exists (QA)
     static let guestDevShellPort: UInt32 = 9200
     static var devShell: Bool { FileManager.default.fileExists(atPath: supportDir.appendingPathComponent("dev-shell").path) }
 
     static var supportDir: URL {
+        // Dedicated internal-test identity; never opens or migrates the daily Wizard VM.
+        if let p = UserDefaults(suiteName: appBundleID)?.string(forKey: "DataHome"), p.hasPrefix("/") {
+            return URL(fileURLWithPath: p, isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Wizard", isDirectory: true)
+        return base.appendingPathComponent("Wizard MVP", isDirectory: true)
     }
     static var osDir: URL { supportDir.appendingPathComponent("os", isDirectory: true) }
     static var logsDir: URL { supportDir.appendingPathComponent("logs", isDirectory: true) }
@@ -28,7 +32,7 @@ enum WizardShared {
     /// nil = not chosen yet (the guest then keeps files on its own disk).
     static let filesShareTag = "wizard-files"
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
-    static var defaultFilesFolder: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Wizard", isDirectory: true) }
+    static var defaultFilesFolder: URL { supportDir.appendingPathComponent("Files", isDirectory: true) }
     static var filesFolder: URL? {
         guard let d = try? Data(contentsOf: filesFolderFile),
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],

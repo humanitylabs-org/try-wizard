@@ -14,7 +14,7 @@ def command(cmd):
 
 def state():
     command('state'); time.sleep(.3)
-    return json.loads(Path('/tmp/wizard-qa-state.json').read_text())
+    return json.loads(Path('/tmp/wizard-mvp-qa-state.json').read_text())
 
 def guest(cmd):
     return subprocess.check_output(['bash',str(HERE/'qa-guest.sh'),cmd],text=True,timeout=60)
@@ -45,7 +45,7 @@ finally:
 s=wait(lambda s:'Local voice ready' in s['localVoice']['summary'])
 print('PASS native-retry-recovers',s['localVoice'])
 # Remote here is the SAME disposable guest URL, never James\'s daily service.
-command('connect http://127.0.0.1:47823/wizard-ux/')
+command('connect http://127.0.0.1:48023/wizard-ux/')
 s=wait(lambda s:not s['localVoice']['visible'] and not s['localVoice']['polling'])
 assert s['localVoice']['summary']=='',s
 print('PASS remote-clears-local-voice')
@@ -54,7 +54,7 @@ assert not state()['localVoice']['visible']
 command('switch 0')
 s=wait(lambda s:s['localVoice']['visible'] and 'Local voice ready' in s['localVoice']['summary'])
 print('PASS local-restores-status')
-req=urllib.request.Request('http://127.0.0.1:47830/api/voice/retry',data=b'',headers={'Origin':'https://unrelated.example'},method='POST')
+req=urllib.request.Request('http://127.0.0.1:48030/api/voice/retry',data=b'',headers={'Origin':'https://unrelated.example'},method='POST')
 try:
     urllib.request.urlopen(req)
     raise AssertionError('cross-origin retry was allowed')

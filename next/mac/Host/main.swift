@@ -282,7 +282,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         boot.initialRamdiskURL = dir.appendingPathComponent("boot/initrd")
         boot.commandLine = (manifest["cmdline"] as? String) ?? "console=hvc0 root=/dev/vda rw quiet"
         // Developer/QA only: with ~/Library/Application Support/Wizard/dev-shell present, the guest opens a root shell on
-        // vsock 9200, bridged to 127.0.0.1:47900 (used by mac/qa-guest.sh for `wam doctor` and friends).
+        // vsock 9200, bridged to 127.0.0.1:48000 (used by mac/qa-guest.sh for `wam doctor` and friends).
         if WizardShared.devShell { boot.commandLine += " wizard.dev=1" }
 
         let c = VZVirtualMachineConfiguration()
@@ -387,6 +387,16 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Quit Wizard (stops Wizard OS)", action: #selector(quitAll), keyEquivalent: "q").target = self
         item.menu = menu
 
+        // One Wizard icon: Wizard.app owns it while it runs; this one only shows when the app isn't running.
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] n in
+                let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                if app?.bundleIdentifier == WizardShared.appBundleID { self?.syncIconVisibility() }
+            }
+        }
+        syncIconVisibility()
+
         vm.onChange = { [weak self] in self?.refresh() }
         bridges = [LoopbackBridge(hostPort: WizardShared.uxPort, guestPort: WizardShared.guestUXPort, vm: vm),
                    LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm)]
@@ -396,7 +406,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         bridges.forEach { $0.start() }
 
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(command(_:)),
-            name: Notification.Name("org.humanitylabs.wizard.host.command"), object: nil, suspensionBehavior: .deliverImmediately)
+            name: Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: nil, suspensionBehavior: .deliverImmediately)
         refresh()
         vm.start()
     }
@@ -424,6 +434,19 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusLine.title = text
         item?.button?.toolTip = text
         item?.button?.appearsDisabled = vm.state != .running
+    }
+
+    func syncIconVisibility() {
+        let appRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.appBundleID).isEmpty
+        item?.isVisible = !appRunning
+        iconVisible = !appRunning
+        writeIconState()
+    }
+    var iconVisible = true
+    private func writeIconState() {
+        let f = WizardShared.supportDir.appendingPathComponent("host-icon.json")
+        let s: [String: Any] = ["iconVisible": iconVisible, "updatedAt": Date().timeIntervalSince1970]
+        if let d = try? JSONSerialization.data(withJSONObject: s) { try? d.write(to: f, options: .atomic) }
     }
 
     @objc func openWizard() {

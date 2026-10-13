@@ -35,7 +35,7 @@ say -o s.aiff "Hey Wizard, remind me to call Miguel tomorrow about the Archimede
 say -o l.aiff "Wizard OS is a personal AI server you run by talking to it. It installs on a Mac as a small virtual machine, then moves to an always on computer when you are ready. Each app has an API and a tool interface, so your agent can use it and you can build a new view for it. This sentence makes the recording longer than thirty seconds so the engine cuts it into pieces at a quiet point. One more sentence about the weather in Bangkok, which is hot and humid this week." && afconvert -f WAVE -d LEI16@16000 l.aiff long.wav
 /opt/homebrew/bin/ffmpeg -loglevel error -y -i short.wav -c:a libopus short.webm
 /opt/homebrew/bin/ffmpeg -loglevel error -y -f lavfi -i anullsrc=r=16000:cl=mono -t 4 silence.wav
-U=http://127.0.0.1:47823
+U=http://127.0.0.1:48023
 for f in short.webm:audio/webm long.wav:audio/wav silence.wav:audio/wav; do
   file=${f%%:*}; ct=${f#*:}; s=$(python3 -c 'import time;print(time.time())')
   r=$(curl -s -m 200 -H "content-type: $ct" --data-binary @"$file" -w ' HTTP=%{http_code}' "$U/wizard/voice/transcribe")

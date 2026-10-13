@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import CryptoKit
 import ServiceManagement
@@ -31,7 +32,7 @@ enum Store {
     }
     static var osFeedURL: URL {
         // GitHub release feed. QA and testers can point a build elsewhere with
-        // `defaults write org.humanitylabs.wizard osFeedURL <url>`.
+        // `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
         URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/latest/download/latest.json")!
     }
 }
@@ -441,12 +442,8 @@ enum HostControl {
         !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).isEmpty
     }
 
-    /// Start the menu-bar service now and at every login.
+    /// Internal MVP: start on demand, never register or change daily login services.
     static func ensureRunning() {
-        let service = SMAppService.loginItem(identifier: WizardShared.hostBundleID)
-        if service.status != .enabled {
-            do { try service.register() } catch { NSLog("Wizard: login item registration failed: \(error)") }
-        }
         if !isRunning {
             let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
             NSWorkspace.shared.openApplication(at: embeddedHostURL, configuration: cfg) { _, err in
@@ -457,7 +454,7 @@ enum HostControl {
 
     static func send(_ command: String) {
         DistributedNotificationCenter.default().postNotificationName(
-            Notification.Name("org.humanitylabs.wizard.host.command"), object: command, userInfo: nil, deliverImmediately: true)
+            Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: command, userInfo: nil, deliverImmediately: true)
     }
 
     static func waitForLocalWizard(timeout: TimeInterval, tick: @escaping (TimeInterval) -> Void, done: @escaping (Bool) -> Void) {
@@ -508,7 +505,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
               ["127.0.0.1", "localhost", Store.active.flatMap { URL(string: $0.url)?.host }].contains(origin.host)
         else { return }
         let id = body["id"] ?? NSNull()
-        let params = body["params"] as? [String: Any] ?? [:]
+        var params = body["params"] as? [String: Any] ?? [:]
+        let so = message.frameInfo.securityOrigin
+        params["_origin"] = "\(so.protocol)://\(so.host)\(so.port != 0 ? ":\(so.port)" : "")"
         guard let handler = handlers.first(where: { method.hasPrefix($0.key) })?.value else { return }
         handler(method, params) { result in
             let payload = (try? JSONSerialization.data(withJSONObject: ["id": id, "result": result ?? NSNull()], options: [.fragmentsAllowed]))
@@ -582,6 +581,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         cfg.websiteDataStore = .default()
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
         cfg.userContentController.add(NativeBridge.shared, name: NativeBridge.name)
+        // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
+        cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -759,6 +760,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func begin() {
         clearLocalVoice()
+        homeURL = nil; resolvedOrigins = []
         guard let backend = Store.active else { showChooser(); return }
         switch backend.kind {
         case .thisMac:
@@ -767,7 +769,65 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)
-            if let url = URL(string: backend.url) { load(url) }
+            if let url = URL(string: backend.url) { resolveHome(url) { [weak self] home in self?.homeURL = home; self?.load(home) } }
+        }
+    }
+
+    // MARK: Wizard UX (wizard-ux) and the native bridge (wizard-os spec/NATIVE_BRIDGE.md)
+
+    /// Where this window's Wizard lives right now: Wizard UX when the back end serves it, else the address as given.
+    var homeURL: URL?
+    func loadHome() {
+        if let homeURL { load(homeURL); return }
+        if let b = Store.active, let u = URL(string: b.url) { load(u) }
+    }
+
+    /// Wizard UX is served at /wizard-os-home/ on a Wizard's origin and picks its desktop shell inside this app.
+    /// A root or legacy /wizard/ address is upgraded to it when the back end answers there; a deeper address stays as typed.
+    /// `defaults write org.humanitylabs.wizard.mvp LegacyUX -bool true` keeps the old UX.
+    func resolveHome(_ base: URL, done: @escaping (URL) -> Void) {
+        let p = base.path.isEmpty ? "/" : base.path
+        guard !UserDefaults.standard.bool(forKey: "LegacyUX"), p == "/" || p == "/wizard" || p.hasPrefix("/wizard/"),
+              let scheme = base.scheme, let host = base.host else { done(base); return }
+        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = base.port
+        guard let origin = c.url, let entry = URL(string: "/wizard-os-home/", relativeTo: origin)?.absoluteURL,
+              let probe = URL(string: "desktop.html", relativeTo: entry)?.absoluteURL else { done(base); return }
+        var req = URLRequest(url: probe, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        req.httpMethod = "GET"
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let ok = (resp as? HTTPURLResponse)?.statusCode == 200 && (data.map { String(decoding: $0.prefix(4096), as: UTF8.self) }?.contains("data-shell") ?? false)
+            NSLog("Wizard: Wizard UX %@ at %@", ok ? "found" : "not found", entry.absoluteString)
+            DispatchQueue.main.async { done(ok ? entry : base) }
+        }.resume()
+    }
+
+    /// Native → page: dispatch a bridge event when the page is Wizard UX and handles it.
+    /// Calls back nil when it isn't (legacy UX, onboarding, still loading) so callers can fall back.
+    /// For wizard:orb it waits for the page's wizard:orb-state answer.
+    func uxSend(_ event: String, _ detail: [String: Any], done: @escaping (String?) -> Void) {
+        let js = """
+        const ux = window.wizardUX;
+        if (!ux || !Array.isArray(ux.events) || !ux.events.includes(name)) return null;
+        if (name !== 'wizard:orb') { window.dispatchEvent(new CustomEvent(name, { detail })); return 'sent'; }
+        return await new Promise(res => {
+          const t = setTimeout(() => res('pending'), 2000);
+          window.addEventListener('wizard:orb-state', e => { clearTimeout(t); res((e.detail && e.detail.state) || 'none'); }, { once: true });
+          window.dispatchEvent(new CustomEvent(name, { detail }));
+        });
+        """
+        web.callAsyncJavaScript(js, arguments: ["name": event, "detail": detail], in: nil, in: .page) { r in
+            switch r {
+            case .success(let v): done(v as? String)
+            case .failure(let e): NSLog("Wizard: bridge %@ failed: %@", event, e.localizedDescription); done(nil)
+            }
+        }
+    }
+
+    /// Is the page in the window Wizard UX (bridge ready)?
+    func uxState(_ done: @escaping ([String: Any]?) -> Void) {
+        web.evaluateJavaScript("window.wizardUX ? JSON.stringify(window.wizardUX) : ''") { r, _ in
+            let s = (r as? String) ?? ""
+            done(s.isEmpty ? nil : (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any])
         }
     }
 
@@ -947,7 +1007,23 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     // MARK: WKNavigationDelegate
 
+    var onNavigate: () -> Void = {}
+    /// Origins already checked for Wizard UX this session (so a legacy-only back end isn't probed on every load).
+    var resolvedOrigins: Set<String> = []
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
+        if homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
+            let key = "\(u.scheme ?? "")://\(h):\(u.port ?? 0)"
+            if !resolvedOrigins.contains(key) {
+                resolvedOrigins.insert(key)
+                resolveHome(u) { [weak self] home in
+                    guard let self, home != u else { return }
+                    self.homeURL = home; self.load(home)
+                }
+            }
+        }
+        onNavigate()
         loadedAt = Date()
         localRetries = 0
         overlay.isHidden = true
@@ -1014,9 +1090,23 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
 // MARK: - App
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var controller: WizardWindowController!
     let wizardsMenu = NSMenu(title: "Wizard")
+    let statusMenu = WizardStatusMenu()
+    let statusActions = WizardStatusActions()
+    var bindingsTimer: Timer?
+    var quitDeadline: TimeInterval = 0
+    var quitTimer: Timer?
+    var quitKeyMonitor: Any?
+    lazy var quitHint: NSPanel = {
+        let panel = WizStyle.panel(NSRect(x: 0, y: 0, width: 340, height: 58))
+        panel.ignoresMouseEvents = true
+        let label = WizStyle.label("Press ⌘Q again to quit", size: 17, weight: .semibold)
+        label.frame = NSRect(x: 20, y: 17, width: 300, height: 25)
+        panel.contentView?.addSubview(label)
+        return panel
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
@@ -1024,18 +1114,193 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()
+        controller.window?.delegate = self
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         controller.begin()
+        installQuitGuard()
+        installWizardKey()
+        installMeetings()
+    }
+
+    // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
+
+    func installMeetings() {
+        MeetingBridge.register(origin: { [weak self] in self?.wizardOrigin })
+        MeetingSpool.shared.kick()   // deliver anything left from a previous run
+        let panel = RecorderPanel.shared
+        panel.onExpand = { [weak self] url in
+            guard let self, let u = URL(string: url) else { return }
+            if let o = self.wizardOrigin, u.host == o.host, let c = URLComponents(url: u, resolvingAgainstBaseURL: false) {
+                var p = c.percentEncodedPath; if let q = c.percentEncodedQuery { p += "?" + q }; if let f = c.percentEncodedFragment { p += "#" + f }
+                self.openView(p)
+            } else { self.showMainWindow(); self.controller.load(u) }
+        }
+        panel.shouldShow = { [weak self] in
+            guard let self, NSApp.isActive, self.controller.window?.isVisible == true, self.controller.window?.isMiniaturized == false,
+                  let s = MeetingRecorder.shared.session, let u = self.controller.web.url else { return true }
+            // Mizel already shows this recording in the window.
+            return !(u.path.contains("/meetings") && (u.fragment ?? "").contains(s.meetingId))
+        }
+        for n in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification, NSWindow.didMiniaturizeNotification,
+                  NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification] {
+            NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { _ in DispatchQueue.main.async { panel.sync() } }
+        }
+        controller.onNavigate = { panel.sync() }
+
+        CallPrompt.shared.onRecord = { [weak self] title, eventId in self?.recordNew(title: title, eventId: eventId) }
+        CallDetector.shared.origin = { [weak self] in self?.wizardOrigin }
+        CallDetector.shared.install()
+
+        let vk = VoiceKeys.shared
+        vk.origin = { [weak self] in self?.wizardOrigin }
+        vk.orb = { [weak self] start in self?.orb(start) }
+        VoiceKeys.deliverInWizard = { [weak self] text, done in
+            guard let self, NSApp.isActive, self.controller.window?.isKeyWindow == true else { done(false); return }
+            self.controller.uxSend("wizard:dictation", ["text": text]) { done($0 != nil) }
+        }
+        vk.install(prompt: false)
+
+        statusActions.isRecording = { MeetingRecorder.shared.isRecording }
+        statusActions.recordToggle = { [weak self] in
+            if MeetingRecorder.shared.isRecording { MeetingRecorder.shared.stop(finalize: true) { _ in } }
+            else { self?.recordNew(title: nil, eventId: CallDetector.shared.currentEvent()?["id"] as? String) }
+        }
+    }
+
+    func recordNew(title: String?, eventId: String?) {
+        guard let o = wizardOrigin else { return }
+        let clean = title.map { $0.replacingOccurrences(of: "^(Call: |Starting now: )", with: "", options: .regularExpression) }
+        MeetingRecorder.shared.startNew(origin: o, title: eventId == nil ? clean : nil, calendarEventId: eventId) { err in
+            if let err {
+                let a = NSAlert(); a.messageText = "Couldn't start recording"; a.informativeText = err.localizedDescription; a.runModal()
+            }
+        }
+    }
+
+    /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
+    /// Wizard UX gets a wizard:orb event and answers with its state; the legacy UX is driven through its buttons.
+    func orb(_ start: Bool) {
+        guard let o = wizardOrigin else { return }
+        showMainWindow()
+        _ = start
+        // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
+        let legacy = "(() => { const f = document.querySelector('button.voice-fab'); const l = f ? (f.getAttribute('aria-label')||'') : ''; if (f && /Finish and send/.test(l)) { f.click(); return 'sent'; } if (/Opening microphone|Transcribing/.test(l)) return 'busy'; if (f && !f.disabled && /Start voice/.test(l)) { f.click(); return 'voice'; } const n = document.querySelector('button.new-thread-fab'); if (n) { n.click(); return 'new'; } return 'none'; })()"
+        var tries = 0
+        func retry() {
+            guard tries < 25 else { MeetingLog.log("orb: gave up"); return }
+            tries += 1
+            if tries == 1, start, let u = controller.web.url, u.path.contains("/meetings") || u.path.contains("/files") || u.path.contains("/apps") {
+                controller.loadHome()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: attempt)
+        }
+        func attempt() {
+            controller.uxSend("wizard:orb", ["action": "toggle"]) { [weak self] state in
+                guard let self else { return }
+                // Wizard UX answered (voice / sent / busy / none): it owns the outcome.
+                if let state { MeetingLog.log("orb (bridge): \(state)"); return }
+                self.controller.web.evaluateJavaScript(legacy) { r, _ in
+                    let res = (r as? String) ?? "none"
+                    MeetingLog.log("orb (legacy): \(res)")
+                    if res == "none" { retry() }
+                }
+            }
+        }
+        _ = o
+        attempt()
+    }
+
+    // MARK: Wizard key, search, menu bar
+
+    /// Origin of the Wizard this window is showing (the place views like /meetings/ live).
+    var wizardOrigin: URL? {
+        let base = controller.web.url ?? Store.active.flatMap { URL(string: $0.url) }
+        guard let u = base, let scheme = u.scheme, let host = u.host, ["http", "https"].contains(scheme) else { return nil }
+        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = u.port
+        return c.url
+    }
+
+    func installWizardKey() {
+        statusActions.statusLine = { [weak self] in self?.statusLine() ?? "" }
+        statusActions.isLocal = { Store.active?.kind == .thisMac }
+        statusActions.open = { [weak self] path in self?.openView(path) }
+        statusActions.show = { [weak self] in self?.showMainWindow() }
+        statusActions.quit = { if Store.active?.kind == .thisMac { HostControl.send("quit") }; NSApp.terminate(nil) }
+        statusActions.toggleVoice = { VoiceKeys.enabled.toggle(); VoiceKeys.shared.install(prompt: VoiceKeys.enabled) }
+        statusMenu.install(statusActions)
+
+        let search = WizardSearch.shared
+        search.origin = { [weak self] in self?.wizardOrigin }
+        search.onOpen = { [weak self] path in self?.openView(path) }
+        WizardBindings.onChange = { search.rebuildCatalog(apps: []); search.refreshApps() }
+
+        let key = WizardKey.shared
+        key.onTap = { WizardSearch.shared.toggle() }
+        key.onChord = { [weak self] c in
+            if c == " " { WizardSearch.shared.toggle(); return }
+            if let b = WizardBindings.current.first(where: { $0.key == String(c) }), let p = b.open { self?.openView(p) }
+        }
+        key.install()
+        if CapsLockRemap.enabled { CapsLockRemap.install() }
+
+        WizardBindings.refresh(origin: wizardOrigin)
+        bindingsTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            WizardBindings.refresh(origin: self?.wizardOrigin)
+        }
+    }
+
+    func statusLine() -> String {
+        guard let b = Store.active else { return "Wizard isn't set up yet" }
+        if b.kind == .remote { return "Connected to \(b.name)" }
+        guard let d = try? Data(contentsOf: WizardShared.statusFile),
+              let s = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let state = s["state"] as? String else {
+            return "Wizard OS on this Mac"
+        }
+        switch state {
+        case "running": return "Wizard is running on this Mac"
+        case "starting": return "Wizard OS is starting…"
+        case "stopped": return "Wizard OS is stopped"
+        case "notInstalled": return "Wizard OS is not installed"
+        case "stopping": return "Wizard OS is shutting down…"
+        default: return "Wizard OS hit a problem — see logs"
+        }
+    }
+
+    func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Open a Wizard view (path on the Wizard's own origin) in the main window.
+    func openView(_ path: String) {
+        guard let origin = wizardOrigin, let url = URL(string: path, relativeTo: origin)?.absoluteURL,
+              url.host == origin.host else { return }
+        showMainWindow()
+        // Wizard UX opens it as a window on its desktop; anything else navigates the page.
+        controller.uxSend("wizard:open", ["path": path]) { [weak self] r in
+            if r == nil { self?.controller.load(url) }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { controller.showWindow(nil) }
+        if !flag { showMainWindow() }
         return true
     }
 
-    // Closing the window quits the front end; Wizard OS keeps running in the menu bar.
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // Closing the window keeps Wizard in the menu bar (Wizard key, search, meeting detection keep working).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        // Leave the keyboard as we found it when Wizard isn't running.
+        if CapsLockRemap.active { CapsLockRemap.remove() }
+        // Chunks already on disk upload at next launch; flush the current partial chunk now.
+        if let s = MeetingRecorder.shared.session { s.me.stop(); s.them?.stop(); MeetingSpool.shared.markDone(s.meetingId) }
+    }
 
     func buildMenus() {
         let main = NSMenu()
@@ -1045,7 +1310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Wizard", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Wizard", action: #selector(requestGuardedQuit(_:)), keyEquivalent: "q").target = self
         appItem.submenu = appMenu
 
         let editItem = NSMenuItem(); main.addItem(editItem)
@@ -1073,7 +1338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let winItem = NSMenuItem(); main.addItem(winItem)
         let win = NSMenu(title: "Window")
         win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        win.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        win.addItem(withTitle: "Close App", action: #selector(closeWizardApp(_:)), keyEquivalent: "w").target = self
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
@@ -1096,11 +1361,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
     }
 
-    // QA hooks (only when `defaults write org.humanitylabs.wizard QAHooks -bool true`).
+    // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
     func installQAHooks() {
         guard UserDefaults.standard.bool(forKey: "QAHooks") else { return }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(qa(_:)),
-            name: Notification.Name("org.humanitylabs.wizard.qa"), object: nil, suspensionBehavior: .deliverImmediately)
+            name: Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: nil, suspensionBehavior: .deliverImmediately)
     }
 
     @objc func qa(_ n: Notification) {
@@ -1129,9 +1394,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "eval":
             controller.web.evaluateJavaScript(arg) { r, e in
                 let s = e.map { "ERROR \($0)" } ?? String(describing: r ?? "nil")
-                try? s.write(toFile: "/tmp/wizard-qa-eval.txt", atomically: true, encoding: .utf8)
+                try? s.write(toFile: "/tmp/wizard-mvp-qa-eval.txt", atomically: true, encoding: .utf8)
             }
-        case "snapshot": snapshot(to: arg.isEmpty ? "/tmp/wizard-qa.png" : arg)
+        case "snapshot": snapshot(to: arg.isEmpty ? "/tmp/wizard-mvp-qa.png" : arg)
+        case "search": WizardSearch.shared.show(); if !arg.isEmpty { WizardSearch.shared.field.stringValue = arg; WizardSearch.shared.filter() }
+        case "search-open": WizardSearch.shared.openSelected()
+        case "search-snapshot":
+            let p = WizardSearch.shared.panel
+            if let v = p.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg.isEmpty ? "/tmp/wizard-mvp-qa-search.png" : arg))
+            }
+        case "wizard-key": // simulate the physical key path: down, optional chord letter, up
+            WizardKey.shared.handle(id: 1, pressed: true)
+            if let c = arg.first {
+                let id = UInt32(100 + (Array(WizardBindings.keyCodes.keys).firstIndex(of: c) ?? 0))
+                WizardKey.shared.handle(id: id, pressed: true)
+            }
+            WizardKey.shared.handle(id: 1, pressed: false)
+        case "close-window": controller.window?.performClose(nil)
+        case "show-window": showMainWindow()
+        case "command-q-repeat": guardedQuit(isRepeat: true)
+        case "command-q":
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12) {
+                let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+                try? String(handled).write(toFile: "/tmp/wizard-mvp-qa-command-q.txt", atomically: true, encoding: .utf8)
+            }
+        case "command-w":
+            // Exercise the actual AppKit menu equivalent, not a direct call to the handler.
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13) {
+                let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+                try? String(handled).write(toFile: "/tmp/wizard-mvp-qa-command-w.txt", atomically: true, encoding: .utf8)
+            }
+        case "ux-state":
+            controller.uxState { ux in
+                let s: [String: Any] = ["wizardUX": ux ?? NSNull(), "url": self.controller.web.url?.absoluteString ?? "",
+                                        "home": self.controller.homeURL?.absoluteString ?? ""]
+                if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) { try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-ux.json")) }
+            }
+        case "ux-open": openView(arg)
+        case "ux-dictation":
+            controller.uxSend("wizard:dictation", ["text": arg]) { r in try? (r ?? "nil").write(toFile: "/tmp/wizard-mvp-qa-dictation.txt", atomically: true, encoding: .utf8) }
+        case "meeting-new": recordNew(title: arg.isEmpty ? "QA meeting" : arg, eventId: nil)
+        case "meeting-stop": MeetingRecorder.shared.stop(finalize: true) { s in
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) { try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-meeting-stop.json")) } }
+        case "meeting-note": MeetingRecorder.shared.addNote(arg)
+        case "meeting-expand": RecorderPanel.shared.expand()
+        case "meeting-prompt": CallDetector.shared.prompt(arg.isEmpty ? "Call in Zoom" : arg, eventId: nil)
+        case "meeting-prompt-record": CallPrompt.shared.record()
+        case "voice-tap": VoiceKeys.shared.tap(arg == "cmd" ? VoiceKeys.rightCommand : VoiceKeys.rightOption)
+        case "voice-enable": VoiceKeys.enabled = arg != "off"; VoiceKeys.shared.install(prompt: false)
+        case "panel-snapshot":
+            // panel-snapshot <recorder|prompt|hud> <png>
+            let a = arg.split(separator: " ", maxSplits: 1).map(String.init)
+            let p: NSPanel = a.first == "quit" ? quitHint : a.first == "prompt" ? CallPrompt.shared.panel : a.first == "hud" ? VoiceHUD.shared.panel : RecorderPanel.shared.panel
+            if let v = p.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: a.count > 1 ? a[1] : "/tmp/wizard-mvp-qa-panel.png"))
+            }
+        case "meeting-state":
+            var s: [String: Any] = MeetingRecorder.shared.status()
+            s["recorderVisible"] = RecorderPanel.shared.panel.isVisible
+            s["detector"] = CallDetector.shared.state
+            s["voice"] = VoiceKeys.shared.state
+            s["hudVisible"] = VoiceHUD.shared.panel.isVisible
+            s["spoolPending"] = MeetingSpool.shared.pendingTotal
+            s["micAuth"] = AVCaptureDevice.authorizationStatus(for: .audio).rawValue
+            s["url"] = controller.web.url?.absoluteString ?? ""
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-meeting.json"))
+            }
+        case "keys-state":
+            let s: [String: Any] = [
+                "triggerRegistered": WizardKey.shared.registered, "capsRemapActive": CapsLockRemap.active,
+                "bindings": WizardBindings.current.map { "\($0.key)=\($0.open ?? "")" },
+                "searchVisible": WizardSearch.shared.panel.isVisible,
+                "searchResults": WizardSearch.shared.results.prefix(8).map { $0.title },
+                "statusMenu": statusMenu.titles(), "statusItemVisible": statusMenu.item.isVisible,
+                "activationPolicy": NSApp.activationPolicy().rawValue, "windowVisible": controller.window?.isVisible ?? false,
+                "windowKey": controller.window?.isKeyWindow ?? false, "overlayHidden": controller.overlay.isHidden,
+                "quitHintVisible": quitHint.isVisible, "quitArmed": quitDeadline > ProcessInfo.processInfo.systemUptime,
+                "url": controller.web.url?.absoluteString ?? ""]
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-keys.json"))
+            }
         case "state":
             let s: [String: Any] = ["overlayHidden": controller.overlay.isHidden, "title": controller.title.stringValue,
                                     "subtitle": controller.subtitle.stringValue, "url": controller.web.url?.absoluteString ?? "",
@@ -1140,7 +1492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     "localVoice": controller.localVoiceQAState,
                                     "backends": Store.backends.map { $0.name }, "active": Store.activeIndex]
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
-                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-state.json"))
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-state.json"))
             }
         default: break
         }
@@ -1158,6 +1510,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             v.cacheDisplay(in: v.bounds, to: rep)
             let img = NSImage(size: v.bounds.size); img.addRepresentation(rep); write(img)
         }
+    }
+
+    /// ⌘W closes a window managed inside Wizard UX; the host window stays open at its root.
+    /// Other native windows keep their normal Close behavior. The red window button is unchanged.
+    @objc func closeWizardApp(_ sender: Any?) {
+        if let key = NSApp.keyWindow, key !== controller.window { key.performClose(sender); return }
+        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
+        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', {key:'w', code:'KeyW', metaKey:true, bubbles:true, cancelable:true}))")
+    }
+
+    func installQuitGuard() {
+        quitKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isQuit = event.charactersIgnoringModifiers?.lowercased() == "q" && mods.contains(.command)
+                && !mods.contains(.option) && !mods.contains(.control) && !mods.contains(.shift)
+            if isQuit && event.isARepeat { return nil } // Holding Q is never a second press.
+            if !isQuit { self?.clearQuitConfirmation() }
+            return event
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.clearQuitConfirmation()
+        }
+    }
+
+    func clearQuitConfirmation() {
+        quitDeadline = 0; quitTimer?.invalidate(); quitTimer = nil; quitHint.orderOut(nil)
+    }
+
+    @objc func requestGuardedQuit(_ sender: Any?) {
+        // AppKit also invokes menu actions with mouse/KitDefined events, which cannot read isARepeat.
+        let repeatKey = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        guardedQuit(isRepeat: repeatKey)
+    }
+
+    func guardedQuit(isRepeat: Bool) {
+        guard !isRepeat else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if quitDeadline > now { clearQuitConfirmation(); NSApp.terminate(nil); return }
+        quitDeadline = now + 2
+        quitTimer?.invalidate()
+        let frame = controller.window?.frame ?? NSScreen.main?.visibleFrame ?? .zero
+        quitHint.setFrameOrigin(NSPoint(x: frame.midX - 170, y: frame.midY - 29))
+        quitHint.orderFrontRegardless()
+        quitTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.clearQuitConfirmation() }
     }
 
     @objc func reload() { controller.begin() }

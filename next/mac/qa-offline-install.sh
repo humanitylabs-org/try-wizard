@@ -34,7 +34,7 @@ else: raise SystemExit('QA processes did not stop; refusing state move')
 PY
 }
 stop_qa
-defaults export org.humanitylabs.wizard "$EV/preferences-before.plist"
+defaults export org.humanitylabs.wizard.mvp "$EV/preferences-before.plist"
 [ ! -e "$SAVED" ] && [ ! -e "$RETAINED" ]
 mv "$AS" "$SAVED"
 printf '%s\n' "$SAVED" "$RETAINED" > "$EV/state-paths.txt"
@@ -43,25 +43,25 @@ restore() {
   stop_qa || { echo "RESTORE_BLOCKED: saved state at $SAVED"; exit 1; }
   [ ! -e "$AS" ] || mv "$AS" "$RETAINED"
   mv "$SAVED" "$AS"
-  defaults import org.humanitylabs.wizard "$EV/preferences-before.plist"
+  defaults import org.humanitylabs.wizard.mvp "$EV/preferences-before.plist"
   open "$APP"
   echo "QA_STATE_RESTORED (offline state retained at $RETAINED)"
   exit "$rc"
 }
 trap restore EXIT
 mkdir -p "$AS"; touch "$AS/dev-shell"
-defaults delete org.humanitylabs.wizard >/dev/null 2>&1 || true
-defaults write org.humanitylabs.wizard QAHooks -bool true
+defaults delete org.humanitylabs.wizard.mvp >/dev/null 2>&1 || true
+defaults write org.humanitylabs.wizard.mvp QAHooks -bool true
 open "$APP"; sleep 3
 bash "$HERE/qa.sh" choose-this-mac-offline
-sleep 2; /tmp/wizard-qa-post "files-folder $AS/qa-media"
+sleep 2; /tmp/wizard-mvp-qa-post "files-folder $AS/qa-media"
 # Wait for the feed-unavailable screen, not merely for an elapsed delay.
 for i in $(seq 1 60); do
-  /tmp/wizard-qa-post state; sleep 1
-  python3 -c 'import json,sys; d=json.load(open("/tmp/wizard-qa-state.json"));sys.exit(0 if d["title"]=="Get Wizard OS" else 1)' && break
+  /tmp/wizard-mvp-qa-post state; sleep 1
+  python3 -c 'import json,sys; d=json.load(open("/tmp/wizard-mvp-qa-state.json"));sys.exit(0 if d["title"]=="Get Wizard OS" else 1)' && break
 done
-python3 -c 'import json;d=json.load(open("/tmp/wizard-qa-state.json"));assert d["title"]=="Get Wizard OS",d;print("FEED_UNAVAILABLE_OK",d["title"])'
-cp /tmp/wizard-qa-state.json "$EV/feed-unavailable.json"
+python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert d["title"]=="Get Wizard OS",d;print("FEED_UNAVAILABLE_OK",d["title"])'
+cp /tmp/wizard-mvp-qa-state.json "$EV/feed-unavailable.json"
 python3 - "$AS" <<'PY'
 import json,pathlib,sys,tarfile
 p=pathlib.Path(sys.argv[1]); b=p/'bad'; b.mkdir(exist_ok=True)
@@ -70,26 +70,26 @@ p=pathlib.Path(sys.argv[1]); b=p/'bad'; b.mkdir(exist_ok=True)
 with tarfile.open(p/'wizard-os-bad.tar.xz','w:xz') as t:
     for name in ['manifest.json','rootfs.img']: t.add(b/name,arcname=name)
 PY
-/tmp/wizard-qa-post "install-file $AS/wizard-os-bad.tar.xz"; sleep 4
-/tmp/wizard-qa-post state; sleep 1
-python3 -c 'import json;d=json.load(open("/tmp/wizard-qa-state.json"));assert "valid Wizard OS image" in d["subtitle"],d;print("CORRUPT_HASH_REJECTED_OK",d["subtitle"])'
+/tmp/wizard-mvp-qa-post "install-file $AS/wizard-os-bad.tar.xz"; sleep 4
+/tmp/wizard-mvp-qa-post state; sleep 1
+python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert "valid Wizard OS image" in d["subtitle"],d;print("CORRUPT_HASH_REJECTED_OK",d["subtitle"])'
 [ ! -e "$AS/os/disk.img" ]
-cp /tmp/wizard-qa-state.json "$EV/corrupt-rejected.json"
+cp /tmp/wizard-mvp-qa-state.json "$EV/corrupt-rejected.json"
 t0=$(python3 -c 'import time;print(time.time())')
-/tmp/wizard-qa-post "install-file $OS"
+/tmp/wizard-mvp-qa-post "install-file $OS"
 ok=0
 for i in $(seq 1 600); do
-  /tmp/wizard-qa-post state; sleep 1
+  /tmp/wizard-mvp-qa-post state; sleep 1
   if python3 - "$t0" <<'PY'
 import json,sys
-d=json.load(open('/tmp/wizard-qa-state.json'))
+d=json.load(open('/tmp/wizard-mvp-qa-state.json'))
 sys.exit(0 if d['overlayHidden'] and d['loadedAt']>float(sys.argv[1]) else 1)
 PY
   then ok=1; break; fi
 done
 [ "$ok" = 1 ] || { echo 'FAIL: file install did not load window'; exit 1; }
-cp /tmp/wizard-qa-state.json "$EV/offline-window.json"
-curl -fsS http://127.0.0.1:47830/healthz
+cp /tmp/wizard-mvp-qa-state.json "$EV/offline-window.json"
+curl -fsS http://127.0.0.1:48030/healthz
 # The factory script must match the corrected source, not a previous live hotpatch.
 bash "$HERE/qa-guest.sh" 'cat /opt/wizard/bin/wizard-media' > "$EV/installed-wizard-media"
 cmp "$HERE/../guest/overlay/opt/wizard/bin/wizard-media" "$EV/installed-wizard-media"
@@ -99,8 +99,8 @@ grep -q FINAL_ARCHIVE_MEDIA_OK "$EV/media-check.log"
 [ "$(cat "$AS/qa-media/Inbox/recovered-files-root.txt")" = filesroot ]
 echo MAC_VISIBLE_WRITES_OK
 # 'On another computer' uses the disposable QA guest address, never a live agent.
-/tmp/wizard-qa-post 'connect http://127.0.0.1:47823/wizard-ux/'
-sleep 8; /tmp/wizard-qa-post state; sleep 1
-python3 -c 'import json;d=json.load(open("/tmp/wizard-qa-state.json"));assert d["overlayHidden"] and d["active"]==1 and d["url"].startswith("http://127.0.0.1:47823/wizard-ux/"),d;print("ANOTHER_COMPUTER_LOCAL_QA_OK",d["url"])'
-cp /tmp/wizard-qa-state.json "$EV/another-computer.json"
+/tmp/wizard-mvp-qa-post 'connect http://127.0.0.1:48023/wizard-ux/'
+sleep 8; /tmp/wizard-mvp-qa-post state; sleep 1
+python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert d["overlayHidden"] and d["active"]==1 and d["url"].startswith("http://127.0.0.1:48023/wizard-ux/"),d;print("ANOTHER_COMPUTER_LOCAL_QA_OK",d["url"])'
+cp /tmp/wizard-mvp-qa-state.json "$EV/another-computer.json"
 echo QA_OFFLINE_FINAL_ARCHIVE_OK

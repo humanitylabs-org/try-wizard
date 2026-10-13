@@ -1,11 +1,11 @@
 #!/bin/bash
 # Run a command as root inside the local Wizard OS (QA only). Needs the dev shell: create
 # "~/Library/Application Support/Wizard/dev-shell" before Wizard OS starts (qa-fresh.sh does), then the guest
-# listens on vsock 9200 and Wizard Host bridges it to 127.0.0.1:47900.
+# listens on vsock 9200 and Wizard Host bridges it to 127.0.0.1:48000.
 #   qa-guest.sh 'wam doctor'      (commands run as root; use `sudo -iu wizard ...` for the wizard user)
 #   qa-guest.sh < script.sh
 set -euo pipefail
-PORT=${PORT:-47900}
+PORT=${PORT:-48000}
 if [ $# -gt 0 ]; then CMD="$1"; else CMD="$(cat)"; fi
 python3 - "$PORT" "$CMD" <<'PY'
 import socket, sys

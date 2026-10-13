@@ -15,7 +15,7 @@ need=16 << 30
 if free < need:
     raise SystemExit(f'QA_UPDATE_BLOCKED_CAPACITY: {free} bytes free; require {need} bytes')
 PY
-U=http://127.0.0.1:47823
+U=http://127.0.0.1:48023
 snapshot() {
   python3 - "$U" <<'PY'
 import json,sys,urllib.request
@@ -23,7 +23,7 @@ u=sys.argv[1]
 def get(url):
     with urllib.request.urlopen(url,timeout=20) as r: return json.load(r)
 s=get(u+'/wizard/hermes/api/sessions?limit=200')
-a=get(u+'/wizard/v1/apps'); o=get('http://127.0.0.1:47830/api/state')
+a=get(u+'/wizard/v1/apps'); o=get('http://127.0.0.1:48030/api/state')
 sessions=s.get('data') or s.get('sessions') or []
 assert sessions and a.get('apps') and o['done'], 'missing QA state'
 print(json.dumps({'sessions':sorted(x['id'] for x in sessions),
@@ -48,17 +48,17 @@ import pathlib,sys
 p=pathlib.Path(sys.argv[1]); m=p/'os/manifest.json'
 sys.exit(0 if m.exists() and m.stat().st_ctime>float(sys.argv[2]) and not (p/'os-staging').exists() else 1)
 PY
-  then /tmp/wizard-qa-post reload; reloaded=1; fi
-  /tmp/wizard-qa-post state; sleep 0.2
+  then /tmp/wizard-mvp-qa-post reload; reloaded=1; fi
+  /tmp/wizard-mvp-qa-post state; sleep 0.2
   if python3 - "$t0" <<'PY'
 import json,sys
-d=json.load(open('/tmp/wizard-qa-state.json'))
+d=json.load(open('/tmp/wizard-mvp-qa-state.json'))
 sys.exit(0 if d['overlayHidden'] and d['loadedAt']>float(sys.argv[1]) else 1)
 PY
   then ok=1; break; fi
 done
 [ "$ok" = 1 ] || { echo 'FAIL: update did not load the guest window'; exit 1; }
-cp /tmp/wizard-qa-state.json "$EV/window.json"
+cp /tmp/wizard-mvp-qa-state.json "$EV/window.json"
 DISK_AFTER=$(stat -f '%d:%i:%z' "$AS/os/disk.img")
 echo "disk before=$DISK_BEFORE after=$DISK_AFTER"
 [ "$DISK_BEFORE" = "$DISK_AFTER" ] && [ ! -e "$AS/os/disk-previous.img" ] || { echo 'FAIL: disk replaced'; exit 1; }

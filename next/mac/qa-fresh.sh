@@ -14,7 +14,7 @@ APP="$HOME/Applications/WizardNext/Wizard.app"
 mkdir -p "$EV"; exec > >(tee "$EV/qa-fresh.log") 2>&1
 now() { python3 -c 'import time;print(time.time())'; }
 since() { python3 -c "import time;print('%.1f'%(time.time()-$1))"; }
-state() { /tmp/wizard-qa-post state 2>/dev/null; sleep 0.2; python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print(d['overlayHidden'],'|',d['title'],'|',d['url'])" 2>/dev/null; }
+state() { /tmp/wizard-mvp-qa-post state 2>/dev/null; sleep 0.2; python3 -c "import json;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));print(d['overlayHidden'],'|',d['title'],'|',d['url'])" 2>/dev/null; }
 bash "$HERE/qa.sh" state >/dev/null 2>&1
 # The app writes snapshots to /tmp (writing to an external volume would stop on a macOS privacy prompt).
 snap() { bash "$HERE/qa.sh" "snapshot /tmp/wq-$1.png"; sleep 2; mv -f "/tmp/wq-$1.png" "$EV/$1.png" 2>/dev/null; }
@@ -23,7 +23,7 @@ echo "== stop Wizard; wipe Wizard OS, logs, prefs and the files-folder choice"
 pkill -x Wizard; pkill -TERM -f "Wizard Host.app/Contents/MacOS"
 for i in $(seq 1 60); do pgrep -f "Wizard Host.app/Contents/MacOS" >/dev/null || break; sleep 1; done
 rm -rf "$AS/os" "$AS/os-staging" "$AS/logs" "$AS/host-status.json" "$AS/files-folder.json"
-defaults delete org.humanitylabs.wizard >/dev/null 2>&1 || true
+defaults delete org.humanitylabs.wizard.mvp >/dev/null 2>&1 || true
 mkdir -p "$AS"; touch "$AS/dev-shell"     # QA only: root shell into the guest (qa-guest.sh)
 
 # Feed: FEED_URL=<https://…/latest.json> downloads from a real host (no local server); FEED_DIR=<dir> serves an
@@ -51,8 +51,8 @@ echo "== install the app from the DMG"
 MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
 rm -rf "$APP"; mkdir -p "$(dirname "$APP")"; ditto "$MNT/Wizard.app" "$APP"; hdiutil detach -quiet "$MNT"
 codesign --verify --deep --strict "$APP" && echo "codesign (ad-hoc) ok"; du -sh "$APP"
-defaults write org.humanitylabs.wizard QAHooks -bool true
-defaults write org.humanitylabs.wizard osFeedURL "$FEED_URL"
+defaults write org.humanitylabs.wizard.mvp QAHooks -bool true
+defaults write org.humanitylabs.wizard.mvp osFeedURL "$FEED_URL"
 
 echo "== launch, On this Mac"
 if [ "${QA_SSH_LAUNCH:-0}" = 1 ]; then
@@ -72,7 +72,7 @@ seen=""
 while :; do
   s=$(state); [ "$s" != "$seen" ] && { echo "$(since $T0)s $s"; seen="$s"; }
   case "$s" in *"Setting up"*) [ -f "$EV/2-download.png" ] || snap 2-download;; esac
-  [ $(( ${PROG_N:=0} % 60 )) = 0 ] && python3 -c "import json;print('   progress:', json.load(open('/tmp/wizard-qa-state.json')).get('subtitle',''))" 2>/dev/null; PROG_N=$((PROG_N+1))
+  [ $(( ${PROG_N:=0} % 60 )) = 0 ] && python3 -c "import json;print('   progress:', json.load(open('/tmp/wizard-mvp-qa-state.json')).get('subtitle',''))" 2>/dev/null; PROG_N=$((PROG_N+1))
   case "$s" in True*) break;; *"didn"*|*"Get Wizard OS"*|*"Couldn"*) echo "FAIL: $s"; exit 1;; esac
   python3 -c "import time,sys;sys.exit(0 if time.time()-$T0<${QA_TIMEOUT:-900} else 1)" || { echo "FAIL: timeout"; exit 1; }
   sleep 0.5
@@ -83,14 +83,14 @@ sleep 1; snap 3-onboarding
 ls -la "$HOME/Wizard"
 
 echo "== onboarding: name, free brain, wake-up check, first chat"
-B=http://127.0.0.1:47830; J=(-H content-type:application/json)
+B=http://127.0.0.1:48030; J=(-H content-type:application/json)
 curl -s "${J[@]}" -XPOST $B/api/name -d '{"name":"Merlin"}' >/dev/null
 t=$(now); curl -s -m 200 "${J[@]}" -XPOST $B/api/brain -d '{"kind":"free"}' | python3 -c "import json,sys;d=json.load(sys.stdin);print('brain:',(d.get('brain') or {}).get('label'),d.get('error',''))"; echo "brain_s=$(since $t)"
 t=$(now); curl -s -m 300 -XPOST $B/api/verify | python3 -c "import json,sys;d=json.load(sys.stdin);print('wake-up reply:',d.get('reply') or d.get('error'))"; echo "verify_s=$(since $t)"
 TF=$(now); FIN=$(curl -s -m 60 -XPOST $B/api/finish); echo "finish: $FIN"
 SID=$(echo "$FIN" | python3 -c "import json,sys;print(json.load(sys.stdin).get('firstSessionId') or '')")
 [ -n "$SID" ] || { echo "FAIL: no first chat"; exit 1; }
-U=http://127.0.0.1:47823
+U=http://127.0.0.1:48023
 R=""
 for i in $(seq 1 150); do
   R=$(curl -s -m 10 "$U/wizard/hermes/api/sessions/$SID/messages?limit=50" | python3 -c "

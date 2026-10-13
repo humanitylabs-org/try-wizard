@@ -17,17 +17,17 @@ now() { python3 -c 'import time;print(time.time())'; }
 vmproc() { pgrep -n -f "com.apple.Virtualization.VirtualMachine"; }
 appopen_until_ux() { # seconds from `open` until the Wizard UX page finished loading in the window
   local t0=$(now); open "$APP"
-  rm -f /tmp/wizard-qa-state.json
+  rm -f /tmp/wizard-mvp-qa-state.json
   while python3 -c "import time,sys;sys.exit(0 if time.time()-$t0<240 else 1)"; do
-    sleep 0.1; /tmp/wizard-qa-post state 2>/dev/null; sleep 0.05
-    python3 -c "import json,sys;d=json.load(open('/tmp/wizard-qa-state.json'));sys.exit(0 if (d['overlayHidden'] and d['loadedAt']>$t0 and '/wizard-ux/' in d['url']) or d['title'].startswith(('Can','Wizard OS didn')) else 1)" 2>/dev/null && break
+    sleep 0.1; /tmp/wizard-mvp-qa-post state 2>/dev/null; sleep 0.05
+    python3 -c "import json,sys;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));sys.exit(0 if (d['overlayHidden'] and d['loadedAt']>$t0 and '/wizard-ux/' in d['url']) or d['title'].startswith(('Can','Wizard OS didn')) else 1)" 2>/dev/null && break
   done
-  python3 -c "import json;d=json.load(open('/tmp/wizard-qa-state.json'));print('%.2f'%(d['loadedAt']-$t0) if d['overlayHidden'] and d['loadedAt'] else 'FAIL '+d['title']+' / '+d['subtitle'])"
+  python3 -c "import json;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));print('%.2f'%(d['loadedAt']-$t0) if d['overlayHidden'] and d['loadedAt'] else 'FAIL '+d['title']+' / '+d['subtitle'])"
 }
 hostcmd() {
   cat > /tmp/hc.swift <<EOF
 import Foundation
-DistributedNotificationCenter.default().postNotificationName(Notification.Name("org.humanitylabs.wizard.host.command"), object: CommandLine.arguments[1], userInfo: nil, deliverImmediately: true)
+DistributedNotificationCenter.default().postNotificationName(Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: CommandLine.arguments[1], userInfo: nil, deliverImmediately: true)
 RunLoop.main.run(until: Date().addingTimeInterval(0.3))
 EOF
   [[ -x /tmp/hc ]] || xcrun swiftc -O /tmp/hc.swift -o /tmp/hc 2>/dev/null; /tmp/hc "$1"
@@ -39,7 +39,7 @@ mem() {
   bash "$HERE/qa-guest.sh" 'free -m | sed -n 1,2p; docker stats --no-stream --format "{{.Name}}\t{{.MemUsage}}" | sort' 2>/dev/null
 }
 snapshot_data() { # chats, installed apps, files: compared before/after
-  local U=http://127.0.0.1:47823
+  local U=http://127.0.0.1:48023
   echo "chats: $(curl -s -m 10 "$U/wizard/hermes/api/sessions?limit=200" | python3 -c "import json,sys;d=json.load(sys.stdin);s=d.get('data') or d.get('sessions') or [];print(len(s), sorted(x.get('id') for x in s)[:3])" 2>/dev/null)"
   echo "apps: $(curl -s -m 10 "$U/wizard/v1/apps" | python3 -c "import json,sys;d=json.load(sys.stdin);print(sorted(a['id'] for a in d.get('apps',[])))" 2>/dev/null)"
   echo "files: $(cd "$HOME/Wizard" 2>/dev/null && ls -1 | tr '\n' ' ')"
@@ -51,8 +51,8 @@ echo "== 1. window closed -> Wizard OS keeps running"
 osascript -e 'tell application "Wizard" to quit' 2>/dev/null; sleep 2
 pgrep -x Wizard >/dev/null && echo "app still running" || echo "app quit"
 grep state "$AS/host-status.json"
-curl -s -m 3 http://127.0.0.1:47830/healthz && echo " <- front door answering with the app closed"
-curl -s -m 3 http://127.0.0.1:47823/wizard/health | head -c 120; echo " <- wizard-shell answering"
+curl -s -m 3 http://127.0.0.1:48030/healthz && echo " <- front door answering with the app closed"
+curl -s -m 3 http://127.0.0.1:48023/wizard/health | head -c 120; echo " <- wizard-shell answering"
 mem
 
 echo "== 2. warm open (Wizard OS running)"
@@ -72,5 +72,5 @@ sleep 60; echo "== memory after cold boot + 60 s"; mem
 echo "== 4. chats, installed apps and files after quit/reopen and two Wizard OS restarts"
 AFTER=$(snapshot_data); echo "$AFTER"
 [ "$BEFORE" = "$AFTER" ] && echo "PERSIST_OK" || echo "PERSIST_DIFF"
-curl -s http://127.0.0.1:47830/api/state | python3 -c "import json,sys;d=json.load(sys.stdin);print('name',d['name'],'done',d['done'],'brain',(d['brain'] or {}).get('label'))"
+curl -s http://127.0.0.1:48030/api/state | python3 -c "import json,sys;d=json.load(sys.stdin);print('name',d['name'],'done',d['done'],'brain',(d['brain'] or {}).get('label'))"
 echo "== log"; tail -12 "$AS/logs/host.log"
