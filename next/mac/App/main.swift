@@ -624,6 +624,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let statusMenu = WizardStatusMenu()
     let statusActions = WizardStatusActions()
     var bindingsTimer: Timer?
+    var quitDeadline: TimeInterval = 0
+    var quitTimer: Timer?
+    var quitKeyMonitor: Any?
+    lazy var quitHint: NSPanel = {
+        let panel = WizStyle.panel(NSRect(x: 0, y: 0, width: 340, height: 58))
+        panel.ignoresMouseEvents = true
+        let label = WizStyle.label("Press ⌘Q again to quit", size: 17, weight: .semibold)
+        label.frame = NSRect(x: 20, y: 17, width: 300, height: 25)
+        panel.contentView?.addSubview(label)
+        return panel
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -634,6 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         controller.begin()
+        installQuitGuard()
         installWizardKey()
         installMeetings()
     }
@@ -825,7 +837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Wizard", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Wizard", action: #selector(requestGuardedQuit(_:)), keyEquivalent: "q").target = self
         appItem.submenu = appMenu
 
         let editItem = NSMenuItem(); main.addItem(editItem)
@@ -923,6 +935,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             WizardKey.shared.handle(id: 1, pressed: false)
         case "close-window": controller.window?.performClose(nil)
         case "show-window": showMainWindow()
+        case "command-q-repeat": guardedQuit(isRepeat: true)
+        case "command-q":
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12) {
+                let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+                try? String(handled).write(toFile: "/tmp/wizard-qa-command-q.txt", atomically: true, encoding: .utf8)
+            }
         case "command-w":
             // Exercise the actual AppKit menu equivalent, not a direct call to the handler.
             if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
@@ -953,7 +974,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "panel-snapshot":
             // panel-snapshot <recorder|prompt|hud> <png>
             let a = arg.split(separator: " ", maxSplits: 1).map(String.init)
-            let p: NSPanel = a.first == "prompt" ? CallPrompt.shared.panel : a.first == "hud" ? VoiceHUD.shared.panel : RecorderPanel.shared.panel
+            let p: NSPanel = a.first == "quit" ? quitHint : a.first == "prompt" ? CallPrompt.shared.panel : a.first == "hud" ? VoiceHUD.shared.panel : RecorderPanel.shared.panel
             if let v = p.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
                 v.cacheDisplay(in: v.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: a.count > 1 ? a[1] : "/tmp/wizard-qa-panel.png"))
@@ -979,6 +1000,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 "statusMenu": statusMenu.titles(), "statusItemVisible": statusMenu.item.isVisible,
                 "activationPolicy": NSApp.activationPolicy().rawValue, "windowVisible": controller.window?.isVisible ?? false,
                 "windowKey": controller.window?.isKeyWindow ?? false, "overlayHidden": controller.overlay.isHidden,
+                "quitHintVisible": quitHint.isVisible, "quitArmed": quitDeadline > ProcessInfo.processInfo.systemUptime,
                 "url": controller.web.url?.absoluteString ?? ""]
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-keys.json"))
@@ -1016,6 +1038,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let key = NSApp.keyWindow, key !== controller.window { key.performClose(sender); return }
         guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
         controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', {key:'w', code:'KeyW', metaKey:true, bubbles:true, cancelable:true}))")
+    }
+
+    func installQuitGuard() {
+        quitKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isQuit = event.charactersIgnoringModifiers?.lowercased() == "q" && mods.contains(.command)
+                && !mods.contains(.option) && !mods.contains(.control) && !mods.contains(.shift)
+            if isQuit && event.isARepeat { return nil } // Holding Q is never a second press.
+            if !isQuit { self?.clearQuitConfirmation() }
+            return event
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.clearQuitConfirmation()
+        }
+    }
+
+    func clearQuitConfirmation() {
+        quitDeadline = 0; quitTimer?.invalidate(); quitTimer = nil; quitHint.orderOut(nil)
+    }
+
+    @objc func requestGuardedQuit(_ sender: Any?) {
+        // AppKit also invokes menu actions with mouse/KitDefined events, which cannot read isARepeat.
+        let repeatKey = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        guardedQuit(isRepeat: repeatKey)
+    }
+
+    func guardedQuit(isRepeat: Bool) {
+        guard !isRepeat else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if quitDeadline > now { clearQuitConfirmation(); NSApp.terminate(nil); return }
+        quitDeadline = now + 2
+        quitTimer?.invalidate()
+        let frame = controller.window?.frame ?? NSScreen.main?.visibleFrame ?? .zero
+        quitHint.setFrameOrigin(NSPoint(x: frame.midX - 170, y: frame.midY - 29))
+        quitHint.orderFrontRegardless()
+        quitTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.clearQuitConfirmation() }
     }
 
     @objc func reload() { controller.begin() }
