@@ -853,7 +853,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let winItem = NSMenuItem(); main.addItem(winItem)
         let win = NSMenu(title: "Window")
         win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        win.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        win.addItem(withTitle: "Close App", action: #selector(closeWizardApp(_:)), keyEquivalent: "w").target = self
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
@@ -922,6 +922,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             WizardKey.shared.handle(id: 1, pressed: false)
         case "close-window": controller.window?.performClose(nil)
+        case "show-window": showMainWindow()
+        case "command-w":
+            // Exercise the actual AppKit menu equivalent, not a direct call to the handler.
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command],
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13) {
+                let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+                try? String(handled).write(toFile: "/tmp/wizard-qa-command-w.txt", atomically: true, encoding: .utf8)
+            }
         case "ux-state":
             controller.uxState { ux in
                 let s: [String: Any] = ["wizardUX": ux ?? NSNull(), "url": self.controller.web.url?.absoluteString ?? "",
@@ -968,6 +978,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 "searchResults": WizardSearch.shared.results.prefix(8).map { $0.title },
                 "statusMenu": statusMenu.titles(), "statusItemVisible": statusMenu.item.isVisible,
                 "activationPolicy": NSApp.activationPolicy().rawValue, "windowVisible": controller.window?.isVisible ?? false,
+                "windowKey": controller.window?.isKeyWindow ?? false, "overlayHidden": controller.overlay.isHidden,
                 "url": controller.web.url?.absoluteString ?? ""]
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-qa-keys.json"))
@@ -997,6 +1008,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             v.cacheDisplay(in: v.bounds, to: rep)
             let img = NSImage(size: v.bounds.size); img.addRepresentation(rep); write(img)
         }
+    }
+
+    /// ⌘W closes a window managed inside Wizard UX; the host window stays open at its root.
+    /// Other native windows keep their normal Close behavior. The red window button is unchanged.
+    @objc func closeWizardApp(_ sender: Any?) {
+        if let key = NSApp.keyWindow, key !== controller.window { key.performClose(sender); return }
+        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
+        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', {key:'w', code:'KeyW', metaKey:true, bubbles:true, cancelable:true}))")
     }
 
     @objc func reload() { controller.begin() }
