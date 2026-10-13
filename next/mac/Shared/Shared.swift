@@ -18,7 +18,8 @@ enum WizardShared {
 
     static var supportDir: URL {
         // Dedicated internal-test identity; never opens or migrates the daily Wizard VM.
-        if let p = UserDefaults(suiteName: appBundleID)?.string(forKey: "DataHome"), p.hasPrefix("/") {
+        let defaults = Bundle.main.bundleIdentifier == appBundleID ? UserDefaults.standard : UserDefaults(suiteName: appBundleID)
+        if let p = defaults?.string(forKey: "DataHome"), p.hasPrefix("/") {
             return URL(fileURLWithPath: p, isDirectory: true)
         }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

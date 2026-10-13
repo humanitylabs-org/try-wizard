@@ -975,7 +975,20 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         panel.message = "Choose the wizard-os-….tar.xz file you downloaded (select every part if it came in parts)"
         panel.allowedContentTypes = []; panel.allowsOtherFileTypes = true; panel.allowsMultipleSelection = true
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        // Opt-in QA drives the real panel and its validation; no external Accessibility grant.
+        if UserDefaults.standard.bool(forKey: "QAHooks"),
+           let path = UserDefaults.standard.string(forKey: "QAFilePickerPath") {
+            let file = URL(fileURLWithPath: path)
+            panel.directoryURL = file.deletingLastPathComponent()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                panel.nameFieldStringValue = file.lastPathComponent
+                panel.ok(nil)
+            }
+        }
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        if UserDefaults.standard.bool(forKey: "QAHooks") {
+            try? panel.urls.map(\.path).joined(separator: "\n").write(toFile: "/tmp/wizard-mvp-qa-picker.txt", atomically: true, encoding: .utf8)
+        }
         showOverlay("Setting up Wizard on this Mac", "Checking \(panel.urls.count == 1 ? panel.urls[0].lastPathComponent : "\(panel.urls.count) files")…", progress: nil)
         installer.install(from: panel.urls)
     }
@@ -1375,6 +1388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let arg = parts.count > 1 ? parts[1] : ""
         switch parts[0] {
         case "choose-this-mac": addThisMac()
+        case "file-picker":
+            UserDefaults.standard.set(arg, forKey: "QAFilePickerPath")
+            controller.chooseOSFile()
+            UserDefaults.standard.removeObject(forKey: "QAFilePickerPath")
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
         case "files-folder": controller.setFilesFolder(arg.isEmpty ? WizardShared.defaultFilesFolder : URL(fileURLWithPath: arg))
