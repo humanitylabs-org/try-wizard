@@ -206,7 +206,9 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         poll()
     }
 
-    func stop(completion: (() -> Void)? = nil) {
+    var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
+    func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
+    func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
         guard let machine = vm, state == .running || state == .starting else { completion?(); return }
         state = .stopping
         log("stopping Wizard OS")
@@ -230,11 +232,48 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
             guard !finished else { return }
+            if !forceOnTimeout {
+                log("update clean shutdown timed out; keeping prior Host, no forced VM stop")
+                try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "Clean shutdown timed out"], WizardUpdate.response)
+                onTimeout?()
+                return
+            }
             log("clean shutdown timed out; forcing stop")
             machine.stop { _ in DispatchQueue.main.async(execute: done) }
         }
     }
     private var stopCompletion: (() -> Void)?
+
+    func runGuestPatch(_ complete: @escaping ([String: Any]?) -> Void) {
+        guard state == .running, let machine = vm, let device = machine.socketDevices.first as? VZVirtioSocketDevice else { complete(nil); return }
+        device.connect(toPort: WizardShared.guestDevShellPort) { [weak self] result in
+            guard let self else { complete(nil); return }
+            switch result {
+            case .failure: complete(nil)
+            case .success(let connection):
+                self.heldConnections.append(connection)
+                var finished = false
+                let done: ([String: Any]?) -> Void = { receipt in
+                    guard !finished else { return }; finished = true
+                    connection.close(); self.heldConnections.removeAll { $0 === connection }
+                    complete(receipt)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 900) { done(nil) }
+                DispatchQueue.global(qos: .utility).async {
+                    let handle = FileHandle(fileDescriptor: connection.fileDescriptor, closeOnDealloc: false)
+                    do {
+                        try handle.write(contentsOf: Data((WizardGuestPatchCommand.script + "\n").utf8))
+                        let data = try handle.readToEnd() ?? Data()
+                        let text = String(data: data, encoding: .utf8) ?? ""
+                        let line = text.split(separator: "\n").first(where: { $0.hasPrefix("WIZARD_PATCH_OK ") })
+                        let bytes = line.flatMap { String($0.dropFirst("WIZARD_PATCH_OK ".count)).data(using: .utf8) }
+                        let receipt = bytes.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                        DispatchQueue.main.async { done(receipt) }
+                    } catch { DispatchQueue.main.async { done(nil) } }
+                }
+            }
+        }
+    }
 
     func restart() { stop { [weak self] in self?.start() } }
 
@@ -283,7 +322,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         boot.commandLine = (manifest["cmdline"] as? String) ?? "console=hvc0 root=/dev/vda rw quiet"
         // Developer/QA only: with ~/Library/Application Support/Wizard/dev-shell present, the guest opens a root shell on
         // vsock 9200, bridged to 127.0.0.1:48000 (used by mac/qa-guest.sh for `wam doctor` and friends).
-        if WizardShared.devShell { boot.commandLine += " wizard.dev=1" }
+        if WizardShared.devShell || WizardShared.guestUpdatePayload != nil { boot.commandLine += " wizard.dev=1" }
 
         let c = VZVirtualMachineConfiguration()
         c.bootLoader = boot
@@ -317,6 +356,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             c.directorySharingDevices = [fs]
             log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
         }
+        if let payload = WizardShared.guestUpdatePayload {
+            let share = VZVirtioFileSystemDeviceConfiguration(tag: "wizard-update")
+            share.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: payload, readOnly: true))
+            c.directorySharingDevices.append(share)
+        }
 
         let consoleURL = WizardShared.logsDir.appendingPathComponent("console.log")
         FileManager.default.createFile(atPath: consoleURL.path, contents: nil)
@@ -339,7 +383,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     private func writeStatus() {
-        var s: [String: Any] = ["state": state.rawValue, "pid": getpid(), "updatedAt": Date().timeIntervalSince1970]
+        var s: [String: Any] = ["state": state.rawValue, "pid": getpid(), "updatedAt": Date().timeIntervalSince1970, "hostProtocol": WizardRelease.peer, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path]
         if let b = bootStartedAt { s["bootStartedAt"] = b.timeIntervalSince1970 }
         if let r = readyAt { s["readyAt"] = r.timeIntervalSince1970 }
         if let secs = bootSeconds { s["bootSeconds"] = secs }
@@ -358,6 +402,8 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var quitting = false
+    var preparingUpdate = false
+    var guestPatchBusy = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
@@ -412,6 +458,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func command(_ n: Notification) {
+        if n.object as? String == "prepare-update" { prepareUpdate(); return }
+        if n.object as? String == "apply-guest-update" { applyGuestUpdate(); return }
+        if preparingUpdate || guestPatchBusy { return }
         switch n.object as? String {
         case "start": vm.start()
         case "stop": vm.stop()
@@ -419,6 +468,50 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "quit": quitAll()
         default: break
         }
+    }
+
+    private func applyGuestUpdate() {
+        guard !guestPatchBusy, !preparingUpdate, WizardShared.guestUpdatePayload != nil else { return }
+        let request = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-command.json"))
+        let enclosingApp = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL.path
+        guard let nonce = request["nonce"] as? String, UUID(uuidString: nonce) != nil,
+              let pid = request["pid"] as? Int32, kill(pid, 0) == 0,
+              request["appPath"] as? String == enclosingApp, request["peer"] as? Int == WizardRelease.peer,
+              let expires = request["expires"] as? Double, expires > Date().timeIntervalSince1970 else { return }
+        let response = WizardUpdate.dir.appendingPathComponent("guest-response.json")
+        if WizardUpdate.json(response)["nonce"] as? String == nonce { return }
+        guestPatchBusy = true
+        WizardUpdate.idle { reason in
+            if let reason { self.guestPatchBusy = false; try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": reason], response); return }
+            self.vm.runGuestPatch { receipt in
+                self.guestPatchBusy = false
+                if let receipt { try? WizardUpdate.write(["nonce": nonce, "state": "applied", "receipt": receipt], response) }
+                else { try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Guest migration failed; private updater.log retained"], response) }
+            }
+        }
+    }
+
+    private func prepareUpdate() {
+        guard !preparingUpdate else { return }
+        let request = WizardUpdate.json(WizardUpdate.request)
+        let enclosingApp = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL.path
+        guard let nonce = request["nonce"] as? String, UUID(uuidString: nonce) != nil,
+              let pid = request["pid"] as? Int32, kill(pid, 0) == 0,
+              request["appPath"] as? String == enclosingApp,
+              request["peer"] as? Int == WizardRelease.peer,
+              let expires = request["expires"] as? Double, expires > Date().timeIntervalSince1970 else { return }
+        preparingUpdate = true
+        let stopWhenIdle: (String?) -> Void = { [weak self] reason in
+            guard let self else { return }
+            if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
+            self.vm.stop(forceOnTimeout: false, onTimeout: { self.preparingUpdate = false }) {
+                try? WizardUpdate.write(["nonce": nonce, "state": "stopped", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path], WizardUpdate.response)
+                self.quitting = true
+                NSApp.terminate(nil)
+            }
+        }
+        if request["maintenance"] as? Bool == true, WizardShared.guestUpdatePayload != nil { stopWhenIdle(nil) }
+        else { WizardUpdate.idle(stopWhenIdle) }
     }
 
     func refresh() {
@@ -454,15 +547,17 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
     }
-    @objc func startOS() { vm.start() }
-    @objc func stopOS() { vm.stop() }
-    @objc func restartOS() { vm.restart() }
+    @objc func startOS() { if !preparingUpdate && !guestPatchBusy { vm.start() } }
+    @objc func stopOS() { if !preparingUpdate && !guestPatchBusy { vm.stop() } }
+    @objc func restartOS() { if !preparingUpdate && !guestPatchBusy { vm.restart() } }
     @objc func showLogs() { NSWorkspace.shared.open(WizardShared.logsDir) }
     @objc func quitAll() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if quitting { return .terminateNow }
+        if preparingUpdate || guestPatchBusy { return .terminateCancel }
         quitting = true
+        if vm.canTerminateWithoutStopping { return .terminateNow }
         vm.stop { NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
