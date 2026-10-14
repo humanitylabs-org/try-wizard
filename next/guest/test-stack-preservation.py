@@ -59,7 +59,15 @@ class NousRefreshTests(unittest.TestCase):
   b['providers']['openrouter']={'api_key':'fixture-one'};a['providers']['openrouter']={'api_key':'fixture-two'}
   self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
  def test_wrong_jwt_account_fails(self):self.assertFalse(self.check(self.grant(),self.grant(False,'other-account'))['stable_identity_credentials_preserved'])
- def test_unexpected_nonexpiring_rotation_fails(self):
+ def test_stock_forced_refresh_before_expiry(self):
+  b=self.grant(False);a=self.grant(False);now=int(time.time());issued=now-60;expiry=now+300
+  enc=lambda v:base64.urlsafe_b64encode(p.json.dumps(v).encode()).decode().rstrip('=')
+  token=enc({'alg':'fixture-only'})+'.'+enc({'sub':'fixture-account','aud':'fixture-inference','iss':'fixture-issuer','iat':issued,'exp':expiry})+'.fixture-signature'
+  iso=lambda v:datetime.datetime.fromtimestamp(v,datetime.timezone.utc).isoformat()
+  for row in [b['providers']['nous'],b['credential_pool']['nous'][0]]:
+   row.update(access_token=token,agent_key=token,expires_at=iso(expiry),agent_key_expires_at=iso(expiry),expires_in=300,agent_key_expires_in=300,obtained_at=iso(issued),agent_key_obtained_at=iso(issued))
+  r=self.check(b,a);self.assertTrue(r['stable_identity_credentials_preserved']);self.assertTrue(r['nous_anonymous_invoke_refresh_accounted'])
+ def test_unaccompanied_nonexpiring_token_mutation_fails(self):
   b=self.grant(False);a=self.grant(False)
   # Keep subject, but rotate the token outside the observed expiring-grant path.
   a['providers']['nous']['access_token']=a['providers']['nous']['agent_key']=a['credential_pool']['nous'][0]['access_token']=a['credential_pool']['nous'][0]['agent_key']=a['providers']['nous']['access_token']+'changed-fixture'
