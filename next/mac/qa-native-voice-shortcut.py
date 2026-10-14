@@ -202,8 +202,10 @@ try:
     wait(lambda:ev('__wux.voice')=='listen')
     ok(voice()['orbTaps']==count,'manual visible microphone still starts the same capture independently')
     ev("dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));true")
+    ok(ev('__wux.voice')=='listen' and len(runs())==sent,'Escape/back navigation preserves manual recording without sending (existing contract)')
+    ev("document.querySelector('#voiceCancel').click();true")
     wait(lambda:ev('__wux.voice')=='idle')
-    ok(len(runs())==sent,'Escape cancels manual recording without sending')
+    ok(len(runs())==sent,'visible Cancel discards manual recording without sending')
     for size in ['700x780','1120x1000']:
         qa('window-size '+size);s=state()['localVoice']
         ok(s['height']==0 and abs(s['webHeight']-s['contentHeight'])<1,'no ready footer gap at '+size)
