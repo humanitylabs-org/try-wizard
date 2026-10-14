@@ -11,6 +11,38 @@ struct HostAudioDevice: Equatable {
     let uid: String
     let displayName: String
     let sdlName: String
+    var transport: HostAudioTransport = .unknown
+}
+
+/// How a CoreAudio device is attached to the Mac (kAudioDevicePropertyTransportType).
+/// Bluetooth matters for the microphone: opening a Bluetooth device's mic switches
+/// headphones and speakers from music (A2DP) to call mode (HFP), so music the VM
+/// plays through them turns muffled and quiet for as long as the mic is open.
+enum HostAudioTransport: Equatable {
+    case builtIn
+    case bluetooth
+    case wired
+    case other
+    case unknown
+
+    init(coreAudio value: UInt32) {
+        switch value {
+        case kAudioDeviceTransportTypeBuiltIn:
+            self = .builtIn
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            self = .bluetooth
+        case kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeFireWire,
+             kAudioDeviceTransportTypeThunderbolt, kAudioDeviceTransportTypePCI,
+             kAudioDeviceTransportTypeAVB, kAudioDeviceTransportTypeDisplayPort,
+             kAudioDeviceTransportTypeHDMI:
+            self = .wired
+        case kAudioDeviceTransportTypeUnknown:
+            self = .unknown
+        default:
+            // Virtual, aggregate, AirPlay and Continuity devices: never chosen automatically.
+            self = .other
+        }
+    }
 }
 
 /// A direction-aware description of one CoreAudio device. Keeping this small
@@ -20,19 +52,41 @@ struct HostAudioHardwareDescriptor: Equatable {
     let uid: String
     let outputName: String?
     let inputName: String?
+    var transport: HostAudioTransport = .unknown
 }
 
 struct HostAudioDeviceCatalog: Equatable {
     let outputDevices: [HostAudioDevice]
     let inputDevices: [HostAudioDevice]
+    /// The Mac's current default input, as a CoreAudio UID.
+    var defaultInputUID: String? = nil
 
     static let empty = Self(outputDevices: [], inputDevices: [])
 
-    static func make(from descriptors: [HostAudioHardwareDescriptor]) -> Self {
+    static func make(
+        from descriptors: [HostAudioHardwareDescriptor],
+        defaultInputUID: String? = nil
+    ) -> Self {
         Self(
             outputDevices: makeDevices(from: descriptors, direction: .output),
-            inputDevices: makeDevices(from: descriptors, direction: .input)
+            inputDevices: makeDevices(from: descriptors, direction: .input),
+            defaultInputUID: defaultInputUID
         )
+    }
+
+    /// The microphone to record from when the user left the input on System Default.
+    ///
+    /// When the Mac's default input is a Bluetooth headset or speaker, recording from it
+    /// would drop the music on that device to call quality. Prefer the Mac's built-in
+    /// microphone, then a wired (USB, Thunderbolt…) one. Returns nil — meaning "use the
+    /// Mac's default" — when the default is not Bluetooth or no other real mic exists
+    /// (for example a Mac mini with only a Bluetooth headset).
+    func automaticInput() -> HostAudioDevice? {
+        guard let defaultInputUID,
+              let current = device(uid: defaultInputUID, direction: .input),
+              current.transport == .bluetooth else { return nil }
+        return inputDevices.first { $0.transport == .builtIn }
+            ?? inputDevices.first { $0.transport == .wired }
     }
 
     func devices(for direction: HostAudioDirection) -> [HostAudioDevice] {
@@ -89,7 +143,8 @@ struct HostAudioDeviceCatalog: Equatable {
             devices.append(HostAudioDevice(
                 uid: descriptor.uid,
                 displayName: displayName,
-                sdlName: sdlName
+                sdlName: sdlName,
+                transport: descriptor.transport
             ))
         }
 
@@ -114,7 +169,7 @@ protocol HostAudioDeviceProviding {
 }
 
 struct CoreAudioHostAudioDeviceProvider: HostAudioDeviceProviding {
-    func nominalSampleRate(direction: HostAudioDirection, selectedSDLName: String?) -> Int? {
+    private func systemDefaultUID(direction: HostAudioDirection) -> String? {
         var defaultAddress = AudioObjectPropertyAddress(
             mSelector: direction == .output
                 ? kAudioHardwarePropertyDefaultOutputDevice
@@ -123,15 +178,35 @@ struct CoreAudioHostAudioDeviceProvider: HostAudioDeviceProviding {
             mElement: kAudioObjectPropertyElementMain
         )
         var defaultID = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var mutableSize = size
         let defaultStatus = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &defaultAddress, 0, nil, &size, &defaultID
+            AudioObjectID(kAudioObjectSystemObject), &defaultAddress, 0, nil, &mutableSize, &defaultID
         )
-        let defaultUID = defaultStatus == noErr ? stringProperty(
+        return defaultStatus == noErr ? stringProperty(
             deviceID: defaultID,
             selector: kAudioDevicePropertyDeviceUID,
             scope: kAudioObjectPropertyScopeGlobal
         ) : nil
+    }
+
+    private func transport(deviceID: AudioDeviceID) -> HostAudioTransport {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr else {
+            return .unknown
+        }
+        return HostAudioTransport(coreAudio: value)
+    }
+
+    func nominalSampleRate(direction: HostAudioDirection, selectedSDLName: String?) -> Int? {
+        let defaultUID = systemDefaultUID(direction: direction)
+        var size: UInt32
         guard let device = catalog().effectiveDevice(
             direction: direction,
             selectedSDLName: selectedSDLName,
@@ -177,10 +252,11 @@ struct CoreAudioHostAudioDeviceProvider: HostAudioDeviceProviding {
             return HostAudioHardwareDescriptor(
                 uid: uid,
                 outputName: outputName,
-                inputName: inputName
+                inputName: inputName,
+                transport: transport(deviceID: deviceID)
             )
         }
-        return .make(from: descriptors)
+        return .make(from: descriptors, defaultInputUID: systemDefaultUID(direction: .input))
     }
 
     private func audioDeviceIdentifiers() -> [AudioDeviceID] {
@@ -476,7 +552,14 @@ struct AudioLaunchConfiguration: Equatable {
         direction: HostAudioDirection,
         catalog: HostAudioDeviceCatalog
     ) -> String? {
-        guard case .device(let uid, _) = selection else { return nil }
-        return catalog.device(uid: uid, direction: direction)?.sdlName
+        // An explicit choice always wins while that device is connected.
+        if case .device(let uid, _) = selection,
+           let chosen = catalog.device(uid: uid, direction: direction) {
+            return chosen.sdlName
+        }
+        // System Default (or a disconnected choice): follow the Mac, except never
+        // record from a Bluetooth mic when the Mac has its own.
+        guard direction == .input else { return nil }
+        return catalog.automaticInput()?.sdlName
     }
 }

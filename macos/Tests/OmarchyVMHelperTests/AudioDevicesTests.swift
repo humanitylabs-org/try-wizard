@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Testing
 @testable import OmarchyVMHelper
@@ -217,6 +218,98 @@ struct AudioDevicesTests {
         #expect(configuration.environment[AudioLaunchConfiguration.inheritedSDLDeviceNameKey] == nil)
         #expect(configuration.environment[AudioLaunchConfiguration.outputDeviceNameKey] == "External Speaker")
         #expect(configuration.environment[AudioLaunchConfiguration.inputDeviceNameKey] == "USB Microphone")
+    }
+
+    // Bluetooth headphones and speakers drop to call quality while their mic is open,
+    // so System Default records from the Mac's own mic instead (James, 14 Oct 2026).
+    private static func bluetoothCatalog(
+        defaultInput: String?,
+        extra: [HostAudioHardwareDescriptor] = [],
+        builtIn: Bool = true
+    ) -> HostAudioDeviceCatalog {
+        var devices: [HostAudioHardwareDescriptor] = [
+            .init(uid: "bose", outputName: "Bose Revolve+ SoundLink", inputName: "Bose Revolve+ SoundLink", transport: .bluetooth),
+            .init(uid: "airpods", outputName: "AirPods Pro", inputName: "AirPods Pro", transport: .bluetooth),
+            .init(uid: "blackhole", outputName: "BlackHole 2ch", inputName: "BlackHole 2ch", transport: .other),
+        ]
+        if builtIn {
+            devices.append(.init(uid: "mbp-mic", outputName: nil, inputName: "MacBook Pro Microphone", transport: .builtIn))
+            devices.append(.init(uid: "mbp-spk", outputName: "MacBook Pro Speakers", inputName: nil, transport: .builtIn))
+        }
+        return .make(from: devices + extra, defaultInputUID: defaultInput)
+    }
+
+    private static func input(_ catalog: HostAudioDeviceCatalog, _ preference: AudioRouteSelection = .systemDefault) -> String? {
+        AudioLaunchConfiguration.make(
+            baseEnvironment: [:],
+            preferences: AudioRoutingPreferences(output: .systemDefault, input: preference),
+            catalog: catalog
+        ).routes.inputSDLName
+    }
+
+    @Test("a Bluetooth speaker as the Mac's default input records from the built-in mic")
+    func bluetoothSpeakerUsesBuiltInMic() {
+        #expect(Self.input(Self.bluetoothCatalog(defaultInput: "bose")) == "MacBook Pro Microphone")
+    }
+
+    @Test("Bluetooth headphones as the default input also keep music in full quality")
+    func bluetoothHeadphonesUseBuiltInMic() {
+        #expect(Self.input(Self.bluetoothCatalog(defaultInput: "airpods")) == "MacBook Pro Microphone")
+    }
+
+    @Test("without a built-in mic a wired mic wins, never a virtual loopback")
+    func wiredMicBeatsVirtual() {
+        let catalog = Self.bluetoothCatalog(
+            defaultInput: "bose",
+            extra: [.init(uid: "yeti", outputName: nil, inputName: "Yeti Stereo Microphone", transport: .wired)],
+            builtIn: false
+        )
+        #expect(Self.input(catalog) == "Yeti Stereo Microphone")
+    }
+
+    @Test("a Mac with only a Bluetooth mic still records from it")
+    func onlyBluetoothFallsBackToDefault() {
+        #expect(Self.input(Self.bluetoothCatalog(defaultInput: "airpods", builtIn: false)) == nil)
+    }
+
+    @Test("a non-Bluetooth default input is left to macOS")
+    func nonBluetoothDefaultUntouched() {
+        let catalog = Self.bluetoothCatalog(
+            defaultInput: "yeti",
+            extra: [.init(uid: "yeti", outputName: nil, inputName: "Yeti Stereo Microphone", transport: .wired)]
+        )
+        #expect(Self.input(catalog) == nil)
+        #expect(Self.input(Self.bluetoothCatalog(defaultInput: "mbp-mic")) == nil)
+        #expect(Self.input(Self.bluetoothCatalog(defaultInput: nil)) == nil)
+    }
+
+    @Test("an explicit microphone choice wins, even a Bluetooth one")
+    func explicitChoiceWins() {
+        let catalog = Self.bluetoothCatalog(defaultInput: "bose")
+        #expect(Self.input(catalog, .device(uid: "airpods", lastKnownName: "AirPods Pro")) == "AirPods Pro")
+        #expect(Self.input(catalog, .device(uid: "gone", lastKnownName: "Old Mic")) == "MacBook Pro Microphone")
+    }
+
+    @Test("output routing is unchanged by Bluetooth mic avoidance")
+    func outputUnchanged() {
+        let configuration = AudioLaunchConfiguration.make(
+            baseEnvironment: [:],
+            preferences: .systemDefaults,
+            catalog: Self.bluetoothCatalog(defaultInput: "bose")
+        )
+        #expect(configuration.routes.outputSDLName == nil)
+        #expect(configuration.environment[AudioLaunchConfiguration.inputDeviceNameKey] == "MacBook Pro Microphone")
+    }
+
+    @Test("CoreAudio transport types classify Bluetooth, built-in, wired and virtual devices")
+    func transportClassification() {
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeBluetooth) == .bluetooth)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeBluetoothLE) == .bluetooth)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeBuiltIn) == .builtIn)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeUSB) == .wired)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeVirtual) == .other)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeAggregate) == .other)
+        #expect(HostAudioTransport(coreAudio: kAudioDeviceTransportTypeUnknown) == .unknown)
     }
 
     @Test("System Default emits no explicit device variables")
