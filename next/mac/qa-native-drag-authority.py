@@ -158,7 +158,7 @@ try:
     # Exercise current restart admission on the real trusted desktop. Device
     # acquisition is an explicitly pending fixture; no live mic claim is made.
     if production_local:
-        ev("Object.values(__wux.wins).forEach(w=>__wux.closeWin(w.id));__wux.newChat();const e=document.querySelector('.win.focus textarea');e.value='update admission draft';e.dispatchEvent(new Event('input',{bubbles:true}));window.qaAcquire=0;Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:()=>{qaAcquire++;return new Promise((resolve,reject)=>{window.qaReject=reject})},configurable:true});true")
+        ev("Object.values(__wux.wins).forEach(w=>__wux.closeWin(w.id));__wux.newChat();const e=document.querySelector('.win.focus textarea');e.value='update admission draft';e.dispatchEvent(new Event('input',{bubbles:true}));window.qaAcquire=0;navigator.mediaDevices.getUserMedia=()=>{qaAcquire++;return new Promise((resolve,reject)=>{window.qaReject=reject})};true")
         ok(admission()['admitted'] and ev('window.__wizardUpdateFrozen')=='1','actual trusted idle admission atomically freezes new capture starts')
         ev("document.querySelector('#micBtn').click();true")
         qa('voice-native-event flags 54 1048576 0;flags 54 0 0.12');time.sleep(.5)
