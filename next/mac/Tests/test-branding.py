@@ -50,6 +50,7 @@ class BrandTests(unittest.TestCase):
         self.assertIn('assets/build-icon.py',build)
         self.assertNotIn('if [[ -f assets/Wizard.icns',build)
         self.assertIn('Shared/Brand.swift',build)
+        self.assertIn('min(18, 18 * ratio)',(MAC/'Shared/Brand.swift').read_text())
         self.assertIn('next/mac/assets/brand/wizard-icon-1024.png',(ROOT/'macos/build-app.sh').read_text())
 
     def test_guest_onboarding_and_semantic_icon(self):

@@ -15,7 +15,8 @@ enum WizardBrand {
     static func menuBarImage() -> NSImage {
         let mark = image("wizard-mark-white", template: true)
         let ratio = mark.size.width / mark.size.height
-        mark.size = NSSize(width: 18, height: 18 / ratio)
+        let width = min(18, 18 * ratio)
+        mark.size = NSSize(width: width, height: width / ratio)
         return mark
     }
 }
