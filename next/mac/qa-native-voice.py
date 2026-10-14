@@ -28,7 +28,7 @@ def wait(check,seconds=60):
         time.sleep(1)
     raise AssertionError(s)
 
-s=wait(lambda s:s['overlayHidden'] and s['localVoice']['visible'] and 'Local voice ready' in s['localVoice']['summary'])
+s=wait(lambda s:s['overlayHidden'] and not s['localVoice']['visible'] and s['localVoice']['polling'] and s['localVoice']['summary']=='')
 assert '/wizard-os-home/' in s['url'], s
 print('PASS native-ready-after-onboarding',s['localVoice'])
 cid=guest('docker ps -q --filter label=com.docker.compose.service=transcriber-engine').strip()
@@ -42,7 +42,7 @@ try:
     print('systemd',guest('systemctl is-active wizard-voice').strip())
 finally:
     guest(f'docker unpause {cid}')
-s=wait(lambda s:'Local voice ready' in s['localVoice']['summary'])
+s=wait(lambda s:not s['localVoice']['visible'] and s['localVoice']['summary']=='')
 print('PASS native-retry-recovers',s['localVoice'])
 # Remote here is the SAME disposable guest URL, never James\'s daily service.
 command('connect http://127.0.0.1:48023/wizard-os-home/')
@@ -52,8 +52,8 @@ print('PASS remote-clears-local-voice')
 time.sleep(6)
 assert not state()['localVoice']['visible']
 command('switch 0')
-s=wait(lambda s:s['localVoice']['visible'] and 'Local voice ready' in s['localVoice']['summary'])
-print('PASS local-restores-status')
+s=wait(lambda s:not s['localVoice']['visible'] and s['localVoice']['polling'] and s['localVoice']['summary']=='')
+print('PASS local-restores-hidden-ready-status')
 req=urllib.request.Request('http://127.0.0.1:48030/api/voice/retry',data=b'',headers={'Origin':'https://unrelated.example'},method='POST')
 try:
     urllib.request.urlopen(req)

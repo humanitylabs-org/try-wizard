@@ -571,15 +571,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     private var voiceTask: URLSessionDataTask?
     private var voiceGeneration = UUID()
     private var voiceRetryPending = false
+    private var qaVoiceOrigin: URL?
     var localVoiceQAState: [String: Any] {
         ["visible": !voiceBar.isHidden, "summary": voiceLabel.stringValue,
          "retryEnabled": voiceRetry.isEnabled, "retryPending": voiceRetryPending,
-         "polling": voiceTimer != nil]
+         "polling": voiceTimer != nil, "height": voiceHeight?.constant ?? 0,
+         "webHeight": web.bounds.height, "contentHeight": window?.contentView?.bounds.height ?? 0]
     }
 
     init() {
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = .default()
+        cfg.websiteDataStore = UserDefaults.standard.bool(forKey: "QAHooks") && UserDefaults.standard.bool(forKey: "QAWebStorage") ? .nonPersistent() : .default()
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
         cfg.userContentController.add(NativeBridge.shared, name: NativeBridge.name)
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
@@ -737,11 +739,22 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     private func voiceURL(_ path: String) -> URL {
-        URL(string: path, relativeTo: WizardShared.localSetupURL)!.absoluteURL
+        URL(string: path, relativeTo: qaVoiceOrigin ?? WizardShared.localSetupURL)!.absoluteURL
+    }
+
+    /// Isolated loopback protocol fixture; never boots, opens or alters a VM.
+    func qaConnectLocalVoice(_ url: URL) {
+        guard UserDefaults.standard.bool(forKey: "QAHooks"), url.host == "127.0.0.1" else { return }
+        qaVoiceOrigin = url
+        Store.backends = [Backend(kind: .thisMac, name: "QA local voice", url: url.absoluteString)]
+        Store.activeIndex = 0; homeURL = url; load(url)
+        startLocalVoice()
     }
 
     private func pollLocalVoice() {
-        guard Store.active?.kind == .thisMac, !voiceBar.isHidden, voiceTask == nil, !voiceRetryPending else { return }
+        // Keep monitoring after readiness collapses the footer: a later failure
+        // must expose recovery again without a reload.
+        guard Store.active?.kind == .thisMac, voiceTask == nil, !voiceRetryPending else { return }
         let generation = voiceGeneration
         var request = URLRequest(url: voiceURL("/api/voice/status"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -751,7 +764,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             DispatchQueue.main.async {
                 guard let self, self.voiceGeneration == generation, Store.active?.kind == .thisMac else { return }
                 self.voiceTask = nil
-                self.voiceLabel.stringValue = status?.summary ?? "Local voice status unavailable — Retry to request preparation."
+                let ready = status?.isReady == true
+                self.voiceBar.isHidden = ready; self.voiceHeight.constant = ready ? 0 : 64
+                self.voiceLabel.stringValue = ready ? "" : status?.summary ?? "Local voice status unavailable — Retry to request preparation."
                 self.voiceLabel.toolTip = self.voiceLabel.stringValue
                 self.voiceRetry.isEnabled = status?.canRetry ?? true
             }
@@ -1016,15 +1031,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func connectLocal() {
         startLocalVoice()
+        let generation = voiceGeneration
         let started = Date()
         HostControl.ensureRunning()
         HostControl.send("start")
         var shown = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
-            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceGeneration == generation else { return }
             if elapsed > 0.6 && !shown { shown = true; self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
         }, done: { [weak self] ok in
-            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
@@ -1491,6 +1507,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "meeting-prompt-record": CallPrompt.shared.record()
         case "voice-tap": VoiceKeys.shared.tap(arg == "cmd" ? VoiceKeys.rightCommand : VoiceKeys.rightOption)
         case "voice-enable": VoiceKeys.enabled = arg != "off"; VoiceKeys.shared.install(prompt: false)
+        case "voice-default":
+            UserDefaults.standard.removeObject(forKey: "VoiceKeys"); VoiceKeys.shared.install(prompt: false)
+        case "voice-local-fixture":
+            if let url = URL(string: arg) { controller.qaConnectLocalVoice(url) }
+        case "voice-native-event":
+            // Send real NSEvents through NSApplication, including its installed
+            // local monitor. Deliberately NOT VoiceKeys.tap/event or a DOM key.
+            let base = ProcessInfo.processInfo.systemUptime
+            for spec in arg.split(separator: ";") {
+                let a = spec.split(separator: " ").map(String.init)
+                guard a.count == 4, let code = UInt16(a[1]), let raw = UInt(a[2]), let offset = Double(a[3]) else { return }
+                let type: NSEvent.EventType = a[0] == "key" ? .keyDown : .flagsChanged
+                if let event = NSEvent.keyEvent(with: type, location: .zero,
+                        modifierFlags: NSEvent.ModifierFlags(rawValue: raw), timestamp: base + offset,
+                        windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                        characters: type == .keyDown ? "c" : "", charactersIgnoringModifiers: type == .keyDown ? "c" : "",
+                        isARepeat: false, keyCode: code) { NSApp.sendEvent(event) }
+            }
         case "panel-snapshot":
             // panel-snapshot <recorder|prompt|hud> <png>
             let a = arg.split(separator: " ", maxSplits: 1).map(String.init)
