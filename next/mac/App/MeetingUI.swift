@@ -417,6 +417,9 @@ final class VoiceKeys {
         set { UserDefaults.standard.set(newValue, forKey: "VoiceKeys") }
     }
     static let rightOption: UInt16 = 61, rightCommand: UInt16 = 54
+    // Keep system-wide capture and Right Option dictation opt-in. Default
+    // foreground Right Command must not commandeer another app's shortcuts.
+    private static var backgroundEnabled: Bool { UserDefaults.standard.bool(forKey: "VoiceKeys") }
 
     enum Mode: String { case idle, dictating, transcribing, orb }
     private(set) var mode: Mode = .idle
@@ -442,6 +445,10 @@ final class VoiceKeys {
             focusObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.resetTap() }
         }
         trustTimer?.invalidate(); trustTimer = nil
+        guard Self.backgroundEnabled else {
+            if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }; globalMonitor = nil
+            return
+        }
         if trusted { addGlobalMonitor(); return }
         if prompt { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
         trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
@@ -465,6 +472,7 @@ final class VoiceKeys {
         if e.type == .keyDown { if downKey != nil { chorded = true }; return }
         let k = e.keyCode
         guard k == Self.rightOption || k == Self.rightCommand else { if downKey != nil { chorded = true }; return }
+        guard k != Self.rightOption || Self.backgroundEnabled else { if downKey != nil { chorded = true }; return }
         let flag: NSEvent.ModifierFlags = k == Self.rightOption ? .option : .command
         if e.modifierFlags.contains(flag) {
             // Do not replace a pending press (e.g. another modifier/chord).

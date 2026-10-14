@@ -53,6 +53,8 @@ class Fixture(http.server.SimpleHTTPRequestHandler):
         p = urlsplit(self.path).path
         body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         writes.append({'path':p, 'bytes':len(body), 'contentType':self.headers.get('Content-Type','')})
+        if self.headers.get('Content-Type','').startswith('application/json'):
+            writes[-1]['payload'] = json.loads(body or b'{}')
         if p == '/api/voice/retry': retry_count += 1; return self.response({'accepted':True}, 202)
         if p.endswith('/transcribe'): return self.response({'text':'qa generated audio', 'ms':1})
         if p.endswith('/files/upload'): return self.response({'file':{'id':'drop_qa_native','filename':'voice.mp4','mime':'audio/mp4','bytes':len(body)}}, 201)
@@ -75,7 +77,7 @@ def ask(suffix, cmd):
     p = Path('/tmp/wizard-mvp-qa-' + suffix); p.unlink(missing_ok=True); qa(cmd)
     until = time.monotonic()+12
     while time.monotonic()<until:
-        if p.exists() and p.stat().st_size: return p.read_text()
+        if p.exists(): return p.read_text()
         time.sleep(.1)
     raise AssertionError('No native QA reply: '+cmd)
 
@@ -132,6 +134,7 @@ try:
     ok(v['enabled'] and v['monitors']==1,'first-launch preference enables the real local NSEvent monitor')
     (OUT/'initial-native-state.json').write_text(json.dumps({'voice':v,'state':state()},indent=2))
     ok(not v['trusted'],'foreground event path exercised WITHOUT Accessibility permission')
+    ok(not v['globalMonitor'],'foreground default does not install a system-wide keyboard monitor')
     local=state()['localVoice']
     ok(local['height']==0 and local['summary']=='' and local['polling'],'ready removes footer/counters/retry while monitoring continues')
     ok(abs(local['webHeight']-local['contentHeight'])<1,'ready returns full native content height to WKWebView')
@@ -169,13 +172,14 @@ try:
     snapshot('native-command-listening')
     time.sleep(1.3)
     tap();wait(lambda:ev('__wux.voice')=='idle')
-    wait(lambda:len(runs())>initial)
+    wait(lambda:any(w['path'].endswith('/v1/runs') for w in writes))
     ok(voice()['orbTaps']==count+2 and ev('qaOrb.at(-1)')=='sent','second Right Command NSEvents finish once through existing voice/outbox path')
     ok(any(w['path'].endswith('/transcribe') and w['bytes']>1200 for w in writes),'actual generated MediaRecorder audio reaches fixture transcription')
-    ok(ev("document.querySelector('.win[data-win] textarea')?.value || ''")=='unsent native draft','new-thread voice send preserves unrelated unsent draft')
+    admitted=[w['payload'] for w in writes if w['path'].endswith('/v1/runs')]
+    ok(len(admitted)==1 and admitted[0]['input']=='unsent native draft\n\nqa generated audio','deliberate second tap sends typed draft with transcript exactly once (existing contract)')
     count=voice()['orbTaps']; sent=len(runs())
-    tap(chord=True);tap(duration=.6);tap(code=55)
-    ok(voice()['orbTaps']==count and ev('__wux.voice')=='idle' and len(runs())==sent,'Command-C chord, held Right Command and Left Command never trigger voice/send')
+    tap(chord=True);tap(duration=.6);tap(code=55);tap(code=61,flags=524288)
+    ok(voice()['orbTaps']==count and voice()['mode']=='idle' and ev('__wux.voice')=='idle' and len(runs())==sent,'Command-C chord, held/Left Command and default Right Option never trigger voice/send')
     qa('voice-enable off');tap()
     ok(not voice()['enabled'] and voice()['orbTaps']==count,'explicit disabled preference is respected')
     qa('voice-default')
@@ -202,8 +206,8 @@ finally:
         try:proc.wait(timeout=8)
         except sp.TimeoutExpired:proc.kill();proc.wait()
     server.shutdown();server.server_close()
+    run('defaults','delete',DOMAIN,check=False)
     if saved:run('defaults','import',DOMAIN,backup)
-    else:run('defaults','delete',DOMAIN,check=False)
     restored=OUT/'defaults-after.plist'
     result=run('defaults','export',DOMAIN,restored,check=False)
     if saved:
