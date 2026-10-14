@@ -6,6 +6,7 @@ import functools,http.server,json,os,pathlib,plistlib,shutil,signal,subprocess,t
 R=pathlib.Path(os.environ['UPDATER_ROOT']); S=R/'source/next/mac'; E=R/'evidence'; E.mkdir(exist_ok=True)
 D=R/'native-data'; F=R/'feed'; A=R/'installed/Wizard.app'; NS='http://www.andymatuschak.org/xml-namespaces/sparkle'
 receipts=[]; app=None; server=None; pref=E/'prefs-before.plist'; mode={'feed':'normal'}
+skip_host=os.environ.get('UPDATER_SKIP_HOST')=='1'
 def run(args,**kw):
  return subprocess.run([str(x) for x in args],check=True,**kw)
 def out(args):return subprocess.check_output([str(x) for x in args],text=True).strip()
@@ -72,17 +73,20 @@ try:
  run(['/usr/bin/ditto',bootstrap,A]); server=http.server.ThreadingHTTPServer(('127.0.0.1',48210),functools.partial(Handler,directory=str(F)));threading.Thread(target=server.serve_forever,daemon=True).start()
  launch(); ready=wait_state(lambda s:s['phase']=='ready',180);check('automatic-check-and-authenticated-download',ready['ready'] and ready['build']=='101',ready)
  qa('snapshot '+str(E/'notice-101.png'));qa('update-later');time.sleep(.5);s=state();check('later-does-not-install',s['ready'] and not s['visible'] and s['build']=='101')
- qa('update-host-start');wait(lambda:state()['hostRunning'],30)
- hs=wait(lambda:json.loads((D/'host-status.json').read_text()),10);check('real-embedded-bootstrap-host-started',hs['build']=='101' and hs['dataHome']==str(D) and hs['state']=='notInstalled',hs)
+ if not skip_host:
+  qa('update-host-start');wait(lambda:state()['hostRunning'],30)
+  hs=wait(lambda:json.loads((D/'host-status.json').read_text()),10);check('real-embedded-bootstrap-host-started',hs['build']=='101' and hs['dataHome']==str(D) and hs['state']=='notInstalled',hs)
  qa('update-check');qa('update-busy on');qa('update-restart');time.sleep(.5);s=state();check('busy-choice-defers-without-replacement',s['phase']=='busy' and s['build']=='101',s)
  qa('update-busy off');qa('update-restart');updated=wait_state(lambda s:s['build']=='102',180)
  check('actual-101-to-102-install-and-relaunch',updated['build']=='102',updated);check('custom-datahome-preserved',updated['dataHome']==str(D))
- wait_state(lambda s:s['phase']=='installed',30);hs=json.loads((D/'host-status.json').read_text());check('actual-Host-101-to-102-relaunch',hs['build']=='102' and hs['hostProtocol']==1 and hs['dataHome']==str(D),hs)
+ if not skip_host:
+  wait_state(lambda s:s['phase']=='installed',30);hs=json.loads((D/'host-status.json').read_text());check('actual-Host-101-to-102-relaunch',hs['build']=='102' and hs['hostProtocol']==1 and hs['dataHome']==str(D),hs)
  run(['codesign','--verify','--deep','--strict',A]);check('installed-102-code-signature-valid',True)
  check('prior-101-bundle-retained',plistlib.loads((D/'updates/previous.app/Contents/Info.plist').read_bytes())['CFBundleVersion']=='101')
  stage(103);qa('update-check');wait(lambda:state()['phase']=='ready',180)
  qa('update-restart');updated=wait_state(lambda s:s['build']=='103',180);check('actual-102-to-103-install-and-relaunch',updated['build']=='103',updated)
- wait_state(lambda s:s['phase']=='installed',30);hs=json.loads((D/'host-status.json').read_text());check('actual-Host-102-to-103-relaunch',hs['build']=='103',hs)
+ if not skip_host:
+  wait_state(lambda s:s['phase']=='installed',30);hs=json.loads((D/'host-status.json').read_text());check('actual-Host-102-to-103-relaunch',hs['build']=='103',hs)
  # Authenticated feed, corrupted archive: Sparkle must reject before installation.
  stage(104); damaged=F/'Wizard-104.zip'
  with damaged.open('r+b') as f:f.seek(100);one=f.read(1);f.seek(100);f.write(bytes([one[0]^1]))
@@ -99,7 +103,7 @@ try:
  # Actually launch the retained previously installed app, not just assert a file exists.
  stop_native(); prior=D/'updates/previous.app'; app=subprocess.Popen([str(prior/'Contents/MacOS/Wizard')],stdout=(E/'rollback-stdout.log').open('a'),stderr=(E/'rollback-stderr.log').open('a'))
  previous=wait_state(lambda s:s['build']=='102',30);check('retained-prior-bundle-is-usable',previous['dataHome']==str(D),previous)
- (E/'native-complete.json').write_text(json.dumps({'completed':True,'tests':len(receipts),'scope':'signed local feed + ad hoc Developer QA; no public feed, Apple notarization, real VM/chat/account preservation, or guest migration proof'},indent=2)+'\n')
+ (E/'native-complete.json').write_text(json.dumps({'completed':True,'tests':len(receipts),'hostLifecycleTested':not skip_host,'scope':'signed local feed + ad hoc Developer QA; no public feed, Apple notarization, real VM/chat/account preservation, or guest migration proof'},indent=2)+'\n')
 finally:
  try:
   if (E/'notify').exists() and (D/'host-status.json').exists():
