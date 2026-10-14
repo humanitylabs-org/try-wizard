@@ -33,7 +33,12 @@ enum WizardShared {
     /// nil = not chosen yet (the guest then keeps files on its own disk).
     static let filesShareTag = "wizard-files"
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
-    static var defaultFilesFolder: URL { supportDir.appendingPathComponent("Files", isDirectory: true) }
+    // User-created files belong in a Finder-visible folder. Changing this suggestion
+    // never changes a persisted files-folder.json or moves an existing user's files.
+    static var defaultFilesFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Wizard MVP", isDirectory: true)
+    }
     static var filesFolder: URL? {
         guard let d = try? Data(contentsOf: filesFolderFile),
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],

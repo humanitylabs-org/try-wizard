@@ -556,8 +556,8 @@ struct LocalVoiceStatus: Decodable {
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
     let overlay = NSView()
-    let title = NSTextField(labelWithString: "")
-    let subtitle = NSTextField(labelWithString: "")
+    let title = NSTextField(wrappingLabelWithString: "")
+    let subtitle = NSTextField(wrappingLabelWithString: "")
     let progress = NSProgressIndicator()
     let stack = NSStackView()
     var buttons: [NSButton] = []
@@ -649,8 +649,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         subtitle.font = .systemFont(ofSize: 14)
         subtitle.textColor = NSColor(white: 0.72, alpha: 1)
         subtitle.alignment = .center
-        subtitle.maximumNumberOfLines = 4
-        subtitle.preferredMaxLayoutWidth = 420
+        title.maximumNumberOfLines = 0
+        subtitle.maximumNumberOfLines = 0
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subtitle.lineBreakMode = .byWordWrapping
         progress.style = .bar
         progress.isIndeterminate = true
@@ -662,10 +664,36 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         stack.translatesAutoresizingMaskIntoConstraints = false
         [mark, title, subtitle, progress].forEach { stack.addArrangedSubview($0) }
         stack.setCustomSpacing(6, after: title)
-        overlay.addSubview(stack)
-        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-                                     stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
-                                     stack.widthAnchor.constraint(lessThanOrEqualToConstant: 460)])
+        // Long paths and download notes must stay readable at the minimum window
+        // size. Scroll only when needed rather than clipping the explanation.
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
+        overlay.addSubview(scroll)
+        document.addSubview(stack)
+        let preferredWidth = stack.widthAnchor.constraint(equalToConstant: 460)
+        preferredWidth.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: overlay.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            stack.centerXAnchor.constraint(equalTo: document.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: document.centerYAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor, constant: -24),
+            stack.widthAnchor.constraint(lessThanOrEqualTo: document.widthAnchor, constant: -48),
+            preferredWidth,
+            title.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
     }
 
     func showOverlay(_ t: String, _ s: String, progress p: Double? = nil, spinning: Bool = true, actions: [(String, Selector)] = []) {
@@ -875,12 +903,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// apps' user-files folder; app databases stay on the Wizard OS disk.
     func askFilesFolder(sizeNote: String? = nil) {
         let home = WizardShared.defaultFilesFolder
-        let title = "Choose where your Wizard keeps its files"
+        let title = "Choose your shared folder"
         showOverlay(title,
-                    "Default: \(home.path)\nYour Wizard and its apps put what they make here: Inbox, Documents, Videos, Meetings and Exports. "
-                    + "You can open the folder in Finder any time." + (sizeNote.map { "\n\n" + $0 } ?? ""),
+                    "Documents, images, audio, videos and transcripts you or your Wizard save here. "
+                    + "Open this shared folder in Finder, or add files for your Wizard to use.\n\n"
+                    + "Folder: \((home.path as NSString).abbreviatingWithTildeInPath)" + (sizeNote.map { "\n\n" + $0 } ?? ""),
                     spinning: false,
-                    actions: [("Use Default Folder", #selector(useDefaultFilesFolder)),
+                    actions: [("Use This Folder", #selector(useDefaultFilesFolder)),
                               ("Choose Folder…", #selector(chooseFilesFolder)),
                               ("Back", #selector(backToChooser))])
         // Say how much space Wizard OS will take before anything downloads (only on this Mac's first install).
@@ -1383,6 +1412,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
         case "files-folder": controller.setFilesFolder(arg.isEmpty ? WizardShared.defaultFilesFolder : URL(fileURLWithPath: arg))
+        case "files-folder-preview": controller.askFilesFolder(sizeNote: arg.isEmpty ? "" : arg)
+        case "click-overlay-button":
+            if let i = Int(arg), controller.buttons.indices.contains(i) { controller.buttons[i].performClick(nil) }
+        case "window-size":
+            let dims = arg.split(separator: "x").compactMap { Double($0) }
+            if dims.count == 2 { controller.window?.setContentSize(NSSize(width: dims[0], height: dims[1])) }
         case "choose-this-mac-offline":
             // Simulate a Mac that can't reach the download feed.
             UserDefaults.standard.set("http://127.0.0.1:9/none.json", forKey: "osFeedURL"); addThisMac()
@@ -1491,8 +1526,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-keys.json"))
             }
         case "state":
+            controller.window?.contentView?.layoutSubtreeIfNeeded()
             let s: [String: Any] = ["overlayHidden": controller.overlay.isHidden, "title": controller.title.stringValue,
                                     "subtitle": controller.subtitle.stringValue, "url": controller.web.url?.absoluteString ?? "",
+                                    "subtitleLinesLimit": controller.subtitle.maximumNumberOfLines,
+                                    "subtitleHeight": controller.subtitle.bounds.height,
+                                    "subtitleRequiredHeight": controller.subtitle.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: controller.subtitle.bounds.width, height: 10000)).height ?? 0,
+                                    "subtitleWidth": controller.subtitle.bounds.width,
+                                    "defaultFilesFolder": WizardShared.defaultFilesFolder.path,
+                                    "selectedFilesFolder": WizardShared.filesFolder?.path ?? "",
+                                    "overlayButtons": controller.buttons.map { b -> [String: Any] in
+                                        let doc = self.controller.stack.superview!
+                                        let r = b.convert(b.bounds, to: doc)
+                                        return ["title": b.title, "visible": !b.isHiddenOrHasHiddenAncestor,
+                                                "width": r.width, "height": r.height,
+                                                "withinDocument": doc.bounds.insetBy(dx: -1, dy: -1).contains(r)]
+                                    },
                                     "loadedAt": controller.loadedAt?.timeIntervalSince1970 ?? 0,
                                     "frame": NSStringFromRect(controller.window?.frame ?? .zero),
                                     "localVoice": controller.localVoiceQAState,
@@ -1512,9 +1561,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if controller.overlay.isHidden {
             controller.web.takeSnapshot(with: nil) { img, _ in if let img { write(img) } }
-        } else if let v = controller.window?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
-            v.cacheDisplay(in: v.bounds, to: rep)
-            let img = NSImage(size: v.bounds.size); img.addRepresentation(rep); write(img)
+        } else if let v = controller.window?.contentView {
+            v.layoutSubtreeIfNeeded()
+            // PDF drawing captures AppKit text/scroll content even when an SSH
+            // session leaves the composited window occluded on the host display.
+            if let img = NSImage(data: v.dataWithPDF(inside: v.bounds)) { write(img) }
         }
     }
 
