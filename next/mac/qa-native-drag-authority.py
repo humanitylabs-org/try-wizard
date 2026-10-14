@@ -163,6 +163,7 @@ try:
         ok(not a['trustedDocument'] and not a['media'][-1]['granted'] and a['media'][-1]['mainFrame'],label+' malicious navigation gains no native media authority')
         ok(not [m for m in a['messages'] if m['method']=='app.info'][-1]['admitted'],label+' malicious navigation gains no native controls')
         ok(ev('replies.length')=='0',label+' receives no native reply')
+        ok(urlsplit(a['nativeControlURL']).netloc==urlsplit(CONTROL).netloc,label+' cannot retarget native background recording/search backend')
     # Selected remote backend deliberate compatibility path, with a different port.
     qa('connect '+OTHER);wait(lambda:ev('typeof probe')=='function' and authority()['trustedDocument'])
     ev('probe();true');wait(lambda:authority()['media'][-1]['granted'])
@@ -172,6 +173,7 @@ try:
     qa('connect '+APPURL);wait(lambda:state()['url']==APPURL and ev('typeof probe')=='function')
     ev('probe();true');time.sleep(.3)
     ok(not authority()['trustedDocument'] and not authority()['media'][-1]['granted'],'explicit localhost app-origin selection is still never native authority')
+    ok(authority()['nativeControlURL']=='','explicit installed-app selection supplies no native API backend')
     qa('voice-local-fixture '+URL);wait(lambda:ev('!!window.__wux')=='1')
     ok(ask('command-w.txt','command-w')=='true' and proc.poll() is None,'Command-W native menu path remains app-internal')
     final=authority();(OUT/'authority-final.json').write_text(json.dumps(final,indent=2))

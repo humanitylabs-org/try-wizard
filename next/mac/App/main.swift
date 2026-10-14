@@ -1196,7 +1196,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
         // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
-        if homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
+        if isTrustedDocument, homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
             let key = "\(u.scheme ?? "")://\(h):\(u.port ?? 0)"
             if !resolvedOrigins.contains(key) {
                 resolvedOrigins.insert(key)
@@ -1281,6 +1281,14 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         } else { url = URL(string: backend.url) }
         guard let origin = url.flatMap(NativeOrigin.init), !origin.isInstalledApp else { return nil }
         return origin
+    }
+    /// Native background recording/search must never acquire a backend from an
+    /// untrusted main-frame navigation either. Keep the selected service origin.
+    var nativeControlURL: URL? {
+        guard let origin = selectedControlOrigin else { return nil }
+        var c = URLComponents(); c.scheme = origin.scheme; c.host = origin.host
+        if origin.port != (origin.scheme == "https" ? 443 : 80) { c.port = origin.port }
+        return c.url
     }
     var isTrustedDocument: Bool {
         guard let selected = selectedControlOrigin, let actual = web.url.flatMap(NativeOrigin.init) else { return false }
@@ -1420,6 +1428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let self else { return }
                 // Wizard UX answered (voice / sent / busy / none): it owns the outcome.
                 if let state { MeetingLog.log("orb (bridge): \(state)"); return }
+                guard self.controller.isTrustedDocument else { retry(); return }
                 self.controller.web.evaluateJavaScript(legacy) { r, _ in
                     let res = (r as? String) ?? "none"
                     MeetingLog.log("orb (legacy): \(res)")
@@ -1433,12 +1442,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Wizard key, search, menu bar
 
-    /// Origin of the Wizard this window is showing (the place views like /meetings/ live).
+    /// Selected Wizard control origin (never an untrusted navigation destination).
     var wizardOrigin: URL? {
-        let base = controller.web.url ?? Store.active.flatMap { URL(string: $0.url) }
-        guard let u = base, let scheme = u.scheme, let host = u.host, ["http", "https"].contains(scheme) else { return nil }
-        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = u.port
-        return c.url
+        controller.nativeControlURL
     }
 
     func installWizardKey() {
@@ -1683,7 +1689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "voice-footer-snapshot": controller.qaSnapshotVoiceFooter(to: arg)
         case "native-authority-state":
             let c = controller!
-            let s: [String: Any] = ["trustedDocument": c.isTrustedDocument,
+            let s: [String: Any] = ["trustedDocument": c.isTrustedDocument, "nativeControlURL": c.nativeControlURL?.absoluteString ?? "",
                                    "messages": NativeBridge.shared.qaMessages, "media": c.qaMedia,
                                    "header": NSStringFromRect(c.dragView.header), "controls": c.dragView.controls.map(NSStringFromRect),
                                    "dragCount": c.dragView.dragCount, "windowNumber": c.window?.windowNumber ?? 0,
