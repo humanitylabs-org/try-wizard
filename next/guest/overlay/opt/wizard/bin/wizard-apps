@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "wizard-app-manager"))
-from wam import cli  # noqa: E402
+from wam import cli, fresh_agent  # noqa: E402
 
 LATER = ["transcriber", "browser", "wizard-ai-accounts"]   # installed after first launch / on first use
 VOICE = "transcriber"
@@ -111,6 +111,10 @@ def factory(hermes_image: str | None) -> None:
         p = c.runtipi_root / "app-data" / cli.STORE / app
         if p.exists():
             subprocess.run(["sudo", "rm", "-rf", str(p)], check=True)
+    subprocess.run(['sudo', '/opt/wizard/bin/wizard-product-configure'], check=True)
+    product = fresh_agent.main(c, 'connect')
+    if not product.get('ok'):
+        raise RuntimeError('Wizard product runtime connection failed')
     cli.write_registry(c, rt)
     say("prune", docker("image", "prune", "-af").stdout.strip().splitlines()[-1:])
     docker("builder", "prune", "-af")
