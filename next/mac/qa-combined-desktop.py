@@ -25,6 +25,8 @@ class Fixture(http.server.SimpleHTTPRequestHandler):
         if p == '/api/voice/status': return self.data({'state':'ready','stage':'Local voice ready','downloaded':1,'total':1})
         if p.endswith('/bootstrap'): return self.data({'bootstrap':1,'settings':{'agent':{'name':'Wizard'}},'capabilities':{'voice':True},'endpoints':{}})
         if p.endswith('/model/options'): return self.data({'provider':'qa','model':'qa','providers':[]})
+        if p.endswith('/api/sessions'):
+            return self.data({'sessions':[{'id':'qa-command-a','title':'QA command A','status':'completed','updated_at':'2026-10-14T12:00:00Z'},{'id':'qa-command-b','title':'QA command B','status':'completed','updated_at':'2026-10-14T11:00:00Z'}],'has_more':False})
         if p.startswith('/wizard/') or p.startswith('/api/'):
             return self.data({'sessions':[],'messages':[],'apps':[],'items':[],'state':{}})
         return super().do_GET()
@@ -89,6 +91,10 @@ try:
         key(direction);ok(ev(f'__wux.ws[0].focus===__qaTiles[{index}]')=='1','native Command-'+direction+' selects adjacent app')
     key('f');ok(ev('__wux.ws[0].mono')=='1','native Command-F expands selected app')
     key('f');ok(ev('!__wux.ws[0].mono')=='1','native Command-F returns to tiles')
+    ev("window.__qaRows=[...document.querySelectorAll('.win.focus .pane-list .ch-row[data-chopen]')].slice(0,2).map(r=>r.dataset.chopen);__wux.chats.openChat(__qaTiles[1],__qaRows[0]);true")
+    ok(ev('__qaRows.length===2')=='1','fixture exposes two real rendered chat rows')
+    key('down,option');ok(ev('__wux.wins[__qaTiles[1]].thread===__qaRows[1]')=='1','native Option-Down selects next chat')
+    key('up,option');ok(ev('__wux.wins[__qaTiles[1]].thread===__qaRows[0]')=='1','native Option-Up selects previous chat')
     ev("__wux.newChat();const draft=document.querySelector('.win.focus .pane-main textarea');draft.value='combined QA draft';draft.dispatchEvent(new Event('input',{bubbles:true}));true")
     for size in ['700x1000','1120x1000','380x560']:
         qa('window-size '+size);time.sleep(.8);composer('size-'+size)
@@ -96,6 +102,14 @@ try:
     ev("__wux.goWs(1);__wux.goWs(0);true")
     ok(ev("document.querySelector('.win.focus .pane-main textarea').value==='combined QA draft'")=='1','desktop switch preserves draft')
     qa('snapshot '+str(OUT/'composer-webview.png'));time.sleep(.7)
+    ev("window.__qaEnqueues=[];__wux.outbox.enqueue=async x=>{__qaEnqueues.push({kind:x.kind,sid:x.sessionId||'',bytes:x.audio?.size||0});return{id:'qa'};};navigator.mediaDevices.getUserMedia=async()=>{const ac=new AudioContext(),dest=ac.createMediaStreamDestination(),osc=ac.createOscillator();osc.connect(dest);osc.start();await ac.resume();window.__qaTone=ac;return dest.stream;};true")
+    key('n,shift');wait("__wux.voice==='listen' && document.querySelector('#voiceText').textContent==='Listening · new chat'")
+    ok(True,'native Command-Shift-N starts new-chat recording')
+    time.sleep(1.3);key('n,shift');wait('__qaEnqueues.length===1');time.sleep(.6)
+    captured=json.loads(ev('JSON.stringify(__qaEnqueues)'))
+    ok(len(captured)==1 and captured[0]['kind']=='new' and not captured[0]['sid'] and captured[0]['bytes']>1200,'second native Command-Shift-N enqueues exactly one new-thread audio item')
+    ok(proc.poll() is None and ev("__wux.voice==='idle'")=='1','new-voice completion keeps Wizard open')
+    receipt['generatedAudio']=captured
     # A webview snapshot is explicitly not full AppKit chrome acceptance.
     receipt.update(state='passed',binarySHA256=hashlib.sha256((APP/'Contents/MacOS/Wizard').read_bytes()).hexdigest(),boundary='Actual AppKit event loop/menu to combined WK desktop, isolated HTTP fixtures and nonpersistent storage. Snapshot is WKWebView only. No physical keyboard/mouse/mic, live agent/STT or guest acceptance.')
     print('COMBINED_DESKTOP_PASS',flush=True)
