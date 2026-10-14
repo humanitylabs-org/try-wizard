@@ -56,6 +56,7 @@ def ev(code):
     return s
 def state():return json.loads(ask('state.json','state'))
 def authority():return json.loads(ask('authority.json','native-authority-state'))
+def admission():return json.loads(ask('admission.json','update-admission'))
 def wait(fn,seconds=30):
     end=time.monotonic()+seconds;last=None
     while time.monotonic()<end:
@@ -157,7 +158,6 @@ try:
     # Exercise current restart admission on the real trusted desktop. Device
     # acquisition is an explicitly pending fixture; no live mic claim is made.
     if production_local:
-        def admission(): return json.loads(ask('admission.json','update-admission'))
         ev("Object.values(__wux.wins).forEach(w=>__wux.closeWin(w.id));__wux.newChat();const e=document.querySelector('.win.focus textarea');e.value='update admission draft';e.dispatchEvent(new Event('input',{bubbles:true}));window.qaAcquire=0;Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:()=>{qaAcquire++;return new Promise((resolve,reject)=>{window.qaReject=reject})},configurable:true});true")
         ok(admission()['admitted'] and ev('window.__wizardUpdateFrozen')=='1','actual trusted idle admission atomically freezes new capture starts')
         ev("document.querySelector('#micBtn').click();true")
@@ -180,6 +180,8 @@ try:
     wait(lambda:any(m['method']=='app.info' and m['admitted'] for m in authority()['messages']))
     ok(ev('replies.length')=='1','trusted main native app.info callback returns through real WK bridge')
     ok(authority()['media'][-1]['granted'],'trusted local main media policy retains grant path')
+    if production_local:
+        ok(not admission()['admitted'],'trusted main document with unknown recorder state defers restart')
     for label,url in [('same-control-child',CONTROL),('installed-app-child',APPURL),('wrong-port-child',OTHER)]:
         n=len(authority()['media'])
         ev("(()=>{const f=document.createElement('iframe');f.id="+json.dumps(label)+";f.src="+json.dumps(url)+";f.allow='microphone';document.body.appendChild(f);return true})()")
