@@ -1,0 +1,15 @@
+[
+  {
+    "httpStatus" : 200,
+    "mainFrameHost" : "github.com",
+    "path" : "\/login"
+  },
+  {
+    "navigationFinished" : true,
+    "pageTitle" : "Sign in to GitHub · GitHub"
+  },
+  {
+    "downloadStarted" : false,
+    "result" : "human-sign-in-required"
+  }
+]

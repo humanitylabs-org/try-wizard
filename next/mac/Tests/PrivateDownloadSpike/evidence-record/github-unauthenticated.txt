@@ -1,0 +1,1 @@
+direct-private-asset-unauthenticated: 404
