@@ -72,6 +72,20 @@ class NousRefreshTests(unittest.TestCase):
   # Keep subject, but rotate the token outside the observed expiring-grant path.
   a['providers']['nous']['access_token']=a['providers']['nous']['agent_key']=a['credential_pool']['nous'][0]['access_token']=a['credential_pool']['nous'][0]['agent_key']=a['providers']['nous']['access_token']+'changed-fixture'
   self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
+ def test_stock_clear_status_on_real_grant_turnover(self):
+  b=self.grant();a=self.grant(False)
+  b['credential_pool']['nous'][0]['last_status']='success';a['credential_pool']['nous'][0]['last_status']=None
+  a['credential_pool']['nous'][0]['last_status_at']=None
+  r=self.check(b,a);self.assertTrue(r['stable_identity_credentials_preserved']);self.assertTrue(r['nous_anonymous_invoke_refresh_accounted'])
+  self.assertEqual(p.auth_snapshot(b)['stable_identity_credentials_sha256'],p.auth_snapshot(a)['stable_identity_credentials_sha256'])
+ def test_status_clear_without_turnover_fails(self):
+  b=self.grant();b['credential_pool']['nous'][0]['last_status']='success';a=copy.deepcopy(b)
+  a['credential_pool']['nous'][0]['last_status']=None;a['credential_pool']['nous'][0]['last_status_at']=None
+  self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
+ def test_arbitrary_status_change_with_turnover_fails(self):
+  b=self.grant();a=self.grant(False)
+  b['credential_pool']['nous'][0]['last_status']='success';a['credential_pool']['nous'][0]['last_status']='forged-ready'
+  self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
  def test_unmirrored_refresh_fails(self):
   b=self.grant();a=self.grant(False);a['credential_pool']['nous'][0]['agent_key']='unmirrored-fixture'
   self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])

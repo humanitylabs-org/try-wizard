@@ -22,6 +22,9 @@ GRANT_FIELDS = ('access_token', 'agent_key', 'expires_at', 'expires_in', 'obtain
                 'agent_key_expires_at', 'agent_key_expires_in', 'agent_key_obtained_at')
 GRANT_PATHS = frozenset(base+'/'+field for base in NOUS_BASES for field in GRANT_FIELDS)
 TELEMETRY_PATHS = frozenset('/credential_pool/nous/0/'+field for field in ('last_status_at','request_count'))
+CLEAR_STATUS_PATHS = frozenset('/credential_pool/nous/0/'+field for field in
+    ('last_status','last_status_at','last_error_code','last_error_message','last_error_reason','last_error_reset_at'))
+CLEAR_STATUS_TYPE_PATHS = frozenset(path+'/@type' for path in CLEAR_STATUS_PATHS)
 TTL_PATHS = frozenset(base+'/'+field for base in NOUS_BASES for field in ('expires_in','agent_key_expires_in'))
 
 def digest(value):
@@ -74,7 +77,7 @@ def auth_snapshot(doc):
             leaves[path] = digest([type(value).__name__, value])
     visit(doc, '')
     nous=_nous_evidence(doc)
-    exclusions=VOLATILE_PATHS | (GRANT_PATHS|TELEMETRY_PATHS if nous.get('eligible') else frozenset())
+    exclusions=VOLATILE_PATHS | (GRANT_PATHS|TELEMETRY_PATHS|CLEAR_STATUS_PATHS|CLEAR_STATUS_TYPE_PATHS if nous.get('eligible') else frozenset())
     stable = {k: v for k, v in leaves.items() if k not in exclusions}
     return {'file_semantic_sha256':digest(leaves),'stable_identity_credentials_sha256':digest(stable),
             'field_hashes':leaves,'nous_refresh_evidence':nous}
@@ -83,7 +86,7 @@ def compare_auth(before, after):
     b,a=before['field_hashes'],after['field_hashes']
     changed=sorted(k for k in set(b)|set(a) if b.get(k)!=a.get(k))
     bn,an=before.get('nous_refresh_evidence',{}),after.get('nous_refresh_evidence',{})
-    possible=VOLATILE_PATHS|GRANT_PATHS|TELEMETRY_PATHS
+    possible=VOLATILE_PATHS|GRANT_PATHS|TELEMETRY_PATHS|CLEAR_STATUS_PATHS|CLEAR_STATUS_TYPE_PATHS
     stable_unchanged=all(b.get(k)==a.get(k) for k in (set(b)|set(a))-possible)
     pinned=(stable_unchanged and bn.get('eligible') and an.get('eligible') and bn.get('grant_mirrors') and
             an.get('grant_mirrors') and bn.get('jwt_identity_sha256')==an.get('jwt_identity_sha256'))
@@ -94,7 +97,14 @@ def compare_auth(before, after):
     allowed=set(VOLATILE_PATHS)
     if pinned:
         allowed.update(TELEMETRY_PATHS)
-        if rotation:allowed.update(GRANT_PATHS)
+        if rotation:
+            allowed.update(GRANT_PATHS)
+            # Stock _CLEAR_STATUS invalidates stale health/error telemetry on
+            # token turnover. Only clearing existing scalar fields to null is
+            # permitted; new values, deleted keys and shapes remain protected.
+            for path in CLEAR_STATUS_PATHS:
+                if path in b and path in a and a[path]==digest(['NoneType',None]):
+                    allowed.update((path,path+'/@type'))
         elif not token_changed:allowed.update(TTL_PATHS)
     volatile=[k for k in changed if k in allowed and k in b and k in a]
     unexpected=[k for k in changed if k not in volatile]
