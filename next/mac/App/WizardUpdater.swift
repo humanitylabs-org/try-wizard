@@ -250,7 +250,12 @@ import Darwin
     func showDownloadDidStartExtractingUpdate() { cancel = nil; show("verifying", "Verifying and preparing update…") }
     func showExtractionReceivedProgress(_ progress: Double) { show("verifying", "Preparing update \(Int(progress * 100))%") }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; show("ready", "Update \(version) available — ready to restart") }
-    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) { show("installing", "Installing update and restarting…") }
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
+        show("installing", "Installing update and restarting…")
+        // Installation handoff is confirmed. Quit ourselves after the deliberate
+        // restart lease, rather than depending on a helper's cross-app quit event.
+        if restartAuthorized && !applicationTerminated { DispatchQueue.main.async { NSApp.terminate(nil) } }
+    }
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) { acknowledgement() }
     func dismissUpdateInstallation() {
         cancel = nil; ready = nil
