@@ -16,7 +16,7 @@ overlay/opt/wizard/setup/hermes_brain.py
 wizard-shell.tar
 ```
 
-SHA256 the payload and image on Thales for the private delivery receipt. No accounts/credentials from a QA disk belong in it. The new factory must run `wizard-product-configure` and `wam fresh-agent connect` once **after** the updated WAM, guest overlay and image are installed. The modified factory command does this. A remaster should invoke these directly rather than trim an existing disk.
+SHA256 the payload and image on Thales for the private delivery receipt. No accounts/credentials from a QA disk belong in it. If the shared host Colima daemon is unhealthy, do not restart/prune it: inside the **isolated maintenance guest**, stage this Service's `server/`, assembled UX `web/` as `ux/`, and `Dockerfile.mac-patch` as `Dockerfile`; build `wizard-shell:mac-mvp-fix-20261014` from the existing shipped `wizard-shell:mac-mvp-20261013` base, record that base image ID, then retag/save the result as the existing pin. This code-only overlay retains the exact packaged Node/dependencies and never commits a used container/volume into an image. `stack-accept.py` exercises this alternative after the real host containerd metadata I/O failure. The new factory must run `wizard-product-configure` and `wam fresh-agent connect` once **after** the updated WAM, guest overlay and image are installed. The modified factory command does this. A remaster should invoke these directly rather than trim an existing disk.
 
 ## Existing MVP disk — state preserving
 
