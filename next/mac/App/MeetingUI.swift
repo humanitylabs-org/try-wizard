@@ -471,7 +471,14 @@ final class VoiceKeys {
     private func event(_ e: NSEvent) {
         if e.type == .keyDown { if downKey != nil { chorded = true }; return }
         let k = e.keyCode
-        guard k == Self.rightOption || k == Self.rightCommand else { if downKey != nil { chorded = true }; return }
+        guard k == Self.rightOption || k == Self.rightCommand else {
+            if let downKey {
+                chorded = true
+                let pendingFlag: NSEvent.ModifierFlags = downKey == Self.rightOption ? .option : .command
+                if !e.modifierFlags.contains(pendingFlag) { resetTap() }
+            }
+            return
+        }
         guard k != Self.rightOption || Self.backgroundEnabled else { if downKey != nil { chorded = true }; return }
         let flag: NSEvent.ModifierFlags = k == Self.rightOption ? .option : .command
         if e.modifierFlags.contains(flag) {

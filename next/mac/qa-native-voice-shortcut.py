@@ -144,12 +144,18 @@ try:
         wait(lambda:state()['localVoice']['visible'] and phase in state()['localVoice']['summary'].lower())
         s=state()['localVoice']
         ok(s['height']==64 and s['retryEnabled'],phase+' preserves visible recovery')
-        if phase=='error': snapshot('error-recovery')
+        if phase=='error':
+            snapshot('error-recovery')
+            qa('voice-footer-snapshot '+str(OUT/'error-recovery-footer.png'))
+            wait(lambda:(OUT/'error-recovery-footer.png').exists())
+    connection_generation=state()['localVoice']['connectionGeneration']
     qa('voice-retry');wait(lambda:retry_count==1)
     ok(retry_count==1,'native Retry button action reaches protocol POST once')
+    ok(state()['localVoice']['connectionGeneration']==connection_generation,'Retry does not invalidate backend wake/connection session')
     status.update(state='ready',stage='Local voice ready')
     wait(lambda:not state()['localVoice']['visible'])
     ok(state()['localVoice']['summary']=='','recovery collapses footer again without reload')
+    ok(state()['localVoice']['connectionGeneration']==connection_generation,'hiding ready footer does not invalidate backend wake/connection session')
     http_status=503
     wait(lambda:'unavailable' in state()['localVoice']['summary'])
     ok(state()['localVoice']['visible'] and state()['localVoice']['retryEnabled'],'unavailable status re-exposes readable recovery after ready')
@@ -157,6 +163,7 @@ try:
     wait(lambda:not state()['localVoice']['visible'])
     qa('connect '+URL);wait(lambda:not state()['localVoice']['polling'])
     ok(not state()['localVoice']['visible'],'remote backend clears local status/polling')
+    ok(state()['localVoice']['connectionGeneration']!=connection_generation,'backend switch invalidates old local connection session')
     qa('voice-local-fixture '+URL)
     wait(lambda:ev('!!window.__wux && !!window.__wux.live.ok')=='1')
     wait(lambda:not state()['localVoice']['visible'] and state()['localVoice']['polling'])
@@ -179,6 +186,8 @@ try:
     ok(len(admitted)==1 and admitted[0]['input']=='unsent native draft\n\nqa generated audio','deliberate second tap sends typed draft with transcript exactly once (existing contract)')
     count=voice()['orbTaps']; sent=len(runs())
     tap(chord=True);tap(duration=.6);tap(code=55);tap(code=61,flags=524288)
+    qa('voice-native-event flags 54 1048576 0;flags 55 1048576 0.02;flags 54 1048576 0.1;flags 55 0 0.2')
+    ok(voice()['pendingKey']==-1,'mixed left/right Command chord releases pending tap state cleanly')
     ok(voice()['orbTaps']==count and voice()['mode']=='idle' and ev('__wux.voice')=='idle' and len(runs())==sent,'Command-C chord, held/Left Command and default Right Option never trigger voice/send')
     qa('voice-enable off');tap()
     ok(not voice()['enabled'] and voice()['orbTaps']==count,'explicit disabled preference is respected')

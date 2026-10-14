@@ -570,12 +570,15 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     private var voiceTimer: Timer?
     private var voiceTask: URLSessionDataTask?
     private var voiceGeneration = UUID()
+    // Backend-session lifetime is independent of a status request/retry.
+    private var voiceConnectionGeneration = UUID()
     private var voiceRetryPending = false
     private var qaVoiceOrigin: URL?
     var localVoiceQAState: [String: Any] {
         ["visible": !voiceBar.isHidden, "summary": voiceLabel.stringValue,
          "retryEnabled": voiceRetry.isEnabled, "retryPending": voiceRetryPending,
          "polling": voiceTimer != nil, "height": voiceHeight?.constant ?? 0,
+         "connectionGeneration": voiceConnectionGeneration.uuidString,
          "webHeight": web.bounds.height, "contentHeight": window?.contentView?.bounds.height ?? 0]
     }
 
@@ -717,10 +720,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         }
     }
 
-    // The bar belongs to the native window, not onboarding's WK page. It stays
-    // visible after /api/finish redirects into Wizard UX, including ready state.
+    // The bar belongs to the native window, not onboarding's WK page. It
+    // remains monitored after /api/finish redirects into Wizard UX; only
+    // preparing/error/recovery states occupy visible layout space.
     private func clearLocalVoice() {
         voiceGeneration = UUID()
+        voiceConnectionGeneration = UUID()
         voiceTimer?.invalidate(); voiceTimer = nil
         voiceTask?.cancel(); voiceTask = nil
         voiceRetryPending = false
@@ -749,6 +754,15 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         Store.backends = [Backend(kind: .thisMac, name: "QA local voice", url: url.absoluteString)]
         Store.activeIndex = 0; homeURL = url; load(url)
         startLocalVoice()
+    }
+
+    func qaSnapshotVoiceFooter(to path: String) {
+        guard UserDefaults.standard.bool(forKey: "QAHooks"), !voiceBar.isHidden else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        if let rep = voiceBar.bitmapImageRepForCachingDisplay(in: voiceBar.bounds) {
+            voiceBar.cacheDisplay(in: voiceBar.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     private func pollLocalVoice() {
@@ -1031,16 +1045,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func connectLocal() {
         startLocalVoice()
-        let generation = voiceGeneration
+        let generation = voiceConnectionGeneration
         let started = Date()
         HostControl.ensureRunning()
         HostControl.send("start")
         var shown = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
-            guard let self, Store.active?.kind == .thisMac, self.voiceGeneration == generation else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if elapsed > 0.6 && !shown { shown = true; self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
         }, done: { [weak self] ok in
-            guard let self, Store.active?.kind == .thisMac, self.voiceGeneration == generation else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
@@ -1511,6 +1525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             UserDefaults.standard.removeObject(forKey: "VoiceKeys"); VoiceKeys.shared.install(prompt: false)
         case "voice-local-fixture":
             if let url = URL(string: arg) { controller.qaConnectLocalVoice(url) }
+        case "voice-footer-snapshot": controller.qaSnapshotVoiceFooter(to: arg)
         case "voice-native-event":
             // Send real NSEvents through NSApplication, including its installed
             // local monitor. Deliberately NOT VoiceKeys.tap/event or a DOM key.
