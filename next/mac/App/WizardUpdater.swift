@@ -28,6 +28,12 @@ import Darwin
     // defers installation; the trusted page freezes new starts atomically.
     var admitWebRestart: (@escaping (Bool) -> Void) -> Void = { done in done(false) }
     var isPreparing: Bool { preparing || activatingGuest }
+    /// Native recorder callbacks are synchronous. Read the live actor-owned
+    /// gate only on the main thread; an unexpected background caller defers.
+    nonisolated static var captureStartAllowed: Bool {
+        guard Thread.isMainThread else { return false }
+        return MainActor.assumeIsolated { !shared.isPreparing }
+    }
     var onFreeze: (Bool) -> Void = { _ in }
     var qaBusy = false
     private var stoppedHost = false

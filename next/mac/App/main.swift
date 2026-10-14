@@ -1475,7 +1475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vk = VoiceKeys.shared
         vk.origin = { [weak self] in self?.wizardOrigin }
         vk.orb = { [weak self] start in self?.orb(start) }
-        vk.mayStartRecording = { !WizardUpdater.shared.isPreparing }
+        vk.mayStartRecording = { WizardUpdater.captureStartAllowed }
         VoiceKeys.deliverInWizard = { [weak self] text, done in
             guard let self, NSApp.isActive, self.controller.window?.isKeyWindow == true else { done(false); return }
             self.controller.uxSend("wizard:dictation", ["text": text]) { done($0 != nil) }
@@ -1490,7 +1490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func recordNew(title: String?, eventId: String?) {
-        guard !WizardUpdater.shared.isPreparing, let o = wizardOrigin else { return }
+        guard WizardUpdater.captureStartAllowed, let o = wizardOrigin else { return }
         let clean = title.map { $0.replacingOccurrences(of: "^(Call: |Starting now: )", with: "", options: .regularExpression) }
         MeetingRecorder.shared.startNew(origin: o, title: eventId == nil ? clean : nil, calendarEventId: eventId) { err in
             if let err {
@@ -1502,7 +1502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
     /// Wizard UX gets a wizard:orb event and answers with its state; the legacy UX is driven through its buttons.
     func orb(_ start: Bool) {
-        guard !WizardUpdater.shared.isPreparing, let o = wizardOrigin else { return }
+        guard WizardUpdater.captureStartAllowed, let o = wizardOrigin else { return }
         showMainWindow()
         _ = start
         // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
