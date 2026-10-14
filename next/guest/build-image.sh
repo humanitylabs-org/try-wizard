@@ -69,7 +69,7 @@ chroot $R /usr/sbin/depmod $KV
 rm -rf $R/usr/lib/firmware/* $R/lib/firmware/* 2>/dev/null || true
 chroot $R /usr/sbin/update-initramfs -c -k $KV >/dev/null 2>&1 || chroot $R /usr/sbin/update-initramfs -u -k $KV
 for u in systemd-networkd systemd-resolved systemd-timesyncd serial-getty@hvc0 wizard-grow wizard-firstboot wizard-media \
-         wizard-setup wizard-vsock@8930 wizard-ux-bridge wizard-ctl wizard-dev wizard-provision wizard-voice; do
+         wizard-setup wizard-vsock@8930 wizard-ux-bridge wizard-ctl wizard-dev wizard-provision wizard-voice wizard-import; do
   chroot $R /usr/bin/systemctl enable $u >/dev/null 2>&1 || { echo "enable failed: $u"; exit 1; }
 done
 for u in apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer e2scrub_reap.service fstrim.timer getty@tty1.service; do

@@ -399,7 +399,8 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         vm.onChange = { [weak self] in self?.refresh() }
         bridges = [LoopbackBridge(hostPort: WizardShared.uxPort, guestPort: WizardShared.guestUXPort, vm: vm),
-                   LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm)]
+                   LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm),
+                   LoopbackBridge(hostPort: WizardShared.importPort, guestPort: WizardShared.guestImportPort, vm: vm)]
         if WizardShared.devShell {
             bridges.append(LoopbackBridge(hostPort: WizardShared.devShellPort, guestPort: WizardShared.guestDevShellPort, vm: vm))
         }

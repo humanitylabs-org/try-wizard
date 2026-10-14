@@ -43,6 +43,10 @@ plist "$APP/Contents/Info.plist" "Wizard MVP" org.humanitylabs.wizard.mvp Wizard
   '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
 plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
+# "Bring My Hermes into Wizard": backs up the Mac's Hermes and streams it to Wizard OS (127.0.0.1:48031 -> vsock 9103).
+mkdir -p "$APP/Contents/Resources/bring-hermes"
+install -m 755 bring-hermes/wizard-bring-hermes "$APP/Contents/Resources/bring-hermes/wizard-bring-hermes"
+
 if [[ -f assets/Wizard.icns ]]; then
   cp assets/Wizard.icns "$APP/Contents/Resources/Wizard.icns"
   cp assets/Wizard.icns "$HOST/Contents/Resources/Wizard.icns"

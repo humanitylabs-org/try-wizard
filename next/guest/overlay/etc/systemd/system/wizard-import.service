@@ -1,0 +1,12 @@
+[Unit]
+Description=Wizard: bring an existing Hermes into this box (vsock 9103, from Wizard Host only)
+After=network.target docker.service
+
+[Service]
+# One import at a time (no fork). The Mac sends "hermes-backup <bytes>" then the zip; one JSON line comes back.
+ExecStart=/usr/bin/socat -T 3600 VSOCK-LISTEN:9103,reuseaddr EXEC:"/opt/wizard/bin/wizard-import-hermes receive"
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,8 @@ enum WizardShared {
     static let guestSetupPort: UInt32 = 8930
     static let guestControlPort: UInt32 = 9100
     static let hostOpenURLPort: UInt32 = 9101
+    static let importPort: UInt16 = 48031         // -> guest 9103: "Bring My Hermes into Wizard" streams a backup in
+    static let guestImportPort: UInt32 = 9103
     static let devShellPort: UInt16 = 48000       // -> guest 9200, only when `dev-shell` exists (QA)
     static let guestDevShellPort: UInt32 = 9200
     static var devShell: Bool { FileManager.default.fileExists(atPath: supportDir.appendingPathComponent("dev-shell").path) }
