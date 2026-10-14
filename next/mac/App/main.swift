@@ -608,6 +608,7 @@ final class WizardDragView: NSView {
     private(set) var dragCount = 0
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let owner, owner.window?.styleMask.contains(.fullScreen) == false else { return nil }
         let p = convert(point, from: superview)
@@ -1235,7 +1236,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { decisionHandler(.allow); return }
-        if action.targetFrame == nil || (action.navigationType == .linkActivated && !isWizardOrigin(url)) {
+        // App-origin iframe navigation is not native authority. Preserve Files /
+        // installed-app links in their managed frame without whitelisting the
+        // same origin for script controls or silent device permission.
+        let managedAppLink = action.targetFrame?.isMainFrame == false && Store.active?.kind == .thisMac && NativeOrigin(url)?.isInstalledApp == true
+        if action.targetFrame == nil || (action.navigationType == .linkActivated && !isWizardOrigin(url) && !managedAppLink) {
             if ["http", "https", "mailto"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
             decisionHandler(.cancel); return
         }

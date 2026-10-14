@@ -29,7 +29,9 @@ class Fixture(http.server.SimpleHTTPRequestHandler):
         if p == '/authority.html':
             return self.data('''<!doctype html><html><body>Native authority fixture
             <button id="capture" onclick="navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{s.getTracks().forEach(t=>t.stop());window.mediaResult='granted'}).catch(e=>window.mediaResult=e.name)">Capture diagnostic</button>
-            <script>window.replies=[];window.wizardNativeReply=m=>replies.push(m);
+            <a id="selfLink" href="/authority.html?navigation=ok">Same-app navigation</a>
+            <script>addEventListener('message',e=>{if(e.data==='navigate-self')document.querySelector('#selfLink').click()});
+            window.replies=[];window.wizardNativeReply=m=>replies.push(m);
             window.probe=()=>{for(const method of ['app.info','qa.media-policy'])window.webkit.messageHandlers.wizardNative.postMessage({id:location.href,method,params:{}})};
             probe();</script></body></html>''', mime='text/html')
         if p.startswith('/wizard/') or p.startswith('/api/') or '/api/' in p:
@@ -149,7 +151,12 @@ try:
         a=authority()
         ok(not a['media'][-1]['granted'] and not a['media'][-1]['mainFrame'],label+' cannot inherit native silent mic authority')
         ok(not [m for m in a['messages'] if m['method']=='app.info'][-1]['admitted'],label+' native control request is rejected')
-    for label,url in [('installed-app-main',APPURL),('wrong-port-main',OTHER)]:
+        if label=='installed-app-child':
+            n=len(a['media'])
+            ev("document.getElementById('installed-app-child').contentWindow.postMessage('navigate-self','http://localhost:48023');true")
+            wait(lambda:len(authority()['media'])>n)
+            ok(not authority()['media'][-1]['granted'],'installed-app same-origin link stays in its frame, without acquiring native media authority')
+    for label,url in [('installed-app-main',APPURL),('wrong-port-main',OTHER),('same-port-alias-main',f'http://localhost:{server.server_port}/authority.html')]:
         n=len(authority()['media']);ev('location.href='+json.dumps(url)+';true')
         wait(lambda:len(authority()['media'])>n)
         a=authority()
