@@ -37,7 +37,12 @@ try:
     app=apps[0];receipt['mountedApp']=str(app)
     receipt['binarySHA256']=hashlib.sha256((app/'Contents/MacOS/Wizard').read_bytes()).hexdigest()
     assert run(['codesign','--verify','--strict','--deep',app],'codesign.log',60)==0,'Mounted codesign failed'
-    tests=[('drag-authority',S/'source/next/mac/qa-native-drag-authority.py'),('desktop',Q/'qa-combined-desktop.py'),('voice',S/'source/next/mac/qa-native-voice-authority.py')]
+    os.environ['COMBINED_FROZEN_MAC']=str(S/'source/next/mac')
+    tests=[('drag-authority',S/'source/next/mac/qa-native-drag-authority.py'),('desktop',Q/'qa-combined-desktop.py'),('voice',Q/'qa-combined-voice.py')]
+    selected=os.environ.get('COMBINED_TESTS','drag-authority,desktop,voice').split(',')
+    assert selected and set(selected)<=set(name for name,_ in tests),'Unknown QA component'
+    tests=[(name,script) for name,script in tests if name in selected]
+    receipt['selectedComponents']=selected
     for name,script in tests:
         rc=run(['/opt/homebrew/bin/python3',script,app,S/'ux/web',E/name],name+'.log',420)
         receipt['tests'][name]={'exit':rc,'evidence':str(E/name),'scriptSHA256':hashlib.sha256(script.read_bytes()).hexdigest()}

@@ -23,6 +23,8 @@ class Fixture(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         p = urlsplit(self.path).path
         if p == '/api/voice/status': return self.data({'state':'ready','stage':'Local voice ready','downloaded':1,'total':1})
+        if p == '/wizard/thread-seen': return self.data({'state':None})
+        if p == '/wizard/thread-dispositions': return self.data({'state':{}})
         if p.endswith('/bootstrap'): return self.data({'bootstrap':1,'settings':{'agent':{'name':'Wizard'}},'capabilities':{'voice':True},'endpoints':{}})
         if p.endswith('/model/options'): return self.data({'provider':'qa','model':'qa','providers':[]})
         if p.endswith('/api/sessions'):
@@ -30,6 +32,10 @@ class Fixture(http.server.SimpleHTTPRequestHandler):
         if p.startswith('/wizard/') or p.startswith('/api/'):
             return self.data({'sessions':[],'messages':[],'apps':[],'items':[],'state':{}})
         return super().do_GET()
+    def do_PUT(self):
+        body=self.rfile.read(int(self.headers.get('Content-Length','0')))
+        if urlsplit(self.path).path == '/wizard/thread-seen':return self.data({'state':json.loads(body)})
+        self.send_error(405)
 def run(*a, check=True):
     return sp.run(list(map(str,a)), check=check, text=True, stdout=sp.PIPE, stderr=sp.STDOUT, timeout=35)
 def qa(cmd): run(OUT/'qa-post', cmd)
@@ -72,7 +78,7 @@ try:
     run('xcrun','swiftc','-O',notifier,'-o',OUT/'qa-post')
     for k in ['backends','activeBackend']:run('defaults','delete',DOMAIN,k,check=False)
     proc=sp.Popen([str(APP/'Contents/MacOS/Wizard'),'-QAHooks','YES','-QAWebStorage','YES','-DataHome',str(OUT/'data-home'),'-CapsLockRemap','NO','-SUEnableAutomaticChecks','NO'],stdout=(OUT/'app.log').open('w'),stderr=sp.STDOUT)
-    time.sleep(2);qa('voice-local-fixture '+URL);wait('!!window.__wux && !!window.__wux.live.ok')
+    time.sleep(2);qa('update-later');qa('voice-local-fixture '+URL);wait('!!window.__wux && !!window.__wux.live.ok')
     # Keep the starting desktop nonempty: leaving an empty desktop now intentionally deletes it.
     ev("Object.values(__wux.wins).forEach(w=>__wux.closeWin(w.id));__wux.newChat();true")
     composer('initial')
