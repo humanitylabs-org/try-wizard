@@ -64,10 +64,10 @@ after={str(p):digest(p) for p in protected}
 auth_report=guard.compare_auth(before_auth,auth_snapshot())
 changed=[Path(p).name for p in before if before[p]!=after[p]]
 other_changed=[p for p in changed if p!='auth.json']
-report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'account_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image}
+report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image}
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
 if other_changed or not auth_report['stable_identity_credentials_preserved']:
     (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')
     raise SystemExit('Protected state mutation: '+repr(other_changed)+'; unexpected auth paths='+repr([c['path'] for c in auth_report['unexpected_field_changes']])+'; retained backup, no success receipt')
 (b/'applied.json').write_text(json.dumps(report,sort_keys=True)+'\n')
-print('Mac stack patch applied; SOUL/env and account identity/credentials preserved; stock auth save metadata accounted by field hashes. Disk, app data and chat databases were not replaced.')
+print('Mac stack patch applied; SOUL/env and permanent account credentials preserved; stock invoke-grant rotation/runtime metadata audited by field hashes. Disk, app data and chat databases were not replaced.')
