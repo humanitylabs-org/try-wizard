@@ -1728,7 +1728,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard a.count == 4, let w = controller.window else { return }
             // Arrange real native focus before dispatch; no DOM click or direct
             // production drag call is used by this hook.
-            w.makeKeyAndOrderFront(nil); w.makeKeyWindow(); NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil); w.makeKey(); NSApp.activate(ignoringOtherApps: true)
             let p = controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: nil)
             let hit = controller.dragView.hitTest(controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: controller.dragView.superview))
             NSLog("QA native mouse: viewport=(%.1f,%.1f), window=(%.1f,%.1f), dragHit=%@, key=%d", a[0], a[1], p.x, p.y, String(describing: hit), w.isKeyWindow ? 1 : 0)
