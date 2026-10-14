@@ -9,6 +9,7 @@ Build the Service image from this slice's Service + UX model adapter, **plus the
 ```
 wam/wam/                    # exact slice WAM package
 source/next/guest/upgrade-mvp-stack.py
+source/next/guest/stack-preservation.py
 overlay/opt/wizard/local-proxy.conf
 overlay/opt/wizard/product-plugin/{__init__.py,plugin.yaml}
 overlay/opt/wizard/bin/wizard-product-configure
