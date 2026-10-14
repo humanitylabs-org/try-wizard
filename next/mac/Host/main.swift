@@ -443,7 +443,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var iconVisible = true
     private func writeIconState() {
         let f = WizardShared.supportDir.appendingPathComponent("host-icon.json")
-        let s: [String: Any] = ["iconVisible": iconVisible, "updatedAt": Date().timeIntervalSince1970]
+        let s: [String: Any] = ["iconVisible": iconVisible, "updatedAt": Date().timeIntervalSince1970,
+            "brandAsset": "wizard-mark-white.png", "menuTemplate": item?.button?.image?.isTemplate ?? false,
+            "menuSize": NSStringFromSize(item?.button?.image?.size ?? .zero)]
         if let d = try? JSONSerialization.data(withJSONObject: s) { try? d.write(to: f, options: .atomic) }
     }
 
