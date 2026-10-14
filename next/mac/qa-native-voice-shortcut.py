@@ -10,6 +10,7 @@ import hashlib
 import http.server
 import json
 import os
+import plistlib
 from pathlib import Path
 import platform
 import subprocess as sp
@@ -118,13 +119,16 @@ if prior: raise SystemExit('Another native Wizard is running; queue QA, do not k
 backup=OUT/'defaults-before.plist'
 saved=run('defaults','export',DOMAIN,backup,check=False).returncode==0
 proc=None
+thread.start()
 try:
     # Compile a private notifier once; no shared QA driver recompilation races.
     notifier=OUT/'qa-post.swift'
     notifier.write_text('import Foundation\nDistributedNotificationCenter.default().postNotificationName(Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: CommandLine.arguments[1], userInfo: nil, deliverImmediately: true)\nRunLoop.main.run(until: Date().addingTimeInterval(0.1))\n')
     run('xcrun','swiftc','-O',notifier,'-o',OUT/'qa-post')
-    run('defaults','delete',DOMAIN,check=False)
-    thread.start()
+    # Leave the running Host's DataHome/feed domain intact. Only front-end
+    # backend choice and voice preference need a missing-key first-launch test.
+    for key in ['backends','activeBackend','VoiceKeys']:
+        run('defaults','delete',DOMAIN,key,check=False)
     proc=sp.Popen([str(APP/'Contents/MacOS/Wizard'),'-QAHooks','YES','-QAWebStorage','YES','-DataHome',str(OUT/'data-home'),'-CapsLockRemap','NO'],stdout=(OUT/'native-app.log').open('w'),stderr=sp.STDOUT)
     time.sleep(2)
     qa('voice-local-fixture '+URL)
@@ -215,12 +219,18 @@ finally:
         try:proc.wait(timeout=8)
         except sp.TimeoutExpired:proc.kill();proc.wait()
     server.shutdown();server.server_close()
-    run('defaults','delete',DOMAIN,check=False)
-    if saved:run('defaults','import',DOMAIN,backup)
+    if saved:
+        # Import merges: remove only keys QA introduced, after restoring saved
+        # values. Never transiently wipe a resident Host's whole preference domain.
+        current=OUT/'defaults-end-of-qa.plist'
+        run('defaults','export',DOMAIN,current)
+        extra=set(plistlib.loads(current.read_bytes()))-set(plistlib.loads(backup.read_bytes()))
+        run('defaults','import',DOMAIN,backup)
+        for key in sorted(extra):run('defaults','delete',DOMAIN,key)
+    else:run('defaults','delete',DOMAIN,check=False)
     restored=OUT/'defaults-after.plist'
     result=run('defaults','export',DOMAIN,restored,check=False)
     if saved:
-        import plistlib
         assert plistlib.loads(backup.read_bytes())==plistlib.loads(restored.read_bytes()),'QA preferences were not restored'
         print('QA_DEFAULTS_RESTORED',flush=True)
     else: print('QA_DEFAULTS_ABSENT_RESTORED',flush=True)
