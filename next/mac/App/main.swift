@@ -488,7 +488,7 @@ enum HostControl {
 
 /// Origins are protocol + host + effective port, never a hostname allowlist.
 /// Authority comes from the selected backend, not navigation/redirect destinations.
-struct NativeOrigin: Equatable {
+struct NativeOrigin: Hashable {
     let scheme: String
     let host: String
     let port: Int
@@ -1027,6 +1027,31 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         }
     }
 
+    /// Freeze admission in the trusted MAIN document in the same JavaScript
+    /// turn that reads the voice state. Pending getUserMedia is already listen.
+    func admitUpdateRestart(_ done: @escaping (Bool) -> Void) {
+        guard isTrustedDocument, let captured = web.url else { done(false); return }
+        let setup = Store.active?.kind == .thisMac && NativeOrigin(captured) == NativeOrigin(WizardShared.localSetupURL)
+        let js = """
+        (() => {
+          const state = window.__wux?.voice ?? window.__wos?.voice;
+          const shared = window.WizAppCapture?.getState?.();
+          const knownIdle = state === 'idle' || (\(setup ? "true" : "false") && state == null);
+          if (!knownIdle || shared?.active || shared?.recording || shared?.hold) return false;
+          window.__wizardUpdateFrozen = true;
+          return true;
+        })()
+        """
+        web.evaluateJavaScript(js) { [weak self] value, error in
+            guard let self, error == nil, self.isTrustedDocument, self.web.url == captured else { done(false); return }
+            done(value as? Bool == true)
+        }
+    }
+    func setUpdateFrozen(_ frozen: Bool) {
+        guard isTrustedDocument else { return }
+        web.evaluateJavaScript("window.__wizardUpdateFrozen = \(frozen ? "true" : "false")")
+    }
+
     /// Is the page in the window Wizard UX (bridge ready)?
     func uxState(_ done: @escaping ([String: Any]?) -> Void) {
         web.evaluateJavaScript("window.wizardUX ? JSON.stringify(window.wizardUX) : ''") { r, _ in
@@ -1307,34 +1332,46 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         decisionHandler(allowed ? .grant : .deny)
     }
 
-    private var selectedControlOrigin: NativeOrigin? {
+    private var selectedControlOrigins: Set<NativeOrigin> {
+        guard let backend = Store.active else { return [] }
+        let urls: [URL]
+        if backend.kind == .thisMac {
+            if UserDefaults.standard.bool(forKey: "QAHooks"), let qa = qaVoiceOrigin {
+                urls = [qa]
+            } else {
+                // Setup redirects to the named shell listener after onboarding.
+                // Only these two exact main origins are privileged; the localhost
+                // app virtual host and every other loopback port remain excluded.
+                urls = [WizardShared.localSetupURL, URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")!]
+            }
+        } else { urls = URL(string: backend.url).map { [$0] } ?? [] }
+        return Set(urls.compactMap(NativeOrigin.init).filter { !$0.isInstalledApp })
+    }
+    /// Native APIs use the selected shell service, never the current navigation
+    /// or the setup front door. QA overrides remain explicit and test-only.
+    var nativeControlURL: URL? {
         guard let backend = Store.active else { return nil }
         let url: URL?
         if backend.kind == .thisMac {
-            url = UserDefaults.standard.bool(forKey: "QAHooks") ? (qaVoiceOrigin ?? WizardShared.localSetupURL) : WizardShared.localSetupURL
+            url = UserDefaults.standard.bool(forKey: "QAHooks") ? (qaVoiceOrigin ?? URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")) : URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")
         } else { url = URL(string: backend.url) }
         guard let origin = url.flatMap(NativeOrigin.init), !origin.isInstalledApp else { return nil }
-        return origin
-    }
-    /// Native background recording/search must never acquire a backend from an
-    /// untrusted main-frame navigation either. Keep the selected service origin.
-    var nativeControlURL: URL? {
-        guard let origin = selectedControlOrigin else { return nil }
         var c = URLComponents(); c.scheme = origin.scheme; c.host = origin.host
         if origin.port != (origin.scheme == "https" ? 443 : 80) { c.port = origin.port }
         return c.url
     }
     var isTrustedDocument: Bool {
-        guard let selected = selectedControlOrigin, let actual = web.url.flatMap(NativeOrigin.init) else { return false }
-        return actual == selected && !actual.isInstalledApp
+        guard let actual = web.url.flatMap(NativeOrigin.init), !actual.isInstalledApp else { return false }
+        return selectedControlOrigins.contains(actual)
     }
     func allowsNative(_ frame: WKFrameInfo) -> Bool {
-        guard frame.isMainFrame, isTrustedDocument, let origin = NativeOrigin(frame.securityOrigin) else { return false }
-        return origin == selectedControlOrigin && !origin.isInstalledApp
+        guard frame.isMainFrame, isTrustedDocument, let origin = NativeOrigin(frame.securityOrigin),
+              !origin.isInstalledApp, let actual = web.url.flatMap(NativeOrigin.init) else { return false }
+        return origin == actual && selectedControlOrigins.contains(origin)
     }
     private func isWizardOrigin(_ url: URL) -> Bool {
         guard let origin = NativeOrigin(url), !origin.isInstalledApp else { return false }
-        return origin == selectedControlOrigin
+        return selectedControlOrigins.contains(origin)
     }
     func updateDragRegions(_ params: [String: Any]) {
         func rect(_ values: [Double]) -> NSRect? {
@@ -1383,7 +1420,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         installWizardKey()
         installMeetings()
         WizardUpdater.shared.isRecording = { MeetingRecorder.shared.session != nil || VoiceKeys.shared.state["mode"] as? String != "idle" }
-        WizardUpdater.shared.onFreeze = { [weak self] frozen in self?.controller.web.isHidden = frozen }
+        WizardUpdater.shared.admitWebRestart = { [weak self] done in
+            guard let self else { done(false); return }
+            self.controller.admitUpdateRestart(done)
+        }
+        WizardUpdater.shared.onFreeze = { [weak self] frozen in
+            self?.controller.setUpdateFrozen(frozen)
+            self?.controller.web.isHidden = frozen
+        }
         WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
         WizardUpdater.shared.start()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
@@ -1421,6 +1465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vk = VoiceKeys.shared
         vk.origin = { [weak self] in self?.wizardOrigin }
         vk.orb = { [weak self] start in self?.orb(start) }
+        vk.mayStartRecording = { !WizardUpdater.shared.isPreparing }
         VoiceKeys.deliverInWizard = { [weak self] text, done in
             guard let self, NSApp.isActive, self.controller.window?.isKeyWindow == true else { done(false); return }
             self.controller.uxSend("wizard:dictation", ["text": text]) { done($0 != nil) }
@@ -1435,7 +1480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func recordNew(title: String?, eventId: String?) {
-        guard let o = wizardOrigin else { return }
+        guard !WizardUpdater.shared.isPreparing, let o = wizardOrigin else { return }
         let clean = title.map { $0.replacingOccurrences(of: "^(Call: |Starting now: )", with: "", options: .regularExpression) }
         MeetingRecorder.shared.startNew(origin: o, title: eventId == nil ? clean : nil, calendarEventId: eventId) { err in
             if let err {
@@ -1447,7 +1492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
     /// Wizard UX gets a wizard:orb event and answers with its state; the legacy UX is driven through its buttons.
     func orb(_ start: Bool) {
-        guard let o = wizardOrigin else { return }
+        guard !WizardUpdater.shared.isPreparing, let o = wizardOrigin else { return }
         showMainWindow()
         _ = start
         // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
@@ -1556,6 +1601,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // Closing the window keeps Wizard in the menu bar (Wizard key, search, meeting detection keep working).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func windowDidResize(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.controller.isTrustedDocument else { return }
+            self.controller.web.evaluateJavaScript("window.dispatchEvent(new Event('resize'))")
+        }
+    }
     func windowWillClose(_ notification: Notification) {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }

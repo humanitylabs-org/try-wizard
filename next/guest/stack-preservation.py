@@ -99,13 +99,16 @@ def compare_auth(before, after):
         allowed.update(TELEMETRY_PATHS)
         if rotation:
             allowed.update(GRANT_PATHS)
-            # Stock _CLEAR_STATUS invalidates stale health/error telemetry on
-            # token turnover. Only clearing existing scalar fields to null is
-            # permitted; new values, deleted keys and shapes remain protected.
+        elif not token_changed:
+            allowed.update(TTL_PATHS)
+        # Stock credential-pool reload can also clear cached health without
+        # rotating a bearer. Permit only existing fields becoming null when
+        # permanent identity, pool membership, mirrors and all grant bytes are
+        # pinned (or the separately validated joint refresh occurred).
+        if rotation or (not token_changed and all(b.get(k)==a.get(k) for k in GRANT_PATHS-TTL_PATHS)):
             for path in CLEAR_STATUS_PATHS:
                 if path in b and path in a and a[path]==digest(['NoneType',None]):
                     allowed.update((path,path+'/@type'))
-        elif not token_changed:allowed.update(TTL_PATHS)
     volatile=[k for k in changed if k in allowed and k in b and k in a]
     unexpected=[k for k in changed if k not in volatile]
     return {'stable_identity_credentials_preserved':not unexpected,

@@ -78,9 +78,24 @@ class NousRefreshTests(unittest.TestCase):
   a['credential_pool']['nous'][0]['last_status_at']=None
   r=self.check(b,a);self.assertTrue(r['stable_identity_credentials_preserved']);self.assertTrue(r['nous_anonymous_invoke_refresh_accounted'])
   self.assertEqual(p.auth_snapshot(b)['stable_identity_credentials_sha256'],p.auth_snapshot(a)['stable_identity_credentials_sha256'])
- def test_status_clear_without_turnover_fails(self):
+ def test_stock_health_clear_without_turnover_preserves_identity(self):
   b=self.grant();b['credential_pool']['nous'][0]['last_status']='success';a=copy.deepcopy(b)
   a['credential_pool']['nous'][0]['last_status']=None;a['credential_pool']['nous'][0]['last_status_at']=None
+  r=self.check(b,a)
+  self.assertTrue(r['stable_identity_credentials_preserved'])
+  self.assertFalse(r['nous_anonymous_invoke_refresh_accounted'])
+ def test_status_clear_with_unaccompanied_grant_change_fails(self):
+  b=self.grant();b['credential_pool']['nous'][0]['last_status']='success';a=copy.deepcopy(b)
+  a['credential_pool']['nous'][0]['last_status']=None
+  a['providers']['nous']['agent_key_obtained_at']='2026-01-01T00:00:00Z'
+  self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
+ def test_status_new_value_without_turnover_fails(self):
+  b=self.grant();b['credential_pool']['nous'][0]['last_status']='success';a=copy.deepcopy(b)
+  a['credential_pool']['nous'][0]['last_status']='forged-ready'
+  self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
+ def test_status_field_deletion_fails(self):
+  b=self.grant();b['credential_pool']['nous'][0]['last_status']='success';a=copy.deepcopy(b)
+  del a['credential_pool']['nous'][0]['last_status']
   self.assertFalse(self.check(b,a)['stable_identity_credentials_preserved'])
  def test_arbitrary_status_change_with_turnover_fails(self):
   b=self.grant();a=self.grant(False)

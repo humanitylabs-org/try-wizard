@@ -433,6 +433,7 @@ final class VoiceKeys {
     private(set) var lastError = ""
     var origin: () -> URL? = { nil }
     var orb: (_ start: Bool) -> Void = { _ in }
+    var mayStartRecording: () -> Bool = { true }
 
     var trusted: Bool { AXIsProcessTrusted() }
 
@@ -501,7 +502,9 @@ final class VoiceKeys {
     func toggleDictation() {
         switch mode {
         case .idle:
+            guard mayStartRecording() else { return }
             MeetingRecorder.micAuthorized { ok in
+                guard self.mayStartRecording() else { return }
                 guard ok else { VoiceHUD.shared.show("Microphone access is off for Wizard", color: WizStyle.rec, live: false); VoiceHUD.shared.hide(after: 2.5); return }
                 do {
                     try self.capture.start(); self.mode = .dictating

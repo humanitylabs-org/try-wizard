@@ -24,6 +24,10 @@ import Darwin
     private var preparing = false
     private var ordinaryQuitPending = false
     var isRecording: () -> Bool = { false }
+    // The main page owns manual mic/Right Command takes. Unknown activity
+    // defers installation; the trusted page freezes new starts atomically.
+    var admitWebRestart: (@escaping (Bool) -> Void) -> Void = { done in done(false) }
+    var isPreparing: Bool { preparing || activatingGuest }
     var onFreeze: (Bool) -> Void = { _ in }
     var qaBusy = false
     private var stoppedHost = false
@@ -90,7 +94,19 @@ import Darwin
         if isRecording() || qaBusy { show("busy", "Recording or agent work is active — update after it finishes"); return }
         if HostControl.hasForeignRunner { show("busy", "Another candidate's Wizard Host is running — close that candidate before updating"); return }
         plannedGuestActivation = incomingGuest && Store.active?.kind == .thisMac && WizardShared.osInstalled
-        preparing = true; onFreeze(true)
+        preparing = true
+        admitWebRestart { [weak self] idle in
+            guard let self, self.preparing else { return }
+            guard idle, !self.isRecording(), !self.qaBusy else {
+                self.preparing = false; self.onFreeze(false)
+                self.show("busy", "Finish recording or let the chat finish loading before updating")
+                return
+            }
+            self.onFreeze(true)
+            self.prepareIdleHost()
+        }
+    }
+    private func prepareIdleHost() {
         WizardUpdate.idle { [weak self] reason in
             guard let self else { return }
             if let reason { self.preparing = false; self.onFreeze(false); self.show("busy", reason); return }
@@ -124,6 +140,14 @@ import Darwin
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.waitForHost(nonce: nonce, deadline: deadline) }
     }
     private func install() {
+        guard !isRecording(), !qaBusy, ready != nil else { fail("Activity started; restart deferred"); return }
+        admitWebRestart { [weak self] idle in
+            guard let self, self.preparing else { return }
+            guard idle, !self.isRecording(), !self.qaBusy else { self.fail("Recording started or its state is unknown; restart deferred"); return }
+            self.installApproved()
+        }
+    }
+    private func installApproved() {
         guard !isRecording(), !qaBusy, let reply = ready else { fail("Activity started; restart deferred"); return }
         do {
             if plannedGuestActivation { try WizardGuestActivation.snapshotStoppedDisk() }
