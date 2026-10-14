@@ -104,7 +104,7 @@ try:
     a=authority();(OUT/'drag-before.json').write_text(json.dumps(a,indent=2))
     ok(a['trustedDocument'],'selected local control/setup origin is trusted')
     # Find blank header hit space using the live DOM, not hardcoded layout widths.
-    x,y=json.loads(ev("JSON.stringify((()=>{const b=document.querySelector('#bar').getBoundingClientRect();for(let x=100;x<b.width-10;x+=4){const e=document.elementFromPoint(x,b.height/2);if(e&&!e.closest('button,a,[data-ws],#voicePill'))return [x,b.height/2]}throw Error('no blank header')})())"))
+    x,y=json.loads(ev("JSON.stringify((()=>{const b=document.querySelector('#bar').getBoundingClientRect();const controls=[...document.querySelectorAll('#bar button,#bar a,#bar [data-ws],#voicePill')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());for(let x=100;x<b.width-10;x+=4){const y=b.height/2;if(!controls.some(r=>x>=r.left-6&&x<=r.right+6&&y>=r.top-6&&y<=r.bottom+6))return [x,y]}throw Error('no blank header')})())"))
     ev('getSelection().removeAllRanges();true')
     mouse(x,y,48,-36)
     b=authority();(OUT/'drag-after.json').write_text(json.dumps(b,indent=2))
