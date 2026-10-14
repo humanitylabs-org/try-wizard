@@ -8,7 +8,11 @@ A=pathlib.Path(os.environ.get('UPDATER_INSTALL_PATH',str(R/'installed/Wizard.app
 if 'UPDATER_INSTALL_PATH' in os.environ:
  assert A.parent==pathlib.Path.home()/'Applications' and A.name=='Wizard Updater QA.app'
 A.parent.mkdir(parents=True,exist_ok=True)
-D=R/'native-data'; N=R/'evidence/notify'; pref=E/'prefs-before.plist'; server=None; app=None; host=None; receipts={}
+D=pathlib.Path(os.environ.get('UPDATER_DATA_HOME',str(R/'native-data'))).expanduser()
+if 'UPDATER_DATA_HOME' in os.environ:
+ assert D == pathlib.Path.home()/'Library/Application Support/Wizard Updater QA'
+D.mkdir(parents=True,exist_ok=True)
+N=R/'evidence/notify'; pref=E/'prefs-before.plist'; server=None; app=None; host=None; receipts={}
 def run(args,**kw): return subprocess.run([str(x) for x in args],check=True,timeout=kw.pop('timeout',15),**kw)
 def output(args): return subprocess.check_output([str(x) for x in args],text=True,timeout=15).strip()
 def save(name,data): (E/name).write_text(json.dumps(data,indent=2)+'\n'); print(name,json.dumps(data),flush=True)
