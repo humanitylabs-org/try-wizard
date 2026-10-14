@@ -236,6 +236,17 @@ def env_merge(wizard_lines: list[str]) -> list[str]:
     return sorted(set(replaced))
 
 
+def tighten_vm_key() -> None:
+    """Runtipi runs `chmod -R a+rwx` on an app's data folder at every start/stop (stock app-files-manager), and ssh
+    then refuses the agent's VM key. Put 0700/0600 back once the start has happened."""
+    sshd = DATA / ".ssh-vm"
+    if sshd.is_dir():
+        os.chmod(sshd, 0o700)
+        for f in sshd.iterdir():
+            if f.is_file():
+                os.chmod(f, 0o600)
+
+
 def session_count() -> int | None:
     import sqlite3
     try:
@@ -333,17 +344,12 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     if Path("/opt/wizard/bin/wizard-product-configure").is_file():   # newer images: product plugin + app origin
         run(["/opt/wizard/bin/wizard-product-configure"])
     run(["chown", "-R", f"{UID}:{GID}", str(DATA)])
-    sshd = DATA / ".ssh-vm"                    # the agent's key for its terminal in this VM: ssh refuses loose modes
-    if sshd.is_dir():
-        os.chmod(sshd, 0o700)
-        for f in sshd.iterdir():
-            if f.is_file():
-                os.chmod(f, 0o600)
     rec["setup_before"] = set_setup({"done": True, "verified": True,
                                      "brain": {"kind": "imported", "label": "Your Hermes"}})
     (ROOT / "last.json").write_text(json.dumps(rec, indent=2))   # undo needs setup_before even if a later step fails
     log("starting the agent")
     rec["agent"] = lifecycle("start")
+    tighten_vm_key()
     rec["api"] = wait_api()
     gw = connect_check()
     rec["gateway"] = bool(gw.get("ok"))
@@ -388,6 +394,7 @@ def undo() -> dict:
             state[k] = v
     SETUP_STATE.write_text(json.dumps(state, indent=2))
     agent = lifecycle("start")
+    tighten_vm_key()
     api = wait_api()
     gw = connect_check()
     shutil.rmtree(aside, ignore_errors=True)        # the imported copy (it holds the imported sign-ins)

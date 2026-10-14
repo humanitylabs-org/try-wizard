@@ -197,15 +197,20 @@ def main():
         r5 = chat(sid, "Search your past sessions for what we said about Playwright, and tell me in one sentence.")
         note('past_chat_search', r5)
         note('ssh_key_mode_after', guest("stat -c '%a %U' /home/wizard/runtipi/app-data/wizardapps/hermes-agent/data/.ssh-vm /home/wizard/runtipi/app-data/wizardapps/hermes-agent/data/.ssh-vm/id_ed25519").strip())
-        time.sleep(35)   # the Agent Service caches its thread list for 30 s
-        thr2 = guest("curl -s 'http://127.0.0.1:8924/wizard/hermes/api/sessions?limit=100&offset=0&include_children=false'")
-        note('new_chat_listed', sid in thr2)
+        listed = False
+        for _ in range(12):   # the Agent Service serves its cached list while it refreshes (30 s cache)
+            thr2 = guest("curl -s 'http://127.0.0.1:8924/wizard/hermes/api/sessions?limit=100&offset=0&include_children=false'")
+            if sid in thr2:
+                listed = True; break
+            time.sleep(10)
+        note('new_chat_listed', {'listed': listed, 'old_box_threads_gone': 'wizard_1791893870614' not in thr2})
 
         # --- the agent survives an app restart
         guest("sudo -iu wizard python3 -c \"import sys;sys.path.insert(0,'/home/wizard/wizard-app-manager');from wam import cli;c=cli.Config();rt=c.runtipi();u='hermes-agent:'+cli.STORE;rt.req('POST',f'/app-lifecycle/{u}/restart',{},timeout=300);print(rt.wait_status(u,{'running'},timeout=900))\"")
         time.sleep(15)
         r4 = chat(sid, "Remind me: what's my QA project codename? Just the codename.")
         note('after_restart_recall', {'has_codename': 'LIGHTHOUSE-7Q' in r4['reply'], **r4})
+        note('ssh_key_mode_after_runtipi_restart', guest("stat -c '%a' /home/wizard/runtipi/app-data/wizardapps/hermes-agent/data/.ssh-vm/id_ed25519").strip())
 
         # --- undo puts the old agent back
         p = sp.run(['/usr/bin/python3', str(SRC / 'wizard-bring-hermes'), '--undo', '--port', str(IMPORT)],
