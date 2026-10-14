@@ -109,7 +109,7 @@ try:
     # Command-line-only isolated DataHome; preserve resident Host keys.
     for key in ['backends','activeBackend']:run('defaults','delete',DOMAIN,key,check=False)
     proc=sp.Popen([str(APP/'Contents/MacOS/Wizard'),'-QAHooks','YES','-QAWebStorage','YES','-DataHome',str(OUT/'data-home'),'-CapsLockRemap','NO'],stdout=(OUT/'native-app.log').open('w'),stderr=sp.STDOUT)
-    time.sleep(2);qa('update-later');qa('voice-production-origin' if production_local else 'voice-local-fixture '+URL)
+    time.sleep(2);qa('update-later');qa('voice-enable on');qa('voice-production-origin' if production_local else 'voice-local-fixture '+URL)
     wait(lambda:ev('!!window.__wux && !!window.__wux.live.ok')=='1')
     wait(lambda:state()['overlayHidden'] and not state()['localVoice']['visible'])
     wait(lambda:frame(authority()['header'])[3]>0)

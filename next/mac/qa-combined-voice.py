@@ -17,10 +17,9 @@ for outcome in ['voice','sent']:
     replacement="    wait(lambda:ev('qaOrb.at(-1)')=='"+outcome+"',seconds=5)\n"+original
     assert original in s, 'frozen orb assertion changed'
     s=s.replace(original,replacement)
-s=s.replace(
-    "    initial=len(runs()); count=voice()['orbTaps']",
-    "    ev(\"window.qaMediaCalls=0;const qaMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:async(...a)=>{qaMediaCalls++;return qaMedia(...a)},configurable:true});window.qaMediaProbe='pending';navigator.mediaDevices.getUserMedia({audio:true}).then(s=>{qaMediaProbe=s.getAudioTracks()[0].readyState;s.getTracks().forEach(t=>t.stop())}).catch(e=>qaMediaProbe=e.name);true\")\n    wait(lambda:ev('qaMediaProbe')=='live')\n    initial=len(runs()); count=voice()['orbTaps']"
-)
+# Device/stream diagnostics live in qa-layout-diagnostic.py. Keep the frozen
+# oscillator and recorder assertions below untouched; do not wrap getUserMedia
+# or stop a cloned track before exercising the actual voice event path.
 s=s.replace('finally:\n    if proc:', '''except Exception:
     import traceback
     traceback.print_exc()
