@@ -634,7 +634,9 @@ final class WizardDragView: NSView {
         const params={header,controls:[...elements].filter(e=>e.getClientRects().length && e.getBoundingClientRect().top < header[3]).map(rect)};
         window.webkit.messageHandlers.wizardNative.postMessage({method:'chrome.regions',params});
       };
-      const schedule = () => { if (!pending) { pending=true; requestAnimationFrame(update); } };
+      // RAF can be suspended while the native window is occluded/headless.
+      // Geometry is an input contract and must not depend on compositor frames.
+      const schedule = () => { if (!pending) { pending=true; setTimeout(update,0); } };
       addEventListener('DOMContentLoaded', () => {
         const bar=document.querySelector('header#bar.bar');
         if (bar) new MutationObserver(schedule).observe(bar,{subtree:true,childList:true,attributes:true});
