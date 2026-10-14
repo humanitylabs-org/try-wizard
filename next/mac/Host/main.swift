@@ -335,8 +335,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         let want: UInt64 = physical >= (16 << 30) ? (wantMiB << 20) : (min(wantMiB, 4096) << 20)
         c.memorySize = min(max(want, VZVirtualMachineConfiguration.minimumAllowedMemorySize), VZVirtualMachineConfiguration.maximumAllowedMemorySize)
 
+        // .cached, not .automatic: with .automatic, Apple's virtio block device corrupts Linux ext4 guests (checksum
+        // errors, read-only remount), most often under host memory pressure. UTM (#5919), Lima (#2026) and Lume (#1099)
+        // made the same change.
         let disk = try VZDiskImageStorageDeviceAttachment(url: dir.appendingPathComponent("disk.img"), readOnly: false,
-                                                          cachingMode: .automatic, synchronizationMode: .full)
+                                                          cachingMode: .cached, synchronizationMode: .full)
         c.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: disk)]
 
         let net = VZVirtioNetworkDeviceConfiguration()
