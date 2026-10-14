@@ -15,8 +15,29 @@ enum WizardShared {
     static let devShellPort: UInt16 = 48000       // -> guest 9200, only when `dev-shell` exists (QA)
     static let guestDevShellPort: UInt32 = 9200
     static var devShell: Bool { FileManager.default.fileExists(atPath: supportDir.appendingPathComponent("dev-shell").path) }
+    private static var validatedGuestPayload: (app: String, nonce: String, url: URL)?
+    static var guestUpdatePayload: URL? {
+        let journal = WizardUpdate.json(WizardUpdate.journal)
+        guard journal["phase"] as? String == "guest-activating", journal["dataHome"] as? String == supportDir.path,
+              let path = journal["appPath"] as? String else { return nil }
+        let app = URL(fileURLWithPath: path)
+        let nonce = journal["nonce"] as? String ?? ""
+        if let cached = validatedGuestPayload, cached.app == path, cached.nonce == nonce { return cached.url }
+        guard let release = try? WizardRelease.read(app), release.guestPatch == "mac-stack-v1",
+              (try? release.validate(app)) != nil else { return nil }
+        let payload = app.appendingPathComponent("Contents/Resources/GuestUpdate")
+        validatedGuestPayload = (path, nonce, payload)
+        return payload
+    }
 
     static var supportDir: URL {
+        // Pin the runner to the launching App's exact DataHome. Suite-only preference
+        // lookup is not a reliable handoff across an NSWorkspace login-item launch.
+        if Bundle.main.bundleIdentifier == hostBundleID,
+           let i = CommandLine.arguments.firstIndex(of: "--wizard-data-home"), i + 1 < CommandLine.arguments.count,
+           CommandLine.arguments[i + 1].hasPrefix("/") {
+            return URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+        }
         // Dedicated internal-test identity; never opens or migrates the daily Wizard VM.
         let defaults = Bundle.main.bundleIdentifier == appBundleID ? UserDefaults.standard : UserDefaults(suiteName: appBundleID)
         if let p = defaults?.string(forKey: "DataHome"), p.hasPrefix("/") {

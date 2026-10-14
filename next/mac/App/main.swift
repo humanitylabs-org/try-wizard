@@ -440,13 +440,22 @@ enum HostControl {
     }
 
     static var isRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).isEmpty
+        NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).contains {
+            $0.bundleURL?.resolvingSymlinksInPath() == embeddedHostURL.resolvingSymlinksInPath()
+        }
+    }
+    static var hasForeignRunner: Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).contains {
+            $0.bundleURL?.resolvingSymlinksInPath() != embeddedHostURL.resolvingSymlinksInPath()
+        }
     }
 
     /// Internal MVP: start on demand, never register or change daily login services.
     static func ensureRunning() {
+        guard !hasForeignRunner else { NSLog("Wizard: another candidate's Host is running; not launching or controlling it"); return }
         if !isRunning {
             let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
+            cfg.arguments = ["--wizard-data-home", WizardShared.supportDir.path]
             NSWorkspace.shared.openApplication(at: embeddedHostURL, configuration: cfg) { _, err in
                 if let err { NSLog("Wizard: couldn't launch Wizard Host: \(err)") }
             }
@@ -612,6 +621,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         root.wantsLayer = true
         root.layer?.backgroundColor = window.backgroundColor.cgColor
         window.contentView = root
+        let updateNotice = WizardUpdater.shared.attach(to: root)
         voiceBar.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(voiceBar)
         voiceHeight = voiceBar.heightAnchor.constraint(equalToConstant: 0)
@@ -635,7 +645,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             root.addSubview(v)
             NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                                          v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                                         v.topAnchor.constraint(equalTo: root.topAnchor),
+                                         v.topAnchor.constraint(equalTo: updateNotice.bottomAnchor),
                                          v.bottomAnchor.constraint(equalTo: voiceBar.topAnchor)])
         }
         overlay.wantsLayer = true
@@ -1182,10 +1192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         controller.window?.delegate = self
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-        controller.begin()
         installQuitGuard()
         installWizardKey()
         installMeetings()
+        WizardUpdater.shared.isRecording = { MeetingRecorder.shared.session != nil || VoiceKeys.shared.state["mode"] as? String != "idle" }
+        WizardUpdater.shared.onFreeze = { [weak self] frozen in self?.controller.web.isHidden = frozen }
+        WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
+        WizardUpdater.shared.start()
+        if !WizardUpdater.shared.activatingGuest { controller.begin() }
     }
 
     // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
@@ -1360,6 +1374,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WizardUpdater.shared.shouldTerminate()
+    }
     func applicationWillTerminate(_ notification: Notification) {
         // Leave the keyboard as we found it when Wizard isn't running.
         if CapsLockRemap.active { CapsLockRemap.remove() }
@@ -1367,11 +1384,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let s = MeetingRecorder.shared.session { s.me.stop(); s.them?.stop(); MeetingSpool.shared.markDone(s.meetingId) }
     }
 
-    func buildMenus() {
+    @MainActor func buildMenus() {
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Wizard", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(WizardUpdater.checkForUpdates(_:)), keyEquivalent: "").target = WizardUpdater.shared
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -1433,11 +1451,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: nil, suspensionBehavior: .deliverImmediately)
     }
 
-    @objc func qa(_ n: Notification) {
+    @MainActor @objc func qa(_ n: Notification) {
         guard let cmd = n.object as? String else { return }
         let parts = cmd.split(separator: " ", maxSplits: 1).map(String.init)
         let arg = parts.count > 1 ? parts[1] : ""
         switch parts[0] {
+        case "update-check": WizardUpdater.shared.checkForUpdates()
+        case "update-restart": WizardUpdater.shared.action.performClick(nil)
+        case "update-later": WizardUpdater.shared.later.performClick(nil)
+        case "update-busy": WizardUpdater.shared.qaBusy = arg == "on"
+        case "update-state": try? WizardUpdate.write(WizardUpdater.shared.snapshot, WizardUpdate.dir.appendingPathComponent("qa.json"))
+        case "update-host-start": HostControl.ensureRunning()
+        case "update-quit": NSApp.terminate(nil)
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
