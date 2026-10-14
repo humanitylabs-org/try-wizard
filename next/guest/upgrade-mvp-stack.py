@@ -24,8 +24,11 @@ protected=[data/'SOUL.md',data/'.env',data/'auth.json']
 before={str(p):digest(p) for p in protected}
 def auth_snapshot():
     path=data/'auth.json'
-    return guard.auth_snapshot(json.loads(path.read_text()) if path.is_file() else None)
-before_auth=auth_snapshot()
+    raw=path.read_bytes() if path.is_file() else None
+    return (hashlib.sha256(raw).hexdigest() if raw is not None else None,
+            guard.auth_snapshot(json.loads(raw) if raw is not None else None))
+before_auth_hash,before_auth=auth_snapshot()
+before[str(data/'auth.json')]=before_auth_hash
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf'):
@@ -61,7 +64,9 @@ if not service_cid or '\n' in service_cid: raise SystemExit('Ambiguous MVP Servi
 actual_image=subprocess.check_output(['docker','inspect',service_cid,'--format','{{.Image}}'],text=True).strip()
 if actual_image!=expected_image: raise SystemExit('Service did not load the new image; no success receipt written')
 after={str(p):digest(p) for p in protected}
-auth_report=guard.compare_auth(before_auth,auth_snapshot())
+after_auth_hash,after_auth=auth_snapshot()
+after[str(data/'auth.json')]=after_auth_hash
+auth_report=guard.compare_auth(before_auth,after_auth)
 changed=[Path(p).name for p in before if before[p]!=after[p]]
 other_changed=[p for p in changed if p!='auth.json']
 report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image}
