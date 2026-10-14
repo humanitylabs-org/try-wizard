@@ -3,7 +3,7 @@
 from pathlib import Path
 p=Path(__file__).with_name('qa-native-voice-shortcut.py')
 s=p.read_text()
-s=s.replace('finally:\n    if app:', '''except Exception:
+s=s.replace('finally:\n    if proc:', '''except Exception:
     import traceback
     traceback.print_exc()
     for label, cmd, path in [('voice','voice-native-state','/tmp/wizard-mvp-qa-voice.json'),('authority','native-authority-state','/tmp/wizard-mvp-qa-authority.json'),('dom','eval JSON.stringify({url:location.href,orb:window.qaOrb,voice:window.WizVoice?.status?.(),capture:window.WizAppCapture?.state?.(),draft:document.querySelector(".chat-compose textarea")?.value})','/tmp/wizard-mvp-qa-eval.txt')]:
@@ -13,5 +13,6 @@ s=s.replace('finally:\n    if app:', '''except Exception:
         except Exception as exc:print('DIAGNOSTIC_FAILED',label,str(exc),flush=True)
     raise
 finally:
-    if app:''')
+    if proc:''')
+assert 'FAILURE_DIAGNOSTIC' in s, 'diagnostic insertion did not match frozen harness'
 exec(compile(s,str(p),'exec'))
