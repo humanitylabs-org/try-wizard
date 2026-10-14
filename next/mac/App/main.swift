@@ -629,13 +629,17 @@ final class WizardDragView: NSView {
       const update = () => {
         pending=false;
         const bar=document.querySelector('header#bar.bar');
-        const params = bar ? {header:rect(bar), controls:[...bar.querySelectorAll('button,a,input,select,textarea,summary,[role="button"],[tabindex],[contenteditable],[data-ws],#voicePill')].filter(e=>e.getClientRects().length).map(rect)} : {header:[0,0,0,0],controls:[]};
+        const header=bar ? rect(bar) : [0,0,innerWidth,28];
+        const elements=(bar || document).querySelectorAll('button,a,input,select,textarea,summary,[role="button"],[tabindex],[contenteditable],[data-ws],#voicePill');
+        const params={header,controls:[...elements].filter(e=>e.getClientRects().length && e.getBoundingClientRect().top < header[3]).map(rect)};
         window.webkit.messageHandlers.wizardNative.postMessage({method:'chrome.regions',params});
       };
       const schedule = () => { if (!pending) { pending=true; requestAnimationFrame(update); } };
       addEventListener('DOMContentLoaded', () => {
-        new MutationObserver(schedule).observe(document.body,{subtree:true,childList:true,attributes:true});
+        const bar=document.querySelector('header#bar.bar');
+        if (bar) new MutationObserver(schedule).observe(bar,{subtree:true,childList:true,attributes:true});
         new ResizeObserver(schedule).observe(document.documentElement);
+        document.fonts.ready.then(schedule);
         schedule();
       }, {once:true});
       addEventListener('resize',schedule); addEventListener('scroll',schedule,true);
