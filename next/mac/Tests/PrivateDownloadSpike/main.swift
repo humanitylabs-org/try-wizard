@@ -20,6 +20,7 @@ final class Probe: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDown
         try? JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys]).write(to: file, options: .atomic)
         print(value); fflush(stdout)
     }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         let config = WKWebViewConfiguration()
