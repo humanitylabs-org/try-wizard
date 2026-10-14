@@ -959,6 +959,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         voiceTask?.resume()
     }
 
+    /// QA-only navigation without an origin override: exercises the production
+    /// finite setup/shell origin set and shell API target without starting a VM.
+    func qaConnectProductionLocal() {
+        guard UserDefaults.standard.bool(forKey: "QAHooks") else { return }
+        qaVoiceOrigin = nil
+        Store.backends = [Backend(kind: .thisMac, name: "QA production local origins", url: WizardShared.localSetupURL.absoluteString)]
+        Store.activeIndex = 0; homeURL = WizardShared.localSetupURL
+        load(WizardShared.localSetupURL); startLocalVoice()
+    }
+
     // MARK: Flow
 
     func begin() {
@@ -1833,6 +1843,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             UserDefaults.standard.removeObject(forKey: "VoiceKeys"); VoiceKeys.shared.install(prompt: false)
         case "voice-local-fixture":
             if let url = URL(string: arg) { controller.qaConnectLocalVoice(url) }
+        case "voice-production-origin": controller.qaConnectProductionLocal()
+        case "update-admission":
+            controller.admitUpdateRestart { admitted in
+                let result: [String: Any] = ["admitted": admitted, "trustedDocument": self.controller.isTrustedDocument, "url": self.controller.web.url?.absoluteString ?? ""]
+                if let data = try? JSONSerialization.data(withJSONObject: result, options: .prettyPrinted) {
+                    try? data.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-admission.json"))
+                }
+            }
+        case "update-unfreeze": controller.setUpdateFrozen(false)
         case "voice-footer-snapshot": controller.qaSnapshotVoiceFooter(to: arg)
         case "native-authority-state":
             let c = controller!

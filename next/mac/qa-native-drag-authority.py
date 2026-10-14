@@ -80,10 +80,19 @@ if platform.system()!='Darwin':raise SystemExit('Must run on Thales')
 prior=run('pgrep','-f',r'/Contents/MacOS/Wizard$',check=False).stdout.strip()
 if prior:raise SystemExit('Another native Wizard is running; do not kill: '+prior)
 # Bind an isolated IPv6 app-only vhost. Never contact or mutate the resident Host's IPv4 control bridge.
-server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
+production_local = os.environ.get('QA_PRODUCTION_LOCAL') == '1'
+server=http.server.ThreadingHTTPServer(('127.0.0.1',48023 if production_local else 0),Fixture)
 appserver=IPv6Server(('::1',48023),Fixture)
 other=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
 servers=[server,appserver,other]
+if production_local:
+    class SetupFixture(Fixture):
+        def do_GET(self):
+            if urlsplit(self.path).path == '/':
+                self.send_response(302); self.send_header('Location', 'http://127.0.0.1:48023/wizard-os-home/desktop.html')
+                self.send_header('Content-Length', '0'); self.end_headers(); return
+            return super().do_GET()
+    servers.append(http.server.ThreadingHTTPServer(('127.0.0.1',48030),SetupFixture))
 URL=f'http://127.0.0.1:{server.server_port}/wizard-os-home/desktop.html'
 CONTROL=f'http://127.0.0.1:{server.server_port}/authority.html'
 APPURL='http://localhost:48023/authority.html'
@@ -99,12 +108,14 @@ try:
     # Command-line-only isolated DataHome; preserve resident Host keys.
     for key in ['backends','activeBackend']:run('defaults','delete',DOMAIN,key,check=False)
     proc=sp.Popen([str(APP/'Contents/MacOS/Wizard'),'-QAHooks','YES','-QAWebStorage','YES','-DataHome',str(OUT/'data-home'),'-CapsLockRemap','NO'],stdout=(OUT/'native-app.log').open('w'),stderr=sp.STDOUT)
-    time.sleep(2);qa('voice-local-fixture '+URL)
+    time.sleep(2);qa('update-later');qa('voice-production-origin' if production_local else 'voice-local-fixture '+URL)
     wait(lambda:ev('!!window.__wux && !!window.__wux.live.ok')=='1')
     wait(lambda:state()['overlayHidden'] and not state()['localVoice']['visible'])
     wait(lambda:frame(authority()['header'])[3]>0)
     a=authority();(OUT/'drag-before.json').write_text(json.dumps(a,indent=2))
     ok(a['trustedDocument'],'selected local control/setup origin is trusted')
+    if production_local:
+        ok(state()['url']==URL and a['nativeControlURL'].rstrip('/')=='http://127.0.0.1:48023','production setup48030 redirect retains trusted shell48023 and API origin with QA override disabled')
     # Find blank header hit space using the live DOM, not hardcoded layout widths.
     x,y=json.loads(ev("JSON.stringify((()=>{const b=document.querySelector('#bar').getBoundingClientRect();const controls=[...document.querySelectorAll('#bar button,#bar a,#bar [data-ws],#voicePill')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());for(let x=100;x<b.width-10;x+=4){const y=b.height/2;if(!controls.some(r=>x>=r.left-6&&x<=r.right+6&&y>=r.top-6&&y<=r.bottom+6))return [x,y]}throw Error('no blank header')})())"))
     ev('getSelection().removeAllRanges();true')
@@ -143,6 +154,25 @@ try:
     wait(lambda:state()['localVoice']['visible'])
     capture('recovery-full-window')
     status.update(state='ready');wait(lambda:not state()['localVoice']['visible'])
+    # Exercise current restart admission on the real trusted desktop. Device
+    # acquisition is an explicitly pending fixture; no live mic claim is made.
+    if production_local:
+        def admission(): return json.loads(ask('admission.json','update-admission'))
+        ev("Object.values(__wux.wins).forEach(w=>__wux.closeWin(w.id));__wux.newChat();const e=document.querySelector('.win.focus textarea');e.value='update admission draft';e.dispatchEvent(new Event('input',{bubbles:true}));window.qaAcquire=0;Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:()=>{qaAcquire++;return new Promise((resolve,reject)=>{window.qaReject=reject})},configurable:true});true")
+        ok(admission()['admitted'] and ev('window.__wizardUpdateFrozen')=='1','actual trusted idle admission atomically freezes new capture starts')
+        ev("document.querySelector('#micBtn').click();true")
+        qa('voice-native-event flags 54 1048576 0;flags 54 0 0.12');time.sleep(.5)
+        ok(ev("qaAcquire===0 && __wux.voice==='idle'")=='1','frozen manual microphone and native Right Command event paths admit no capture')
+        qa('update-unfreeze');time.sleep(.3)
+        for route in ['manual','right-command']:
+            if route=='manual':ev("document.querySelector('#micBtn').click();true")
+            else:qa('voice-native-event flags 54 1048576 0;flags 54 0 0.12')
+            wait(lambda:ev("__wux.voice==='listen' && typeof qaReject==='function'")=='1')
+            ok(not admission()['admitted'] and ev('!window.__wizardUpdateFrozen')=='1',route+' pending microphone permission defers restart and preserves the take')
+            ok(ev("document.querySelector('.win.focus textarea').value==='update admission draft'")=='1',route+' deferred restart preserves typed draft')
+            ev("document.querySelector('#voiceCancel').click();qaReject(new Error('QA cancelled pending acquisition'));true")
+            wait(lambda:ev("__wux.voice==='idle'")=='1')
+        ok(ev("document.querySelector('.win.focus textarea').value==='update admission draft'")=='1','cancelled pending recording retains unsent draft')
     # Use actual WebKit main and child frames. The device-free diagnostic invokes
     # the production media permission delegate with each caller's WKFrameInfo.
     ev('location.href='+json.dumps(CONTROL)+';true')
@@ -180,10 +210,10 @@ try:
     ev('probe();true');time.sleep(.3)
     ok(not authority()['trustedDocument'] and not authority()['media'][-1]['granted'],'explicit localhost app-origin selection is still never native authority')
     ok(authority()['nativeControlURL']=='','explicit installed-app selection supplies no native API backend')
-    qa('voice-local-fixture '+URL);wait(lambda:ev('!!window.__wux')=='1')
+    qa('voice-production-origin' if production_local else 'voice-local-fixture '+URL);wait(lambda:ev('!!window.__wux')=='1')
     ok(ask('command-w.txt','command-w')=='true' and proc.poll() is None,'Command-W native menu path remains app-internal')
     final=authority();(OUT/'authority-final.json').write_text(json.dumps(final,indent=2))
-    (OUT/'receipt.json').write_text(json.dumps({'host':platform.node(),'app':str(APP),'binarySHA256':hashlib.sha256((APP/'Contents/MacOS/Wizard').read_bytes()).hexdigest(),'fixtureControl':CONTROL,'fixtureApp':APPURL,'passes':passed,'boundary':'Actual NSEvents/NSApplication/native frame and real WK bridge/frame origins. Media decisions invoke actual delegate with real WKFrameInfo, without physical device acquisition. Full-window captures only accepted where screencapture succeeds and pixels are inspected. No physical mouse/mic/TCC, live backend/STT, or guest VM proof.'},indent=2))
+    (OUT/'receipt.json').write_text(json.dumps({'host':platform.node(),'app':str(APP),'binarySHA256':hashlib.sha256((APP/'Contents/MacOS/Wizard').read_bytes()).hexdigest(),'fixtureControl':CONTROL,'fixtureApp':APPURL,'productionOriginOverrideDisabled':production_local,'passes':passed,'boundary':'Actual NSEvents/NSApplication/native frame and real WK bridge/frame origins. Media decisions invoke actual delegate with real WKFrameInfo, without physical device acquisition. Full-window captures only accepted where screencapture succeeds and pixels are inspected. No physical mouse/mic/TCC, live backend/STT, or guest VM proof.'},indent=2))
     print('NATIVE_DRAG_AUTHORITY_PASS',flush=True)
 finally:
     if proc:
