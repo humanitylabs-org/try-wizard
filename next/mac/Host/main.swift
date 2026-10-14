@@ -370,9 +370,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         log("Wizard Host launched (pid \(mine))")
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        let image = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: "Wizard")
-        image?.isTemplate = true
-        item.button?.image = image
+        item.button?.image = WizardBrand.menuBarImage()
         let menu = NSMenu(); menu.delegate = self
         statusLine.isEnabled = false
         menu.addItem(statusLine)
