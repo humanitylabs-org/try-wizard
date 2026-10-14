@@ -1710,6 +1710,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
+        wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Bring My Hermes into Wizard…", action: #selector(bringHermes), keyEquivalent: "").target = self
     }
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
@@ -2031,6 +2033,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func addThisMac() { controller.chooseThisMac(); rebuildWizardMenu() }
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
+    /// Backs up the Hermes on this Mac with its own `hermes backup` and makes it the agent in Wizard OS on this Mac
+    /// (bundled wizard-bring-hermes posts it to the VM's front door). The Mac's Hermes is left as it is.
+    @objc func bringHermes() {
+        let alert = NSAlert()
+        alert.messageText = "Bring your Hermes into Wizard?"
+        alert.informativeText = "Wizard copies your Hermes from this Mac: its memory, skills, chats, settings and " +
+            "sign-ins. From then on it is your agent in Wizard and works inside Wizard OS, away from your Mac's files.\n\n" +
+            "Your Hermes on this Mac isn't changed. In Wizard, its messaging (like Telegram) starts off and its " +
+            "scheduled jobs start paused, so the two copies never double up. Wizard's current agent is saved, so you " +
+            "can switch back."
+        alert.addButton(withTitle: "Bring It In"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let tool = Bundle.main.url(forResource: "wizard-bring-hermes", withExtension: nil, subdirectory: "bring-hermes") else { return }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [tool.path]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+        p.environment = env
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { proc in
+            let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let line = text.split(separator: "\n").last.map(String.init) ?? ""
+            let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+            DispatchQueue.main.async {
+                let done = NSAlert()
+                if proc.terminationStatus == 0, obj?["ok"] as? Bool == true {
+                    let paused = (obj?["paused_jobs"] as? [Any])?.count ?? 0
+                    let off = (obj?["disabled_messaging"] as? [String]) ?? []
+                    done.messageText = "Your Hermes is now your agent in Wizard"
+                    var notes = ["It remembers what it knew and can search its past chats."]
+                    if !off.isEmpty { notes.append("Messaging is off here (\(off.joined(separator: ", "))).") }
+                    if paused > 0 { notes.append("\(paused) scheduled job\(paused == 1 ? " is" : "s are") paused here.") }
+                    done.informativeText = notes.joined(separator: " ")
+                } else {
+                    done.messageText = "Wizard couldn't bring your Hermes in"
+                    done.informativeText = (obj?["detail"] as? String) ?? (obj?["error"] as? String) ?? String(text.suffix(300))
+                }
+                done.runModal()
+                self.controller.begin()
+            }
+        }
+        do { try p.run() } catch { NSLog("Wizard: wizard-bring-hermes failed to start: \(error)") }
+    }
+
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
     @objc func showFilesFolder() {
         if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
