@@ -620,8 +620,19 @@ final class WizardDragView: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         guard event.type == .leftMouseDown else { return }
+        guard let window else { return }
         dragCount += 1
-        window?.performDrag(with: event)
+        window.makeKeyAndOrderFront(nil)
+        let start = window.convertPoint(toScreen: event.locationInWindow)
+        let frame = window.frame
+        // AppKit tracking consumes real mouse events, including off-window up.
+        // Unlike a web gesture this never begins a selection or DOM click.
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { break }
+            let screen = window.convertPoint(toScreen: next.locationInWindow)
+            window.setFrameOrigin(NSPoint(x: frame.minX + screen.x - start.x,
+                                          y: frame.minY + screen.y - start.y))
+        }
     }
     static let script = """
     (() => {
@@ -655,6 +666,7 @@ final class WizardDragView: NSView {
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
     let dragView = WizardDragView()
+    private var dragMonitor: Any?
     private(set) var qaMedia: [[String: Any]] = []
     let overlay = NSView()
     let title = NSTextField(wrappingLabelWithString: "")
@@ -752,7 +764,19 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                                      dragView.trailingAnchor.constraint(equalTo: web.trailingAnchor),
                                      dragView.topAnchor.constraint(equalTo: web.topAnchor),
                                      dragView.bottomAnchor.constraint(equalTo: web.bottomAnchor)])
+        // WKWebView / transparent native chrome can win ordinary view routing.
+        // Intercept only this window's authenticated blank header mouseDown;
+        // controls, desktop content and other windows retain normal AppKit input.
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let point = self.dragView.convert(event.locationInWindow, from: nil)
+            let parentPoint = self.dragView.convert(point, to: self.dragView.superview)
+            guard self.dragView.hitTest(parentPoint) != nil else { return event }
+            self.dragView.mouseDown(with: event)
+            return nil
+        }
     }
+    deinit { if let dragMonitor { NSEvent.removeMonitor(dragMonitor) } }
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildOverlay() {
@@ -1702,6 +1726,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // actual window via NSApplication, never call the drag view directly.
             let a = arg.split(separator: " ").compactMap { Double($0) }
             guard a.count == 4, let w = controller.window else { return }
+            // Arrange real native focus before dispatch; no DOM click or direct
+            // production drag call is used by this hook.
+            w.makeKeyAndOrderFront(nil); w.makeKeyWindow(); NSApp.activate(ignoringOtherApps: true)
             let p = controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: nil)
             let hit = controller.dragView.hitTest(controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: controller.dragView.superview))
             NSLog("QA native mouse: viewport=(%.1f,%.1f), window=(%.1f,%.1f), dragHit=%@, key=%d", a[0], a[1], p.x, p.y, String(describing: hit), w.isKeyWindow ? 1 : 0)
