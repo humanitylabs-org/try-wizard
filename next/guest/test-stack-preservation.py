@@ -46,7 +46,7 @@ class NousRefreshTests(unittest.TestCase):
   return {'updated_at':iso(issued),'active_provider':'nous','providers':{'nous':provider},'credential_pool':{'nous':[row]}}
  def check(self,b,a):return p.compare_auth(p.auth_snapshot(b),p.auth_snapshot(a))
  def test_observed_anonymous_grant_refresh(self):
-  r=self.check(self.grant(),self.grant(False));self.assertTrue(r['stable_identity_credentials_preserved']);self.assertTrue(r['nous_anonymous_invoke_refresh_verified'])
+  r=self.check(self.grant(),self.grant(False));self.assertTrue(r['stable_identity_credentials_preserved']);self.assertTrue(r['nous_anonymous_invoke_refresh_accounted'])
  def test_permanent_anon_material_remains_protected(self):
   b=self.grant();a=self.grant(False)
   a['providers']['nous']['anon_token']=a['credential_pool']['nous'][0]['anon_token']='changed-permanent-fixture'
