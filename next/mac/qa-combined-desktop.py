@@ -62,9 +62,9 @@ def wait(code):
 def key(spec): qa('show-window'); qa('desktop-key '+spec); time.sleep(.5)
 def composer(label):
     x=json.loads(ev("JSON.stringify((()=>{const e=document.querySelector('.win.focus .pane-main textarea'),f=e.closest('form'),b=e.closest('.wbody');const r=x=>{const q=x.getBoundingClientRect();return {x:q.x,y:q.y,bottom:q.bottom,height:q.height}};return {ta:r(e),form:r(f),box:r(b),logo:r(document.querySelector('#logo')),viewport:innerHeight,value:e.value}})())"))
+    (OUT/(label+'-layout.json')).write_text(json.dumps(x,indent=2))
     ok(x['ta']['height']>=38 and x['form']['bottom']<=x['box']['bottom']+1 and x['ta']['bottom']<=x['viewport'],label+' composer visible before typing')
     ok(x['logo']['x']>=86,label+' native traffic-light clearance')
-    (OUT/(label+'-layout.json')).write_text(json.dumps(x,indent=2))
 if platform.system()!='Darwin': raise SystemExit('Thales only')
 if run('pgrep','-f',r'/Contents/MacOS/Wizard$',check=False).stdout.strip(): raise SystemExit('Another native app is running; preserve it')
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
@@ -122,6 +122,8 @@ try:
 except Exception as exc:
     receipt.update(state='failed',error=str(exc))
     try:(OUT/'failure-state.json').write_text(ev('JSON.stringify({cur:__wux.cur,desktops:__wux.ws,voice:__wux.voice,url:location.href})'))
+    except Exception:pass
+    try:qa('snapshot '+str(OUT/'failure-webview.png'));time.sleep(.8)
     except Exception:pass
     raise
 finally:
