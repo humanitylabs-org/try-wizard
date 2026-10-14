@@ -2,8 +2,11 @@
 """Apply this bounded Mac MVP runtime patch inside an existing guest. No factory trim/reset.
 Payload: wam/wam/, overlay/opt/wizard/, wizard-shell.tar; invoke --apply only after host disk backup.
 """
-import argparse, hashlib, json, os, shutil, subprocess, sys, time
+import argparse, hashlib, importlib.util, json, os, shutil, subprocess, sys, time
 from pathlib import Path
+spec=importlib.util.spec_from_file_location('stack_preservation',Path(__file__).with_name('stack-preservation.py'))
+if spec is None or spec.loader is None: raise SystemExit('Missing preservation helper')
+guard=importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
 p=argparse.ArgumentParser(); p.add_argument('payload',type=Path); p.add_argument('--apply',action='store_true'); a=p.parse_args()
 if os.geteuid()!=0: raise SystemExit('Run as root inside the Wizard guest')
 root=Path('/home/wizard/runtipi'); data=root/'app-data/wizardapps/hermes-agent/data'
@@ -19,18 +22,10 @@ for src in (data/'config.yaml',root/'user-config/wizardapps/wizard-shell/docker-
 def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 protected=[data/'SOUL.md',data/'.env',data/'auth.json']
 before={str(p):digest(p) for p in protected}
-def auth_leaves():
+def auth_snapshot():
     path=data/'auth.json'
-    if not path.is_file(): return {}
-    doc=json.loads(path.read_text()); leaves={}
-    def visit(value, path):
-        if isinstance(value,dict):
-            for k,v in value.items(): visit(v,path+'.'+str(k))
-        elif isinstance(value,list):
-            for i,v in enumerate(value): visit(v,path+'.'+str(i))
-        else: leaves[path]=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
-    visit(doc,'auth'); return leaves
-before_auth=auth_leaves()
+    return guard.auth_snapshot(json.loads(path.read_text()) if path.is_file() else None)
+before_auth=auth_snapshot()
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf'):
@@ -66,10 +61,13 @@ if not service_cid or '\n' in service_cid: raise SystemExit('Ambiguous MVP Servi
 actual_image=subprocess.check_output(['docker','inspect',service_cid,'--format','{{.Image}}'],text=True).strip()
 if actual_image!=expected_image: raise SystemExit('Service did not load the new image; no success receipt written')
 after={str(p):digest(p) for p in protected}
-if before!=after:
-    changed=[Path(p).name for p in before if before[p]!=after[p]]
-    after_auth=auth_leaves(); changed_paths=[k for k in set(before_auth)|set(after_auth) if before_auth.get(k)!=after_auth.get(k)]
-    (b/'preservation-failure.json').write_text(json.dumps({'changed_files':changed,'auth_field_paths_changed':changed_paths,'before':before,'after':after})+'\n')
-    raise SystemExit('Protected file changed unexpectedly: '+', '.join(changed)+'; auth field paths changed='+repr(changed_paths)+'; retained backup, do not claim migration passed')
-(b/'applied.json').write_text(json.dumps({'patch':'mac-stack-v1','at':int(time.time()),'protected_unchanged':True,'service_image':actual_image})+'\n')
-print('Mac stack patch applied; SOUL/account files unchanged. Disk, app data and chat databases were not replaced.')
+auth_report=guard.compare_auth(before_auth,auth_snapshot())
+changed=[Path(p).name for p in before if before[p]!=after[p]]
+other_changed=[p for p in changed if p!='auth.json']
+report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'account_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image}
+(b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
+if other_changed or not auth_report['stable_identity_credentials_preserved']:
+    (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')
+    raise SystemExit('Protected state mutation: '+repr(other_changed)+'; unexpected auth paths='+repr([c['path'] for c in auth_report['unexpected_field_changes']])+'; retained backup, no success receipt')
+(b/'applied.json').write_text(json.dumps(report,sort_keys=True)+'\n')
+print('Mac stack patch applied; SOUL/env and account identity/credentials preserved; stock auth save metadata accounted by field hashes. Disk, app data and chat databases were not replaced.')
