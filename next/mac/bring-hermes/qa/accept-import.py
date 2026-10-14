@@ -9,7 +9,7 @@ from pathlib import Path
 
 Q = Path('/Volumes/ThalesMedia/Projects/wizard-desktop/existing-hermes-20261014')
 BASE = Path('/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-jan-20261013')
-E = Path(os.environ.get('E') or Q / 'evidence-r6'); E.mkdir(parents=True, exist_ok=True)
+E = Path(os.environ.get('E') or Q / 'evidence-r8'); E.mkdir(parents=True, exist_ok=True)
 SRC = Q / 'bring-src'
 DISK = Q / 'import-test.img'
 JAN = Q / 'jan-hermes-home'
@@ -161,8 +161,9 @@ def main():
         wait(lambda: '"status":"ok"' in guest('curl -s http://127.0.0.1:8924/wizard/health').replace(' ', ''), 600)
         note('overlay_mount', guest("grep -c ':/opt/agent-ssh:ro' /home/wizard/runtipi/user-config/wizardapps/hermes-agent/docker-compose.yml").strip())
         # Runtipi restart (its start-time chmod -R a+rwx on app-data) must no longer cost the agent its terminal
-        guest("sudo -iu wizard python3 -c \"import sys;sys.path.insert(0,'/home/wizard/wizard-app-manager');from wam import cli;c=cli.Config();rt=c.runtipi();u='hermes-agent:'+cli.STORE;rt.req('POST',f'/app-lifecycle/{u}/restart',{},timeout=300);print(rt.wait_status(u,{'running'},timeout=900))\"")
+        note('runtipi_restart', guest("sudo -iu wizard python3 -c \"import sys;sys.path.insert(0,'/home/wizard/wizard-app-manager');from wam import cli;c=cli.Config();rt=c.runtipi();u='hermes-agent:'+cli.STORE;rt.req('POST',f'/app-lifecycle/{u}/restart',{},timeout=300);print(rt.wait_status(u,{'running'},timeout=900))\" 2>&1 | tail -3").strip()[-300:])
         time.sleep(15)
+        note('ssh_with_new_key_after_restart', guest("docker exec -u 1000:1000 $(docker ps -q --filter label=com.docker.compose.service=hermes-agent-engine) ssh -i /opt/agent-ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 wizard@wizard-vm 'hostname; echo AGENT_SSH_OK' 2>&1").strip()[-200:])
         note('key_mode_after_restart', guest("docker exec $(docker ps -q --filter label=com.docker.compose.service=hermes-agent-engine) stat -c '%a %u' /opt/agent-ssh/id_ed25519").strip())
         b0 = chat(f"wizard_baseline_{int(time.time())}", "Use your terminal tool to run exactly: hostname && test -d /home/wizard/runtipi && echo IN_WIZARD_VM . Reply with the command output only.")
         note('terminal_before_import_after_runtipi_restart', {'in_vm': 'IN_WIZARD_VM' in b0['reply'], **b0})

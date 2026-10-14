@@ -25,6 +25,16 @@ def engine() -> str:
     return ids[0] if ids else ""
 
 
+def configured_key(cid: str) -> str:
+    """terminal.ssh_key as written in the agent's config.yaml (`hermes config get` masks values named *key*)."""
+    r = sh(["docker", "exec", "-u", "1000:1000", cid, "python3", "-c",
+            "import yaml;print(((yaml.safe_load(open('/opt/data/config.yaml')) or {}).get('terminal') or {}).get('ssh_key') or '')"])
+    if r.returncode != 0:
+        r = sh(["docker", "exec", "-u", "1000:1000", cid, "/opt/hermes/.venv/bin/python", "-c",
+                "import yaml;print(((yaml.safe_load(open('/opt/data/config.yaml')) or {}).get('terminal') or {}).get('ssh_key') or '')"])
+    return r.stdout.strip()
+
+
 def main() -> int:
     out = {"ok": False}
     if not KEY.is_file():
@@ -40,15 +50,21 @@ def main() -> int:
     if not cid:
         out["error"] = "agent not running"
         print(json.dumps(out)); return 1
-    cur = sh(["docker", "exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid, "/opt/hermes/.venv/bin/hermes",
-              "config", "get", "terminal.ssh_key"]).stdout.strip()
+    cur = configured_key(cid)
     if cur != NEW and sh(["docker", "exec", cid, "test", "-r", NEW]).returncode == 0:
         r = sh(["docker", "exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid, "/opt/hermes/.venv/bin/hermes",
                 "config", "set", "terminal.ssh_key", NEW])
         out["config_set"] = r.returncode == 0
-    out["ssh_key"] = sh(["docker", "exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid,
-                         "/opt/hermes/.venv/bin/hermes", "config", "get", "terminal.ssh_key"]).stdout.strip()
-    out["ok"] = out["ssh_key"] == NEW
+        # The running agent keeps the terminal settings it started with: restart it so it uses the new key now.
+        out["restarted"] = sh(["docker", "restart", cid]).returncode == 0
+        cid = engine() or cid
+    out["ssh_key"] = configured_key(cid)
+    # Prove it: the agent's container reaches the box over ssh with the new key.
+    probe = sh(["docker", "exec", "-u", "1000:1000", cid, "ssh", "-i", NEW, "-o", "BatchMode=yes", "-o",
+                "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=15",
+                "wizard@wizard-vm", "echo AGENT_SSH_OK"])
+    out["ssh_probe"] = "AGENT_SSH_OK" in probe.stdout
+    out["ok"] = out["ssh_key"] == NEW and out["ssh_probe"]
     print(json.dumps(out))
     return 0 if out["ok"] else 1
 
