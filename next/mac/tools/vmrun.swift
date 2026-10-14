@@ -6,7 +6,11 @@ import Virtualization
 // Used on the build Mac to install Wizard OS inside a real VM and to time boots.
 //
 //   vmrun --kernel K --initrd I --disk D [--cmdline S] [--cpus N] [--mem MiB]
-//         [--share tag=/path]... [--bridge hostPort:guestPort]... [--console FILE] [--timeout SECS]
+//         [--share tag=/path]... [--bridge hostPort:guestPort]... [--reverse guestPort:hostPort]...
+//         [--console FILE] [--timeout SECS]
+//
+// --reverse: the guest connects to vsock CID 2 port guestPort; vmrun connects that to 127.0.0.1:hostPort on this Mac
+// (what Wizard Host does for the existing-Hermes relay).
 //
 // Exits 0 when the guest powers off, 2 on timeout (guest is force-stopped), 1 on error.
 
@@ -21,6 +25,7 @@ var kernel = "", initrd = "", disk = "", cmdline = "console=hvc0 root=/dev/vda r
 var cpus = 4, memMiB = 4096, timeout = 0.0, console = ""
 var shares: [(String, String)] = []
 var bridges: [(UInt16, UInt32)] = []
+var reverses: [(UInt32, UInt16)] = []
 var args = Array(CommandLine.arguments.dropFirst())
 while !args.isEmpty {
     let a = args.removeFirst()
@@ -42,6 +47,10 @@ while !args.isEmpty {
         let p = val().split(separator: ":").map(String.init)
         guard p.count == 2, let h = UInt16(p[0]), let g = UInt32(p[1]) else { die("--bridge hostPort:guestPort") }
         bridges.append((h, g))
+    case "--reverse":
+        let p = val().split(separator: ":").map(String.init)
+        guard p.count == 2, let g = UInt32(p[0]), let h = UInt16(p[1]) else { die("--reverse guestPort:hostPort") }
+        reverses.append((g, h))
     default: die("unknown argument \(a)")
     }
 }
@@ -106,6 +115,24 @@ final class Pump {
     }
 }
 
+final class Reverse: NSObject, VZVirtioSocketListenerDelegate {
+    let hostPort: UInt16
+    let listener = VZVirtioSocketListener()
+    init(_ hostPort: UInt16) { self.hostPort = hostPort; super.init(); listener.delegate = self }
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection,
+                  from socketDevice: VZVirtioSocketDevice) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        var addr = sockaddr_in(); addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = hostPort.bigEndian; addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let ok = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        guard ok == 0 else { close(fd); note("reverse -> 127.0.0.1:\(hostPort) refused errno=\(errno)"); return false }
+        Pump.run(fd, connection)
+        return true
+    }
+}
+var reverseListeners: [Reverse] = []
+
 final class Runner: NSObject, VZVirtualMachineDelegate {
     let vm: VZVirtualMachine
     init(_ c: VZVirtualMachineConfiguration) { vm = VZVirtualMachine(configuration: c); super.init(); vm.delegate = self }
@@ -143,6 +170,13 @@ final class Runner: NSObject, VZVirtualMachineDelegate {
 
 signal(SIGPIPE, SIG_IGN)
 let runner = Runner(c)
+if let dev = runner.vm.socketDevices.first as? VZVirtioSocketDevice {
+    for (g, h) in reverses {
+        let r = Reverse(h); reverseListeners.append(r)
+        dev.setSocketListener(r.listener, forPort: g)
+        note("reverse guest vsock \(g) -> 127.0.0.1:\(h)")
+    }
+}
 runner.vm.start { r in
     if case .failure(let e) = r { die("start: \(e.localizedDescription)") }
     note("started (cpus=\(cpus) mem=\(memMiB)MiB shares=\(shares.map { $0.0 }))")

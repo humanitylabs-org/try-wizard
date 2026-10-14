@@ -105,6 +105,32 @@ final class LoopbackBridge {
     }
 }
 
+// MARK: - Guest -> Mac relay to the owner's existing Hermes (vsock 9102 -> 127.0.0.1:<api_port>)
+
+final class HermesRelay: NSObject, VZVirtioSocketListenerDelegate {
+    let listener = VZVirtioSocketListener()
+    override init() { super.init(); listener.delegate = self }
+
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection,
+                  from socketDevice: VZVirtioSocketDevice) -> Bool {
+        // Only while the owner has turned it on, and only ever to this Mac's loopback.
+        guard let cfg = WizardShared.existingHermes, let port = cfg["api_port"] as? Int else { return false }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(port).bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let ok = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard ok == 0 else { close(fd); log("existing Hermes relay: 127.0.0.1:\(port) refused (errno \(errno))"); return false }
+        var one: Int32 = 1
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
+        Pipe2(tcp: fd, conn: connection).run()
+        return true
+    }
+}
+
 // MARK: - Wizard OS virtual machine
 
 final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListenerDelegate {
@@ -119,6 +145,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     private var readyAt: Date?
     private var lastError: String?
     private var heldConnections: [VZVirtioSocketConnection] = []
+    private let hermesRelay = HermesRelay()
 
     override init() {
         super.init()
@@ -146,6 +173,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             vm = machine
             socketDevice = machine.socketDevices.first as? VZVirtioSocketDevice
             socketDevice?.setSocketListener(openURLListener, forPort: WizardShared.hostOpenURLPort)
+            socketDevice?.setSocketListener(hermesRelay.listener, forPort: WizardShared.hermesRelayPort)
             bootStartedAt = Date(); readyAt = nil; lastError = nil
             state = .starting
             log("starting Wizard OS (cpus=\(config.cpuCount) mem=\(config.memorySize >> 20)MiB)")
@@ -197,6 +225,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                         self.readyAt = Date()
                         log(String(format: "Wizard OS ready in %.2fs", self.bootSeconds ?? -1))
                         self.state = .running
+                        self.applyExistingHermes()
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: poll)
                     }
@@ -235,6 +264,55 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
     }
     private var stopCompletion: (() -> Void)?
+
+    /// One request line to the guest control channel; `done` gets its one reply line (nil on failure/timeout).
+    func control(_ line: String, timeout: TimeInterval = 900, done: @escaping (String?) -> Void) {
+        guard let dev = socketDevice else { done(nil); return }
+        dev.connect(toPort: WizardShared.guestControlPort) { result in
+            guard case .success(let conn) = result else { done(nil); return }
+            DispatchQueue.global().async {
+                let fd = conn.fileDescriptor
+                var tv = timeval(tv_sec: Int(timeout), tv_usec: 0)
+                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+                let data = Array((line + "\n").utf8)
+                _ = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+                var reply = [UInt8](), buf = [UInt8](repeating: 0, count: 4096)
+                while !reply.contains(10) {
+                    let n = buf.withUnsafeMutableBytes { read(fd, $0.baseAddress, 4096) }
+                    if n <= 0 { break }
+                    reply += buf[0..<n]
+                }
+                DispatchQueue.main.async { conn.close() }
+                let text = String(decoding: reply, as: UTF8.self).split(separator: "\n").first.map(String.init)
+                DispatchQueue.main.async { done(text) }
+            }
+        }
+    }
+
+    /// Turn the owner's existing Hermes on (or off) inside Wizard OS. The guest's reply (with the app gateway token
+    /// the Mac Hermes needs) goes to existing-hermes-state.json, 0600, for `wizard-existing-hermes connect`.
+    func applyExistingHermes(disable: Bool = false) {
+        guard state == .running else { return }
+        let stateFile = WizardShared.existingHermesStateFile
+        func save(_ reply: String?) {
+            var o: [String: Any] = ["updatedAt": Date().timeIntervalSince1970]
+            if let r = reply, let d = r.data(using: .utf8), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                o["reply"] = j
+            } else { o["reply"] = ["ok": false, "error": "no_reply"] }
+            if let d = try? JSONSerialization.data(withJSONObject: o) {
+                FileManager.default.createFile(atPath: stateFile.path, contents: d, attributes: [.posixPermissions: 0o600])
+            }
+            log("existing Hermes \(disable ? "disable" : "enable"): \(((o["reply"] as? [String: Any])?["ok"] as? Bool) == true ? "ok" : "failed")")
+        }
+        if disable {
+            control("existing-hermes-disable") { save($0) }
+            return
+        }
+        guard let cfg = WizardShared.existingHermes else { return }
+        let req: [String: Any] = ["api_key": cfg["api_key"] as? String ?? "", "ssh_pubkey": cfg["ssh_pubkey"] as? String ?? ""]
+        guard let d = try? JSONSerialization.data(withJSONObject: req) else { return }
+        control("existing-hermes-enable " + d.base64EncodedString()) { save($0) }
+    }
 
     func restart() { stop { [weak self] in self?.start() } }
 
@@ -399,7 +477,10 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         vm.onChange = { [weak self] in self?.refresh() }
         bridges = [LoopbackBridge(hostPort: WizardShared.uxPort, guestPort: WizardShared.guestUXPort, vm: vm),
-                   LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm)]
+                   LoopbackBridge(hostPort: WizardShared.setupPort, guestPort: WizardShared.guestSetupPort, vm: vm),
+                   // The owner's existing Hermes reaches the app gateway and this VM's terminal (answer only once on).
+                   LoopbackBridge(hostPort: WizardShared.existingMCPPort, guestPort: WizardShared.guestExistingMCPPort, vm: vm),
+                   LoopbackBridge(hostPort: WizardShared.existingSSHPort, guestPort: WizardShared.guestExistingSSHPort, vm: vm)]
         if WizardShared.devShell {
             bridges.append(LoopbackBridge(hostPort: WizardShared.devShellPort, guestPort: WizardShared.guestDevShellPort, vm: vm))
         }
@@ -417,6 +498,8 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "stop": vm.stop()
         case "restart": vm.restart()
         case "quit": quitAll()
+        case "existing-hermes-apply": vm.applyExistingHermes()
+        case "existing-hermes-disable": vm.applyExistingHermes(disable: true)
         default: break
         }
     }

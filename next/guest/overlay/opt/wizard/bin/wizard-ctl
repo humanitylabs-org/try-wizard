@@ -1,8 +1,12 @@
 #!/bin/bash
-# One-line control channel from the Mac (vsock 9100): poweroff | ping
+# One-line control channel from the Mac (vsock 9100; only Wizard Host can reach it):
+#   poweroff | ping | existing-hermes-enable <base64 json> | existing-hermes-disable | existing-hermes-status
 read -r cmd || exit 0
 case "$cmd" in
   poweroff) echo ok; systemctl poweroff ;;
   ping) echo pong ;;
+  existing-hermes-enable\ *) exec /opt/wizard/bin/wizard-existing-hermes enable "${cmd#existing-hermes-enable }" ;;
+  existing-hermes-disable) exec /opt/wizard/bin/wizard-existing-hermes disable ;;
+  existing-hermes-status) exec /opt/wizard/bin/wizard-existing-hermes status ;;
   *) echo unknown ;;
 esac

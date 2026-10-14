@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Use your existing Hermes inside Wizard for Mac, without moving or copying it.
+
+    wizard-existing-hermes connect    [--hermes-home DIR] [--data-home DIR] [--no-restart]
+    wizard-existing-hermes status     [--hermes-home DIR] [--data-home DIR]
+    wizard-existing-hermes disconnect [--hermes-home DIR] [--data-home DIR] [--no-restart]
+
+Your Hermes keeps its memory, skills, sessions and settings where they are. Wizard OS (the Linux VM run by Wizard
+Host) talks to it over its own API, and it works inside the VM:
+
+  * Wizard OS's Agent Service sends chats to this Hermes through a vsock relay that Wizard Host connects to its API
+    on 127.0.0.1 only. The VM's own Hermes is stopped while yours is in use, so one agent owns the memory.
+  * This Hermes gets the Wizard app gateway (`wizard link`: one `wizard` MCP server, the wizard-os plugin) at
+    127.0.0.1:48087, and its terminal and file tools run inside the VM over Hermes' stock `ssh` backend
+    (wizard@127.0.0.1:48022, a key made for this). Your Mac's files stay out of the agent's working computer.
+
+Every change is recorded in <data-home>/existing-hermes/connect.json; `disconnect` puts your Hermes back exactly
+(config.yaml values and .env lines it added) and returns Wizard OS to its own Hermes.
+Stdlib only, Python 3.9+. Secrets go into 0600 files, never argv or output.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+APP_DOMAIN = "org.humanitylabs.wizard.mvp"
+# Wizard Host bridges these Mac loopback ports into Wizard OS (Shared.swift existingMCPPort / existingSSHPort).
+# QA only: WIZARD_EH_MCP_PORT / WIZARD_EH_SSH_PORT for a test VM on other ports.
+MCP_URL = f"http://127.0.0.1:{int(os.environ.get('WIZARD_EH_MCP_PORT') or 48087)}/wizard/mcp"
+SSH_HOST, SSH_PORT, SSH_USER = "127.0.0.1", int(os.environ.get("WIZARD_EH_SSH_PORT") or 48022), "wizard"
+TERMINAL = ("backend", "ssh_host", "ssh_port", "ssh_user", "ssh_key", "cwd")
+STATE_WAIT = 900   # the guest restarts the Agent Service and stops its own Hermes: allow a few minutes
+
+
+def fail(msg: str, code: int = 1) -> "None":
+    print(json.dumps({"ok": False, "error": msg}, indent=2))
+    sys.exit(code)
+
+
+def load_wizard_cli():
+    """The generic `wizard` CLI (link/unlink), shipped next to this tool."""
+    path = HERE / "wizard"
+    if not path.is_file():
+        fail(f"missing {path}")
+    loader = importlib.machinery.SourceFileLoader("wizard_cli", str(path))
+    spec = importlib.util.spec_from_loader("wizard_cli", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def data_home(arg: str | None) -> Path:
+    if arg:
+        return Path(arg).expanduser()
+    p = subprocess.run(["defaults", "read", APP_DOMAIN, "DataHome"], capture_output=True, text=True)
+    if p.returncode == 0 and p.stdout.strip().startswith("/"):
+        return Path(p.stdout.strip())
+    return Path.home() / "Library" / "Application Support" / "Wizard MVP"
+
+
+def env_values(envp: Path) -> dict[str, str]:
+    out = {}
+    if envp.is_file():
+        for ln in envp.read_text().splitlines():
+            k, sep, v = ln.partition("=")
+            if sep and not k.strip().startswith("#"):
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def api_port(w, home: Path) -> int:
+    cfg = w.raw_config(home)
+    plat = ((cfg.get("platforms") or {}).get("api_server") or {}) if isinstance(cfg, dict) else {}
+    extra = plat.get("extra") or {}
+    env = env_values(home / ".env")
+    host = str(plat.get("host") or extra.get("host") or env.get("API_SERVER_HOST") or "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost", "0.0.0.0", "::", ""):
+        fail(f"this Hermes API listens on {host}; Wizard reaches it on 127.0.0.1 only")
+    return int(plat.get("port") or extra.get("port") or env.get("API_SERVER_PORT") or 8642)
+
+
+def write_private(path: Path, data: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def qa_control(dh: Path, enable: bool) -> None:
+    """QA only (WIZARD_QA_GUEST_CONTROL=127.0.0.1:<port> bridged to guest vsock 9100): do what Wizard Host's
+    applyExistingHermes does, for a test VM run without Wizard Host."""
+    import base64
+    import socket
+    host, _, port = os.environ["WIZARD_QA_GUEST_CONTROL"].rpartition(":")
+    if enable:
+        cfg = json.loads((dh / "existing-hermes.json").read_text())
+        line = "existing-hermes-enable " + base64.b64encode(json.dumps(
+            {"api_key": cfg["api_key"], "ssh_pubkey": cfg["ssh_pubkey"]}).encode()).decode()
+    else:
+        line = "existing-hermes-disable"
+    with socket.create_connection((host, int(port)), timeout=STATE_WAIT) as s:
+        s.sendall((line + "\n").encode())
+        buf = b""
+        while b"\n" not in buf:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    try:
+        reply = json.loads(buf.split(b"\n")[0] or b"{}")
+    except ValueError:
+        reply = {"ok": False, "error": "no_reply", "detail": buf[-300:].decode(errors="replace")}
+    write_private(dh / "existing-hermes-state.json", json.dumps({"updatedAt": time.time() + 0.001, "reply": reply}))
+
+
+def tell_host(command: str) -> None:
+    """Wizard Host listens for these on its distributed-notification command channel."""
+    js = ("ObjC.import('Foundation');$.NSDistributedNotificationCenter.defaultCenter"
+          f".postNotificationNameObjectUserInfoDeliverImmediately('{APP_DOMAIN}.host.command','{command}',$(),true)")
+    subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, timeout=30)
+
+
+def wait_state(state_file: Path, since: float) -> dict:
+    end = time.monotonic() + STATE_WAIT
+    while time.monotonic() < end:
+        try:
+            st = json.loads(state_file.read_text())
+            if st.get("updatedAt", 0) > since:
+                return st.get("reply") or {}
+        except (OSError, ValueError):
+            pass
+        time.sleep(1)
+    fail("Wizard OS did not answer; is Wizard running? (Wizard Host writes existing-hermes-state.json)")
+
+
+def run_hermes(w, home: Path, *args: str, timeout: int = 180) -> bool:
+    try:
+        return w.run_hermes(home, *args, check=False, timeout=timeout).returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def connect(ns, w) -> dict:
+    home = w.hermes_home_path(ns.hermes_home)
+    if not (home / "config.yaml").is_file():
+        fail(f"no Hermes at {home}")
+    dh = data_home(ns.data_home)
+    d = dh / "existing-hermes"
+    rec_path = d / "connect.json"
+    if rec_path.is_file():
+        return {"ok": True, "already_connected": True, "record": str(rec_path)}
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.environ["WIZARD_OS_HOME"] = str(d / "os-home")
+    rec = {"version": 1, "hermes_home": str(home), "data_home": str(dh), "env_added": [], "terminal": [],
+           "linked": False, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    write_private(rec_path, json.dumps(rec, indent=2))   # undo intent is durable before any change
+
+    # 1. The Hermes API server (a key is what turns it on in stock Hermes).
+    envp = home / ".env"
+    if len(env_values(envp).get("API_SERVER_KEY", "")) < 16:
+        import secrets
+        rec["env_added"].append("API_SERVER_KEY")
+        write_private(rec_path, json.dumps(rec, indent=2))
+        w.env_append(envp, "API_SERVER_KEY", secrets.token_urlsafe(32))
+    key = env_values(envp)["API_SERVER_KEY"]
+    port = api_port(w, home)
+
+    # 2. A key for this Hermes's terminal inside the VM.
+    sshkey = d / "id_ed25519"
+    if not sshkey.is_file():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "wizard-existing-hermes", "-f", str(sshkey)],
+                       check=True)
+    pub = (d / "id_ed25519.pub").read_text().split()[:2]
+
+    # 3. Wizard OS switches to this Hermes and hands back its app gateway token.
+    since = time.time()
+    write_private(dh / "existing-hermes.json", json.dumps({"enabled": True, "api_port": port, "api_key": key,
+                                                            "ssh_pubkey": " ".join(pub)}))
+    if os.environ.get("WIZARD_QA_GUEST_CONTROL"):
+        qa_control(dh, True)
+    elif not ns.no_host:
+        tell_host("existing-hermes-apply")
+    reply = wait_state(dh / "existing-hermes-state.json", since)
+    if not reply.get("ok") or not reply.get("gateway_token"):
+        fail(f"Wizard OS could not switch to this Hermes: {reply.get('error')} {reply.get('detail') or ''}".strip())
+    write_private(d / "os-home" / "mcp-token", reply["gateway_token"] + "\n")
+
+    # 4. The app gateway + wizard-os plugin (`wizard link`, reversible with `wizard unlink`).
+    plugin = HERE / "wizard-os-plugin"
+    lns = argparse.Namespace(hermes_home=str(home), url=MCP_URL, restart=False,
+                             plugin_source=str(plugin) if plugin.is_dir() else None, plugin_ref=None)
+    link = w.cmd_link(lns)
+    rec["linked"] = True
+    write_private(rec_path, json.dumps(rec, indent=2))
+
+    # 5. Terminal and file tools run in the VM (stock `ssh` backend).
+    want = {"backend": "ssh", "ssh_host": SSH_HOST, "ssh_port": SSH_PORT, "ssh_user": SSH_USER,
+            "ssh_key": str(sshkey), "cwd": "~"}
+    for k in TERMINAL:
+        try:
+            before = {"present": True, "value": w.raw_get(w.raw_config(home), f"terminal.{k}")}
+        except KeyError:
+            before = {"present": False}
+        rec["terminal"].append({"key": f"terminal.{k}", "before": before})
+        write_private(rec_path, json.dumps(rec, indent=2))
+        w.hcfg_set(home, f"terminal.{k}", want[k])
+    rec["complete"] = True
+    write_private(rec_path, json.dumps(rec, indent=2))
+    restarted = None if ns.no_restart else run_hermes(w, home, "gateway", "restart")
+    return {"ok": True, "hermes_home": str(home), "api_port": port, "wizard_os": reply.get("origin"),
+            "mac_hermes_seen_from_vm": reply.get("mac_hermes"), "gateway": MCP_URL, "linked": link.get("edits"),
+            "terminal": f"ssh {SSH_USER}@{SSH_HOST}:{SSH_PORT}", "gateway_restarted": restarted,
+            "next": "" if restarted else "restart Hermes so it loads the changes: hermes gateway restart"}
+
+
+def status(ns, w) -> dict:
+    dh = data_home(ns.data_home)
+    d = dh / "existing-hermes"
+    rec = json.loads((d / "connect.json").read_text()) if (d / "connect.json").is_file() else None
+    rows = []
+    if rec:
+        home = Path(rec["hermes_home"])
+        key = env_values(home / ".env").get("API_SERVER_KEY", "")
+        port = api_port(w, home)
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as r:
+                rows.append(("Hermes API answers", r.status == 200))
+        except (OSError, urllib.error.URLError):
+            rows.append(("Hermes API answers", False))
+        token = (d / "os-home" / "mcp-token").read_text().strip() if (d / "os-home" / "mcp-token").is_file() else ""
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26",
+                           "capabilities": {}, "clientInfo": {"name": "wizard-existing-hermes", "version": "1"}}}).encode()
+        req = urllib.request.Request(MCP_URL, body, {"Content-Type": "application/json", "Authorization": f"Bearer {token}",
+                                                     "Accept": "application/json, text/event-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                rows.append(("Wizard app gateway answers", r.status == 200))
+        except (OSError, urllib.error.URLError):
+            rows.append(("Wizard app gateway answers", False))
+        p = subprocess.run(["ssh", "-p", str(SSH_PORT), "-i", str(d / "id_ed25519"), "-o", "BatchMode=yes",
+                            "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
+                            f"{SSH_USER}@{SSH_HOST}", "hostname"], capture_output=True, text=True, timeout=30)
+        rows.append(("Terminal reaches the VM", p.returncode == 0))
+        rows.append(("API key set", len(key) >= 16))
+    return {"ok": bool(rec) and all(ok for _, ok in rows), "connected": bool(rec),
+            "checks": [{"check": n, "ok": ok} for n, ok in rows]}
+
+
+def disconnect(ns, w) -> dict:
+    dh = data_home(ns.data_home)
+    d = dh / "existing-hermes"
+    rec_path = d / "connect.json"
+    if not rec_path.is_file():
+        return {"ok": True, "connected": False}
+    rec = json.loads(rec_path.read_text())
+    home = Path(rec["hermes_home"])
+    os.environ["WIZARD_OS_HOME"] = str(d / "os-home")
+    for e in reversed(rec.get("terminal") or []):
+        if e["before"]["present"]:
+            w.hcfg_set(home, e["key"], e["before"]["value"])
+        else:
+            w.hcfg_unset(home, e["key"])
+    unlinked = w.cmd_unlink(argparse.Namespace(hermes_home=str(home), restart=False)) if rec.get("linked") else None
+    if rec.get("env_added"):
+        w.env_remove(home / ".env", rec["env_added"])
+    since = time.time()
+    write_private(dh / "existing-hermes.json", json.dumps({"enabled": False}))
+    if os.environ.get("WIZARD_QA_GUEST_CONTROL"):
+        qa_control(dh, False)
+    elif not ns.no_host:
+        tell_host("existing-hermes-disable")
+    reply = wait_state(dh / "existing-hermes-state.json", since)
+    (dh / "existing-hermes.json").unlink(missing_ok=True)
+    for f in ("connect.json", "id_ed25519", "id_ed25519.pub", "os-home/mcp-token"):
+        (d / f).unlink(missing_ok=True)
+    restarted = None if ns.no_restart else run_hermes(w, home, "gateway", "restart")
+    return {"ok": bool(reply.get("ok")), "wizard_os": reply, "unlinked": bool(unlinked), "gateway_restarted": restarted}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="wizard-existing-hermes", description=__doc__.split("\n\n")[0])
+    ap.add_argument("cmd", choices=["connect", "status", "disconnect"])
+    ap.add_argument("--hermes-home")
+    ap.add_argument("--data-home")
+    ap.add_argument("--no-restart", action="store_true", help="don't restart the Hermes gateway (you will)")
+    ap.add_argument("--no-host", action="store_true", help=argparse.SUPPRESS)   # QA: drive the guest yourself
+    ns = ap.parse_args()
+    w = load_wizard_cli()
+    try:
+        import yaml  # noqa: F401 - the wizard CLI reads config.yaml with PyYAML; Hermes' own Python carries it
+    except ImportError:
+        home = w.hermes_home_path(ns.hermes_home)
+        py = w.hermes_python(home)
+        if os.path.realpath(py) != os.path.realpath(sys.executable):
+            os.execv(py, [py, str(Path(__file__).resolve()), *sys.argv[1:]])
+        fail("PyYAML is missing from this Hermes's Python")
+    res = None
+    try:
+        res = {"connect": connect, "status": status, "disconnect": disconnect}[ns.cmd](ns, w)
+    except w.Fail as e:
+        fail(f"{e.code}: {e}")
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

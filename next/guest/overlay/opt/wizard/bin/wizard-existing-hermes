@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Use the owner's existing Hermes (on the Mac) instead of this box's own. Wizard for Mac only.
+
+    wizard-existing-hermes enable <base64 JSON {"api_key": ..., "ssh_pubkey": ...}>
+    wizard-existing-hermes disable
+    wizard-existing-hermes status
+
+Runs as root; the Mac's Wizard Host calls it over the vsock control channel (wizard-ctl) and reads one JSON line.
+
+What `enable` sets up, all recorded in /var/lib/wizard/existing-hermes.json and reversed by `disable`:
+  1. Relay: the Agent Service reaches the Mac Hermes API as http://wizard-mac-hermes:18642. A socat listener on the
+     Runtipi network's gateway address (only containers on that network reach it) forwards each connection over
+     vsock to the Mac (CID 2, port 9102), where Wizard Host connects it to the Mac Hermes on 127.0.0.1.
+  2. The Mac Hermes reaches this box: vsock 8787 -> the Agent Service's MCP gateway (token-checked), and
+     vsock 2222 -> sshd (key-only, user wizard) for Hermes' stock `ssh` terminal backend, so its commands and file
+     tools run in this VM. Wizard Host bridges both to Mac loopback.
+  3. `wam fresh-agent external`: the Service overlay points at the Mac Hermes (its API key in a 0600 env file) and
+     this box's own hermes-agent is stopped, so one agent owns the memory.
+  4. The Mac Hermes's public key in ~wizard/.ssh/authorized_keys, tagged so `disable` removes exactly that line.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+WIZARD_HOME = Path("/home/wizard/.wizard-os")
+RECORD = Path("/var/lib/wizard/existing-hermes.json")
+SETUP_STATE = Path("/var/lib/wizard/setup.json")
+AUTH_KEYS = Path("/home/wizard/.ssh/authorized_keys")
+UNIT_DIR = Path("/etc/systemd/system")
+KEY_TAG = "wizard-existing-hermes"
+RELAY_PORT, HOST_VSOCK, MCP_VSOCK, SSH_VSOCK = 18642, 9102, 8787, 2222
+ORIGIN = f"http://wizard-mac-hermes:{RELAY_PORT}"
+SERVICE_APPS = ("wizard-agent-service", "wizard-shell")
+STORE = "wizardapps"
+PUBKEY_RE = re.compile(r"(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/=]{40,800}")
+
+
+def out(obj: dict, code: int = 0) -> None:
+    print(json.dumps(obj, separators=(",", ":")), flush=True)
+    sys.exit(code)
+
+
+def run(argv: list[str], stdin: str | None = None, timeout: int = 900) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=timeout)
+
+
+def as_wizard(argv: list[str], stdin: str | None = None) -> subprocess.CompletedProcess:
+    uid = run(["id", "-u", "wizard"]).stdout.strip()
+    env = [f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+           "PATH=/home/wizard/.local/bin:/usr/local/bin:/usr/bin:/bin"]
+    return run(["sudo", "-u", "wizard", "env", *env, *argv], stdin=stdin)
+
+
+def bridge_ip() -> str:
+    st = json.loads((WIZARD_HOME / "fresh-agent.json").read_text())
+    return st["bridge"]["ip"]
+
+
+def service_port() -> int:
+    """The 127.0.0.1 port the Agent Service publishes its internal 8787 on (where /wizard/mcp lives)."""
+    for app in SERVICE_APPS:
+        p = run(["docker", "ps", "--filter", f"label=com.docker.compose.project={app}_{STORE}", "--format", "{{.Ports}}"])
+        m = re.search(r"127\.0\.0\.1:(\d+)->8787/tcp", p.stdout)
+        if m:
+            return int(m.group(1))
+    raise RuntimeError("Agent Service is not published on 127.0.0.1")
+
+
+def unit(name: str, desc: str, exec_start: str) -> str:
+    return (f"[Unit]\nDescription={desc}\nAfter=network.target docker.service\n\n[Service]\nExecStart={exec_start}\n"
+            f"Restart=always\nRestartSec=1\n\n[Install]\nWantedBy=multi-user.target\n")
+
+
+def units(ip: str, svc: int) -> dict[str, str]:
+    return {
+        "wizard-hermes-relay.service": unit("relay", "Wizard: Agent Service -> the Mac's existing Hermes (vsock 9102)",
+            f"/usr/bin/socat TCP-LISTEN:{RELAY_PORT},bind={ip},fork,reuseaddr VSOCK-CONNECT:2:{HOST_VSOCK}"),
+        "wizard-mcp-vsock.service": unit("mcp", "Wizard: the Mac's existing Hermes -> the app gateway (/wizard/mcp)",
+            f"/usr/bin/socat VSOCK-LISTEN:{MCP_VSOCK},fork,reuseaddr TCP:127.0.0.1:{svc}"),
+        "wizard-ssh-vsock.service": unit("ssh", "Wizard: the Mac's existing Hermes -> this VM's terminal (sshd)",
+            f"/usr/bin/socat VSOCK-LISTEN:{SSH_VSOCK},fork,reuseaddr TCP:127.0.0.1:22"),
+    }
+
+
+def mac_hermes_health(ip: str) -> str:
+    try:
+        with urllib.request.urlopen(f"http://{ip}:{RELAY_PORT}/health", timeout=8) as r:
+            return f"HTTP {r.status}"
+    except Exception as e:  # noqa: BLE001 - reported, not raised
+        return type(e).__name__
+
+
+def load_record() -> dict:
+    try:
+        return json.loads(RECORD.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_record(rec: dict) -> None:
+    RECORD.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RECORD.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec, indent=2))
+    os.chmod(tmp, 0o600)
+    tmp.replace(RECORD)
+
+
+def set_key(pubkey: str | None) -> None:
+    AUTH_KEYS.parent.mkdir(mode=0o700, exist_ok=True)
+    lines = AUTH_KEYS.read_text().splitlines() if AUTH_KEYS.is_file() else []
+    lines = [ln for ln in lines if not ln.rstrip().endswith(" " + KEY_TAG)]
+    if pubkey:
+        lines.append(f"{pubkey} {KEY_TAG}")
+    AUTH_KEYS.write_text("\n".join(lines) + ("\n" if lines else ""))
+    os.chmod(AUTH_KEYS, 0o600)
+    run(["chown", "-R", "wizard:wizard", str(AUTH_KEYS.parent)])
+
+
+def gateway_token() -> str:
+    return (WIZARD_HOME / "mcp-token").read_text().strip()
+
+
+def enable(arg: str) -> None:
+    req = json.loads(base64.b64decode(arg))
+    key, pub = str(req.get("api_key") or "").strip(), str(req.get("ssh_pubkey") or "").strip()
+    if len(key) < 16 or not re.fullmatch(r"[\x21-\x7e]+", key):
+        out({"ok": False, "error": "api_key_invalid"}, 1)
+    m = PUBKEY_RE.match(pub)
+    if not m:
+        out({"ok": False, "error": "ssh_pubkey_invalid"}, 1)
+    pub = m.group(0)
+    rec = load_record()
+    ip, svc = bridge_ip(), service_port()
+    for name, text in units(ip, svc).items():
+        (UNIT_DIR / name).write_text(text)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "ssh.service"])
+    for name in units(ip, svc):
+        run(["systemctl", "enable", name])
+        run(["systemctl", "restart", name])
+    set_key(pub)
+    p = as_wizard(["wam", "fresh-agent", "external", "--origin", ORIGIN, "--host-ip", ip], stdin=key + "\n")
+    try:
+        wam = json.loads(p.stdout)
+    except ValueError:
+        wam = {"ok": False, "error": "wam_output", "detail": (p.stderr or p.stdout)[-300:]}
+    if not wam.get("ok"):
+        out({"ok": False, "error": "wam_external_failed", "detail": wam}, 1)
+    state = json.loads(SETUP_STATE.read_text()) if SETUP_STATE.is_file() else {}
+    if "setup_done_before" not in rec:
+        rec["setup_done_before"] = bool(state.get("done"))
+    if not state.get("done"):   # the Mac Hermes already has a name, memory and a brain: skip first-run setup
+        state.update(done=True, brain={"kind": "existing", "label": "Your existing Hermes"})
+        SETUP_STATE.write_text(json.dumps(state, indent=2))
+        os.chmod(SETUP_STATE, 0o600)
+    rec.update(enabled=True, at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), bridge_ip=ip, service_port=svc,
+               origin=ORIGIN, units=sorted(units(ip, svc)))
+    save_record(rec)
+    out({"ok": True, "origin": ORIGIN, "mac_hermes": mac_hermes_health(ip), "gateway_token": gateway_token(),
+         "mcp_vsock": MCP_VSOCK, "ssh_vsock": SSH_VSOCK, "box_agent": wam.get("box_agent")})
+
+
+def disable() -> None:
+    rec = load_record()
+    p = as_wizard(["wam", "fresh-agent", "external", "--off"])
+    try:
+        wam = json.loads(p.stdout)
+    except ValueError:
+        wam = {"ok": False, "detail": (p.stderr or p.stdout)[-300:]}
+    for name in rec.get("units") or units("0.0.0.0", 0):
+        run(["systemctl", "disable", "--now", name])
+        (UNIT_DIR / name).unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"])
+    set_key(None)
+    if rec.get("setup_done_before") is False and SETUP_STATE.is_file():
+        state = json.loads(SETUP_STATE.read_text())
+        state.pop("brain", None)
+        state["done"] = False
+        SETUP_STATE.write_text(json.dumps(state, indent=2))
+    RECORD.unlink(missing_ok=True)
+    out({"ok": bool(wam.get("ok")), "wam": wam})
+
+
+def status() -> None:
+    rec = load_record()
+    active = {n: run(["systemctl", "is-active", n]).stdout.strip() for n in (rec.get("units") or [])}
+    keyed = AUTH_KEYS.is_file() and any(ln.rstrip().endswith(" " + KEY_TAG) for ln in AUTH_KEYS.read_text().splitlines())
+    out({"ok": True, "enabled": bool(rec.get("enabled")), "units": active, "ssh_key": keyed,
+         "mac_hermes": mac_hermes_health(rec["bridge_ip"]) if rec.get("bridge_ip") else None})
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        out({"ok": False, "error": "run as root"}, 2)
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        if cmd == "enable" and len(sys.argv) == 3:
+            enable(sys.argv[2])
+        elif cmd == "disable":
+            disable()
+        elif cmd == "status":
+            status()
+        else:
+            out({"ok": False, "error": "usage: enable <b64> | disable | status"}, 2)
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 - the Mac reads one JSON line whatever happens
+        out({"ok": False, "error": type(e).__name__, "detail": str(e)[:300]}, 1)

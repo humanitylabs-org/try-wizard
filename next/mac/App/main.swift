@@ -1424,6 +1424,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
+        wizardsMenu.addItem(.separator())
+        let on = WizardShared.existingHermes != nil
+        wizardsMenu.addItem(withTitle: on ? "Stop Using My Existing Hermes" : "Use My Existing Hermes…",
+                            action: #selector(toggleExistingHermes), keyEquivalent: "").target = self
+    }
+
+    /// Runs the bundled `wizard-existing-hermes` tool with the user's Hermes on this Mac. It links that Hermes to
+    /// Wizard OS (memory and settings stay where they are) and points its terminal at the VM.
+    @objc func toggleExistingHermes() {
+        let on = WizardShared.existingHermes != nil
+        let alert = NSAlert()
+        alert.messageText = on ? "Stop using your existing Hermes?" : "Use your existing Hermes in Wizard?"
+        alert.informativeText = on
+            ? "Wizard OS goes back to its own Hermes, and your Hermes's settings are put back as they were."
+            : "Wizard keeps your Hermes where it is, with its memory, skills and chats. Wizard OS talks to it, and its " +
+              "terminal and file tools move into Wizard OS so it works there instead of on your Mac's files. " +
+              "You can switch back at any time."
+        alert.addButton(withTitle: on ? "Stop Using It" : "Use My Hermes"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let tool = Bundle.main.url(forResource: "wizard-existing-hermes", withExtension: nil, subdirectory: "existing-hermes") else { return }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [tool.path, on ? "disconnect" : "connect", "--data-home", WizardShared.supportDir.path]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+        p.environment = env
+        let out = Pipe(); p.standardOutput = out; p.standardError = out
+        p.terminationHandler = { proc in
+            let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let obj = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
+            DispatchQueue.main.async {
+                let done = NSAlert()
+                if proc.terminationStatus == 0 {
+                    done.messageText = on ? "Wizard is using its own Hermes again" : "Wizard is now using your Hermes"
+                    done.informativeText = on ? "" : "Your Hermes keeps its memory and chats. Its commands and files now run in Wizard OS."
+                } else {
+                    done.messageText = "That didn't work"
+                    done.informativeText = (obj?["error"] as? String) ?? String(text.suffix(400))
+                }
+                done.runModal()
+                self.rebuildWizardMenu(); self.controller.begin()
+            }
+        }
+        do { try p.run() } catch { NSLog("Wizard: existing Hermes tool failed to start: \(error)") }
     }
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
@@ -1440,6 +1483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch parts[0] {
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
+        case "existing-hermes-menu": rebuildWizardMenu()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
         case "files-folder": controller.setFilesFolder(arg.isEmpty ? WizardShared.defaultFilesFolder : URL(fileURLWithPath: arg))
         case "files-folder-preview": controller.askFilesFolder(sizeNote: arg.isEmpty ? "" : arg)

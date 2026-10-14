@@ -43,6 +43,13 @@ plist "$APP/Contents/Info.plist" "Wizard MVP" org.humanitylabs.wizard.mvp Wizard
   '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
 plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
+# "Use My Existing Hermes": the connect tool, the generic wizard CLI it drives (link/unlink) and the pinned plugin.
+EH="$APP/Contents/Resources/existing-hermes"; mkdir -p "$EH"
+# (wizard = wizard-app-manager/wizard-cli/wizard; wizard-os-plugin = wam/vendor/wizard_os_plugin, pinned in its SOURCE.json)
+cp existing-hermes/wizard-existing-hermes existing-hermes/wizard "$EH/"
+cp -R existing-hermes/wizard-os-plugin "$EH/wizard-os-plugin"
+chmod 755 "$EH/wizard-existing-hermes" "$EH/wizard"
+
 if [[ -f assets/Wizard.icns ]]; then
   cp assets/Wizard.icns "$APP/Contents/Resources/Wizard.icns"
   cp assets/Wizard.icns "$HOST/Contents/Resources/Wizard.icns"

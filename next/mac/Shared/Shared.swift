@@ -12,6 +12,21 @@ enum WizardShared {
     static let guestSetupPort: UInt32 = 8930
     static let guestControlPort: UInt32 = 9100
     static let hostOpenURLPort: UInt32 = 9101
+    // Existing Hermes (the owner's Hermes on this Mac, used by Wizard OS instead of the VM's own):
+    static let hermesRelayPort: UInt32 = 9102      // guest -> Mac: Wizard Host connects it to the Mac Hermes API
+    static let existingMCPPort: UInt16 = 48087     // -> guest 8787 -> the Agent Service's app gateway (/wizard/mcp)
+    static let existingSSHPort: UInt16 = 48022     // -> guest 2222 -> sshd (Hermes' ssh terminal backend into the VM)
+    static let guestExistingMCPPort: UInt32 = 8787
+    static let guestExistingSSHPort: UInt32 = 2222
+    static var existingHermesFile: URL { supportDir.appendingPathComponent("existing-hermes.json") }
+    static var existingHermesStateFile: URL { supportDir.appendingPathComponent("existing-hermes-state.json") }
+    /// Written by `wizard-existing-hermes connect` (0600): {"enabled", "api_port", "api_key", "ssh_pubkey"}.
+    static var existingHermes: [String: Any]? {
+        guard let d = try? Data(contentsOf: existingHermesFile),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], o["enabled"] as? Bool == true,
+              let port = o["api_port"] as? Int, (1...65535).contains(port) else { return nil }
+        return o
+    }
     static let devShellPort: UInt16 = 48000       // -> guest 9200, only when `dev-shell` exists (QA)
     static let guestDevShellPort: UInt32 = 9200
     static var devShell: Bool { FileManager.default.fileExists(atPath: supportDir.appendingPathComponent("dev-shell").path) }
