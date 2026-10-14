@@ -3,6 +3,10 @@
 from pathlib import Path
 p=Path(__file__).with_name('qa-native-voice-shortcut.py')
 s=p.read_text()
+# The orb response and MediaRecorder startup are asynchronous WebKit work.
+# Preserve the frozen assertions, but wait for the claimed start outcome rather
+# than treating its original fixed250ms sleep as a production behavior contract.
+s=s.replace("native('tap');time.sleep(.25)\n    ok(voice()['orbTaps']==count+1","native('tap');wait(lambda:voice()['orbTaps']==count+1 and ev('qaOrb.at(-1)')=='voice',seconds=5)\n    ok(voice()['orbTaps']==count+1")
 s=s.replace('finally:\n    if proc:', '''except Exception:
     import traceback
     traceback.print_exc()
