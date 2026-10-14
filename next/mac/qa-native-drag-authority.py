@@ -144,7 +144,7 @@ try:
     ok(authority()['media'][-1]['granted'],'trusted local main media policy retains grant path')
     for label,url in [('same-control-child',CONTROL),('installed-app-child',APPURL),('wrong-port-child',OTHER)]:
         n=len(authority()['media'])
-        ev("const f=document.createElement('iframe');f.id="+json.dumps(label)+";f.src="+json.dumps(url)+";f.allow='microphone';document.body.appendChild(f);true")
+        ev("(()=>{const f=document.createElement('iframe');f.id="+json.dumps(label)+";f.src="+json.dumps(url)+";f.allow='microphone';document.body.appendChild(f);return true})()")
         wait(lambda:len(authority()['media'])>n)
         a=authority()
         ok(not a['media'][-1]['granted'] and not a['media'][-1]['mainFrame'],label+' cannot inherit native silent mic authority')
@@ -162,7 +162,7 @@ try:
     ok(ev('replies.length')!='0','selected exact remote main retains native bridge')
     ok(authority()['media'][-1]['granted'],'selected exact remote main deliberately retains microphone policy')
     # Even explicitly selecting app-only origin must not promote it to control.
-    qa('connect '+APPURL);wait(lambda:ev('typeof probe')=='function')
+    qa('connect '+APPURL);wait(lambda:state()['url']==APPURL and ev('typeof probe')=='function')
     ev('probe();true');time.sleep(.3)
     ok(not authority()['trustedDocument'] and not authority()['media'][-1]['granted'],'explicit localhost app-origin selection is still never native authority')
     qa('voice-local-fixture '+URL);wait(lambda:ev('!!window.__wux')=='1')
