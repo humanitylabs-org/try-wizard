@@ -1563,6 +1563,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "Quit Wizard", action: #selector(requestGuardedQuit(_:)), keyEquivalent: "q").target = self
         appItem.submenu = appMenu
 
+        let fileItem = NSMenuItem(); main.addItem(fileItem)
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "New Chat", action: #selector(newWizardChat(_:)), keyEquivalent: "n").target = self
+        file.addItem(withTitle: "New Voice Chat", action: #selector(newWizardVoiceChat(_:)), keyEquivalent: "n").target = self
+        file.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "New Desktop", action: #selector(newWizardDesktop(_:)), keyEquivalent: "t").target = self
+        fileItem.submenu = file
+
         let editItem = NSMenuItem(); main.addItem(editItem)
         let edit = NSMenu(title: "Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -1579,6 +1587,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         view.addItem(withTitle: "Reload", action: #selector(reload), keyEquivalent: "r").target = self
         view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         view.items.last?.keyEquivalentModifierMask = [.command, .control]
+        view.addItem(withTitle: "Full App", action: #selector(fullWizardApp(_:)), keyEquivalent: "f").target = self
+        let focusKeys: [(String, String, Selector)] = [
+            ("Focus App Above", "\u{F700}", #selector(focusWizardAppUp(_:))),
+            ("Focus App Below", "\u{F701}", #selector(focusWizardAppDown(_:))),
+            ("Focus App Left", "\u{F702}", #selector(focusWizardAppLeft(_:))),
+            ("Focus App Right", "\u{F703}", #selector(focusWizardAppRight(_:)))]
+        for (title, key, action) in focusKeys {
+            view.addItem(withTitle: title, action: action, keyEquivalent: key).target = self
+        }
+        view.addItem(withTitle: "Previous Chat", action: #selector(previousWizardChat(_:)), keyEquivalent: "\u{F700}").target = self
+        view.items.last?.keyEquivalentModifierMask = [.option]
+        view.addItem(withTitle: "Next Chat", action: #selector(nextWizardChat(_:)), keyEquivalent: "\u{F701}").target = self
+        view.items.last?.keyEquivalentModifierMask = [.option]
         viewItem.submenu = view
 
         let wizItem = NSMenuItem(); main.addItem(wizItem)
@@ -1589,6 +1610,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let win = NSMenu(title: "Window")
         win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         win.addItem(withTitle: "Close App", action: #selector(closeWizardApp(_:)), keyEquivalent: "w").target = self
+        win.addItem(.separator())
+        win.addItem(withTitle: "Previous Desktop", action: #selector(previousWizardDesktop(_:)), keyEquivalent: "[").target = self
+        win.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        win.addItem(withTitle: "Next Desktop", action: #selector(nextWizardDesktop(_:)), keyEquivalent: "]").target = self
+        win.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        win.addItem(withTitle: "Next Desktop", action: #selector(nextWizardDesktop(_:)), keyEquivalent: "\t").target = self
+        win.items.last?.keyEquivalentModifierMask = [.control]
+        win.items.last?.isAlternate = true
+        win.addItem(withTitle: "Previous Desktop", action: #selector(previousWizardDesktop(_:)), keyEquivalent: "\t").target = self
+        win.items.last?.keyEquivalentModifierMask = [.control, .shift]
+        win.items.last?.isAlternate = true
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
@@ -1687,6 +1719,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                            characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13) {
                 let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
                 try? String(handled).write(toFile: "/tmp/wizard-mvp-qa-command-w.txt", atomically: true, encoding: .utf8)
+            }
+        case "desktop-key":
+            // QAHooks: enter AppKit's real event loop; currentEvent/repeat handling stay real.
+            let spec = arg.split(separator: ",").map(String.init)
+            let key = spec.first ?? "n", shift = spec.contains("shift"), repeatKey = spec.contains("repeat")
+            let flags: NSEvent.ModifierFlags = spec.contains("option") ? [.option] : shift ? [.command, .shift] : [.command]
+            let codes: [String: UInt16] = ["n": 45, "t": 17, "w": 13, "f": 3, "[": 33, "]": 30, "up": 126, "down": 125, "left": 123, "right": 124]
+            let chars = ["up": "\u{F700}", "down": "\u{F701}", "left": "\u{F702}", "right": "\u{F703}"][key] ?? (shift ? key.uppercased() : key)
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: chars, charactersIgnoringModifiers: chars,
+                                           isARepeat: repeatKey, keyCode: codes[key] ?? 45) {
+                NSApp.postEvent(event, atStart: false)
+                try? "posted".write(toFile: "/tmp/wizard-qa-desktop-key.txt", atomically: true, encoding: .utf8)
             }
         case "ux-state":
             controller.uxState { ux in
@@ -1836,9 +1883,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Other native windows keep their normal Close behavior. The red window button is unchanged.
     @objc func closeWizardApp(_ sender: Any?) {
         if let key = NSApp.keyWindow, key !== controller.window { key.performClose(sender); return }
-        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
-        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', {key:'w', code:'KeyW', metaKey:true, bubbles:true, cancelable:true}))")
+        dispatchDesktopKey("w", "KeyW")
     }
+
+    // Native menus own the shortcuts, even when an iframe has keyboard focus.
+    func dispatchDesktopKey(_ key: String, _ code: String, shift: Bool = false, option: Bool = false) {
+        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
+        if let e = NSApp.currentEvent, e.type == .keyDown, e.isARepeat { return }
+        let event: [String: Any] = ["key": key, "code": code, "metaKey": !option, "altKey": option, "shiftKey": shift,
+                                  "bubbles": true, "cancelable": true]
+        guard let data = try? JSONSerialization.data(withJSONObject: event), let json = String(data: data, encoding: .utf8) else { return }
+        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', \(json)))")
+    }
+    @objc func newWizardChat(_ sender: Any?) { dispatchDesktopKey("n", "KeyN") }
+    @objc func newWizardVoiceChat(_ sender: Any?) { dispatchDesktopKey("N", "KeyN", shift: true) }
+    @objc func newWizardDesktop(_ sender: Any?) { dispatchDesktopKey("t", "KeyT") }
+    @objc func previousWizardDesktop(_ sender: Any?) { dispatchDesktopKey("[", "BracketLeft", shift: true) }
+    @objc func nextWizardDesktop(_ sender: Any?) { dispatchDesktopKey("]", "BracketRight", shift: true) }
+
+    @objc func fullWizardApp(_ sender: Any?) { dispatchDesktopKey("f", "KeyF") }
+    @objc func focusWizardAppUp(_ sender: Any?) { dispatchDesktopKey("ArrowUp", "ArrowUp") }
+    @objc func focusWizardAppDown(_ sender: Any?) { dispatchDesktopKey("ArrowDown", "ArrowDown") }
+    @objc func focusWizardAppLeft(_ sender: Any?) { dispatchDesktopKey("ArrowLeft", "ArrowLeft") }
+    @objc func focusWizardAppRight(_ sender: Any?) { dispatchDesktopKey("ArrowRight", "ArrowRight") }
+    @objc func previousWizardChat(_ sender: Any?) { dispatchDesktopKey("ArrowUp", "ArrowUp", option: true) }
+    @objc func nextWizardChat(_ sender: Any?) { dispatchDesktopKey("ArrowDown", "ArrowDown", option: true) }
 
     func installQuitGuard() {
         quitKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
