@@ -89,7 +89,7 @@ try:
         key(direction);ok(ev(f'__wux.ws[0].focus===__qaTiles[{index}]')=='1','native Command-'+direction+' selects adjacent app')
     key('f');ok(ev('__wux.ws[0].mono')=='1','native Command-F expands selected app')
     key('f');ok(ev('!__wux.ws[0].mono')=='1','native Command-F returns to tiles')
-    ev("__wux.newChat();document.querySelector('.win.focus .pane-main textarea').value='combined QA draft';true")
+    ev("__wux.newChat();const draft=document.querySelector('.win.focus .pane-main textarea');draft.value='combined QA draft';draft.dispatchEvent(new Event('input',{bubbles:true}));true")
     for size in ['700x1000','1120x1000','380x560']:
         qa('window-size '+size);time.sleep(.8);composer('size-'+size)
         ok(ev("document.querySelector('.win.focus .pane-main textarea').value==='combined QA draft'")=='1','resize '+size+' preserves draft')
