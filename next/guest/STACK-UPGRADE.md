@@ -1,6 +1,6 @@
 # Mac MVP runtime patch — integration and existing-disk recipe
 
-This is a one-time internal candidate, not an updater. Parent owns assembly/release. Do **not** run `wizard-apps factory` against a user's disk: that command removes optional apps/data by design.
+This is a one-time internal candidate, not an updater. Parent owns assembly/release. **Do not apply it to James's disk yet:** the round's `STACK-HANDOFF.md` records an unresolved auth.json preservation-guard replay, pending fresh/Mac identity acceptance, and native app-origin authority gates. A first used-disk clone migration passed; the final replay still needs a shared Thales lock slot. Do **not** run `wizard-apps factory` against a user's disk: that command removes optional apps/data by design.
 
 ## Components / payload
 
