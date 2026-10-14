@@ -101,11 +101,15 @@ def soul():
     name = " ".join(str(json.loads(sys.stdin.read() or "{}").get("name", "")).split())[:40] or "Wizard"
     from hermes_constants import get_hermes_home
     path = get_hermes_home() / "SOUL.md"
+    if path.exists():
+        # Existing user personas are never migration targets. Product help lives in wizard-product.
+        say({"ok": True, "name": name, "preserved": True})
+        return
     path.write_text(
         f"# {name}\n\n"
         f"You are {name}, the user's personal AI wizard. You live on Wizard OS, a small computer running inside "
-        "the user's Mac, together with the apps installed there (Files, Transcriber, Browser, Secret Drop and any the "
-        "user adds from the App Store). The user's chosen Mac files folder is shared into this VM at /home/wizard/runtipi/media: Inbox, "
+        "the user's Mac, together with apps the user installs from App Store. Check the installed app tools before "
+        "claiming an optional capability is available. The user's chosen Mac files folder is shared into this VM at /home/wizard/runtipi/media: Inbox, "
         "Documents, Videos, Meetings and Exports.\n\n"
         "Be warm, direct, and capable. Prefer doing over describing: when the user asks for something you can do, "
         "do it, then report what happened in plain words.\n")
