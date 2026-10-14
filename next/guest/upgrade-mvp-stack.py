@@ -29,6 +29,9 @@ def auth_snapshot():
             guard.auth_snapshot(json.loads(raw) if raw is not None else None))
 before_auth_hash,before_auth=auth_snapshot()
 before[str(data/'auth.json')]=before_auth_hash
+before_engine_cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
+if not before_engine_cid or '\n' in before_engine_cid: raise SystemExit('Ambiguous Hermes engine before migration')
+before_engine_image=subprocess.check_output(['docker','inspect',before_engine_cid,'--format','{{.Image}}'],text=True).strip()
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf'):
@@ -57,6 +60,8 @@ subprocess.run(['sudo','-u','wizard','env','XDG_RUNTIME_DIR=/run/user/1000','sys
 subprocess.run(['systemctl','restart','wizard-local-proxy','wizard-setup'],check=True)
 cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
 if not cid or '\n' in cid: raise SystemExit('Ambiguous Hermes engine; refusing restart')
+after_engine_image=subprocess.check_output(['docker','inspect',cid,'--format','{{.Image}}'],text=True).strip()
+if after_engine_image!=before_engine_image: raise SystemExit('Stock engine image changed unexpectedly; no success receipt')
 subprocess.run(['docker','restart','-t','20',cid],check=True,stdout=subprocess.DEVNULL)
 expected_image=subprocess.check_output(['docker','image','inspect','wizard-shell:mac-mvp-20261013','--format','{{.Id}}'],text=True).strip()
 service_cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=wizard-shell'],text=True).strip()
@@ -69,7 +74,7 @@ after[str(data/'auth.json')]=after_auth_hash
 auth_report=guard.compare_auth(before_auth,after_auth)
 changed=[Path(p).name for p in before if before[p]!=after[p]]
 other_changed=[p for p in changed if p!='auth.json']
-report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image}
+report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
 if other_changed or not auth_report['stable_identity_credentials_preserved']:
     (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')

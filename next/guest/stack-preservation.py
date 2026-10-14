@@ -4,7 +4,9 @@ Unknown providers/mutations fail closed. The sole token-rotation exception is th
 observed stock Nous anonymous invoke-JWT flow, with pinned anon refresh material,
 pool membership, client/account/config identity, matching JWT identity claims,
 provider/pool mirrors, an expiring old grant and a valid freshly obtained grant.
-No credential bytes are returned or written by this module.
+No credential bytes are returned or written by this module. JWT identity/expiry
+checks are metadata invariants, not a signature-verifier replacement; the pinned
+stock runtime produces the grant and real model acceptance verifies usability.
 """
 import base64
 import datetime
@@ -51,7 +53,7 @@ def _nous_evidence(doc):
         return {'eligible':bool(eligible and identity),'grant_mirrors':bool(mirrors),
                 'jwt_identity_sha256':digest(identity),'jwt_identity_field_names':sorted(identity),
                 'jwt_identity_field_hashes':{k:digest(v) for k,v in identity.items()},
-                'old_grant_expiring':exp<=now+180,'fresh_valid_grant':bool(fresh)}
+                'old_grant_expiring':exp<=now+180,'fresh_current_grant_metadata':bool(fresh)}
     except (KeyError,TypeError,ValueError,AttributeError):
         return {'eligible':False}
 
@@ -84,7 +86,7 @@ def compare_auth(before, after):
     pinned=(stable_unchanged and bn.get('eligible') and an.get('eligible') and bn.get('grant_mirrors') and
             an.get('grant_mirrors') and bn.get('jwt_identity_sha256')==an.get('jwt_identity_sha256'))
     token_changed=b.get('/providers/nous/access_token')!=a.get('/providers/nous/access_token')
-    rotation=bool(pinned and token_changed and bn.get('old_grant_expiring') and an.get('fresh_valid_grant'))
+    rotation=bool(pinned and token_changed and bn.get('old_grant_expiring') and an.get('fresh_current_grant_metadata'))
     allowed=set(VOLATILE_PATHS)
     if pinned:
         allowed.update(TELEMETRY_PATHS)
@@ -93,7 +95,7 @@ def compare_auth(before, after):
     volatile=[k for k in changed if k in allowed and k in b and k in a]
     unexpected=[k for k in changed if k not in volatile]
     return {'stable_identity_credentials_preserved':not unexpected,
-            'nous_anonymous_invoke_refresh_verified':rotation,
+            'nous_anonymous_invoke_refresh_accounted':rotation,
             'permanent_identity_pinned':bool(pinned),
             'volatile_field_changes':[{'path':k,'before_sha256':b[k],'after_sha256':a[k]} for k in volatile],
             'unexpected_field_changes':[{'path':k,'before_sha256':b.get(k),'after_sha256':a.get(k)} for k in unexpected]}
