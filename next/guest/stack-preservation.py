@@ -3,7 +3,9 @@
 Unknown providers/mutations fail closed. The sole token-rotation exception is the
 observed stock Nous anonymous invoke-JWT flow, with pinned anon refresh material,
 pool membership, client/account/config identity, matching JWT identity claims,
-provider/pool mirrors, an expiring old grant and a valid freshly obtained grant.
+provider/pool mirrors and fresh jointly changed grant timestamps. Expiry-triggered
+and stock force-refresh turnover are both supported; an unaccompanied token change
+is rejected.
 No credential bytes are returned or written by this module. JWT identity/expiry
 checks are metadata invariants, not a signature-verifier replacement; the pinned
 stock runtime produces the grant and real model acceptance verifies usability.
@@ -86,7 +88,9 @@ def compare_auth(before, after):
     pinned=(stable_unchanged and bn.get('eligible') and an.get('eligible') and bn.get('grant_mirrors') and
             an.get('grant_mirrors') and bn.get('jwt_identity_sha256')==an.get('jwt_identity_sha256'))
     token_changed=b.get('/providers/nous/access_token')!=a.get('/providers/nous/access_token')
-    rotation=bool(pinned and token_changed and bn.get('old_grant_expiring') and an.get('fresh_current_grant_metadata'))
+    fresh_obtained=(b.get('/providers/nous/agent_key_obtained_at')!=a.get('/providers/nous/agent_key_obtained_at') and
+                    b.get('/providers/nous/obtained_at')!=a.get('/providers/nous/obtained_at'))
+    rotation=bool(pinned and token_changed and fresh_obtained and an.get('fresh_current_grant_metadata'))
     allowed=set(VOLATILE_PATHS)
     if pinned:
         allowed.update(TELEMETRY_PATHS)
