@@ -2,7 +2,13 @@
 """Thales-only under worker.lock: bounded real installer/Host diagnosis, not full QA."""
 import functools,http.server,json,os,pathlib,plistlib,signal,subprocess,threading,time
 R=pathlib.Path(os.environ['UPDATER_ROOT']); E=R/'evidence-repair'/os.environ.get('PROBE_ID','probe1'); E.mkdir(parents=True,exist_ok=False)
-A=R/'installed/Wizard.app'; D=R/'native-data'; N=R/'evidence/notify'; pref=E/'prefs-before.plist'; server=None; app=None; host=None; receipts={}
+A=pathlib.Path(os.environ.get('UPDATER_INSTALL_PATH',str(R/'installed/Wizard.app'))).expanduser()
+# Normal Applications placement distinguishes updater code from a headless
+# removable-volume permission gate. Only this explicitly owned QA bundle moves.
+if 'UPDATER_INSTALL_PATH' in os.environ:
+ assert A.parent==pathlib.Path.home()/'Applications' and A.name=='Wizard Updater QA.app'
+A.parent.mkdir(parents=True,exist_ok=True)
+D=R/'native-data'; N=R/'evidence/notify'; pref=E/'prefs-before.plist'; server=None; app=None; host=None; receipts={}
 def run(args,**kw): return subprocess.run([str(x) for x in args],check=True,timeout=kw.pop('timeout',15),**kw)
 def output(args): return subprocess.check_output([str(x) for x in args],text=True,timeout=15).strip()
 def save(name,data): (E/name).write_text(json.dumps(data,indent=2)+'\n'); print(name,json.dumps(data),flush=True)
