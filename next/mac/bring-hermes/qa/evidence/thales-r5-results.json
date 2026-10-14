@@ -1,0 +1,215 @@
+{
+  "ssh_key_mode_before": "700 wizard\n600 wizard",
+  "terminal_before_import": {
+    "in_vm": false,
+    "status": "completed",
+    "reply": "The terminal tool rejected the invocation before the command ran, so there\u2019s no command output to report.",
+    "tools": [
+      "execute_code",
+      "skill_view",
+      "terminal"
+    ]
+  },
+  "before": {
+    "sessions": 4,
+    "memory_has_codename": false,
+    "setup": {
+      "done": true,
+      "brain": {
+        "kind": "free",
+        "provider": "nous",
+        "model": "nous/welcome",
+        "label": "Free starter brain"
+      },
+      "name": "Aster MVP"
+    },
+    "api_key_sha": "e3b0c44298fc",
+    "terminal": {
+      "backend": "ssh",
+      "cwd": "~",
+      "timeout": 180,
+      "home_mode": "auto",
+      "docker_mount_cwd_to_workspace": false,
+      "lifetime_seconds": 300,
+      "container_cpu": 1,
+      "container_memory": 5120,
+      "container_disk": 51200,
+      "container_persistent": true,
+      "ssh_host": "wizard-vm",
+      "ssh_user": "wizard",
+      "ssh_port": 22,
+      "ssh_key": "/opt/data/.ssh-vm/id_ed25519"
+    }
+  },
+  "import": {
+    "ok": true,
+    "stamp": "20261014T133126Z",
+    "archive": {
+      "files": 336,
+      "skipped": 16,
+      "skipped_examples": [
+        ".skills_prompt_snapshot.json",
+        ".update_check",
+        "auth.lock",
+        "bin",
+        "cron",
+        "logs",
+        "models_dev_cache.etag",
+        "models_dev_cache.json",
+        "runtime",
+        "shared",
+        "state.db.auto-maintenance.lock",
+        "state.db.fts_rebuild.lock"
+      ]
+    },
+    "sessions_before": 4,
+    "sessions_after": 1,
+    "disabled_messaging": [
+      "telegram"
+    ],
+    "paused_jobs": [
+      "Lighthouse nightly"
+    ],
+    "env_replaced": [
+      "API_SERVER_PORT"
+    ],
+    "agent": "running",
+    "api": true,
+    "gateway": true,
+    "gateway_detail": null,
+    "backup_bytes": 15433556,
+    "seconds": 39
+  },
+  "wiring_kept": {
+    "terminal_backend": "ssh",
+    "terminal_same_as_before": true,
+    "mcp_wizard": true,
+    "plugins": [
+      "wizard-os"
+    ],
+    "api_key_same": true,
+    "imported_api_port_dropped": true,
+    "mac_binaries_dropped": [
+      "tirith"
+    ]
+  },
+  "carried_over": {
+    "memory_has_codename": true,
+    "model": {
+      "default": "nous/welcome",
+      "provider": "nous"
+    },
+    "soul_head": "You are Hermes Agent, built by Nous Research. Be direct: mat",
+    "sessions": 1,
+    "imported_chat_present": true
+  },
+  "safety": {
+    "platforms": {
+      "telegram": false
+    },
+    "telegram_token_kept_for_later": true,
+    "jobs": [
+      [
+        "Lighthouse nightly",
+        false,
+        "paused"
+      ]
+    ],
+    "setup": {
+      "done": true,
+      "brain": {
+        "kind": "imported",
+        "label": "Your Hermes"
+      },
+      "name": "Aster MVP"
+    }
+  },
+  "telegram_log_lines": "1\n2026-10-14 13:31:55,413 WARNING gateway.config: Platform 'telegram' is explicitly disabled by platforms.telegram.enabled: false in config.yaml, so the credentials found in the environment (TELEGRAM_BOT_TOKEN) will NOT start its adapter. Environment credentials no longer override an explicit disable. Remove the key or set platforms.telegram.enabled: true to turn it back on.",
+  "thread_list": {
+    "imported_cli_chat_listed": false,
+    "head": "{\"object\":\"list\",\"data\":[{\"id\":\"wizard_1791893870614_7f90e1f42c86\",\"source\":\"api_server\",\"user_id\":null,\"model\":\"nous/welcome\",\"title\":\"Create and read proof file\",\"started_at\":1791893870.6773746,\"end"
+  },
+  "memory_recall": {
+    "has_codename": true,
+    "status": "completed",
+    "reply": "LIGHTHOUSE-7Q",
+    "tools": []
+  },
+  "terminal_in_vm": {
+    "in_vm": true,
+    "status": "completed",
+    "reply": "wizard\nIN_WIZARD_VM",
+    "tools": [
+      "execute_code",
+      "process_manage",
+      "terminal",
+      "tool_call",
+      "tool_describe",
+      "tool_search"
+    ]
+  },
+  "app_tool": {
+    "status": "completed",
+    "reply": "browser, files, secret-drop, transcriber",
+    "tools": [
+      "execute_code",
+      "mcp__wizard__wizard_apps",
+      "process_manage",
+      "terminal",
+      "tool_call",
+      "tool_describe",
+      "tool_search"
+    ]
+  },
+  "past_chat_search": {
+    "status": "completed",
+    "reply": "We said the QA agent would explore apps and turn its findings into Playwright tests.",
+    "tools": [
+      "execute_code",
+      "mcp__wizard__wizard_apps",
+      "process_manage",
+      "session_search",
+      "terminal",
+      "tool_call",
+      "tool_describe",
+      "tool_search"
+    ]
+  },
+  "ssh_key_mode_after": "700 wizard\n600 wizard",
+  "new_chat_listed": {
+    "listed": true,
+    "old_box_threads_gone": true
+  },
+  "after_restart_recall": {
+    "has_codename": true,
+    "status": "completed",
+    "reply": "LIGHTHOUSE-7Q",
+    "tools": [
+      "execute_code",
+      "mcp__wizard__wizard_apps",
+      "process_manage",
+      "session_search",
+      "terminal",
+      "tool_call",
+      "tool_describe",
+      "tool_search"
+    ]
+  },
+  "ssh_key_mode_after_runtipi_restart": "777",
+  "undo": {
+    "ok": true,
+    "agent": "running",
+    "api": true,
+    "gateway": true,
+    "sessions": 4
+  },
+  "undo_restored": {
+    "sessions_match": true,
+    "memory_codename_gone": true,
+    "setup_match": true,
+    "terminal_match": true,
+    "api_key_match": true
+  },
+  "mac_hermes_untouched": true,
+  "no_backup_left_in_vm": "20261014T133126Z\nlast.json\nbefore.tar"
+}
