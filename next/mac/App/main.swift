@@ -1692,6 +1692,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let a = arg.split(separator: " ").compactMap { Double($0) }
             guard a.count == 4, let w = controller.window else { return }
             let p = controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: nil)
+            let hit = controller.dragView.hitTest(controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: controller.dragView.superview))
+            NSLog("QA native mouse: viewport=(%.1f,%.1f), window=(%.1f,%.1f), dragHit=%@, key=%d", a[0], a[1], p.x, p.y, String(describing: hit), w.isKeyWindow ? 1 : 0)
             let base = ProcessInfo.processInfo.systemUptime
             func event(_ type: NSEvent.EventType, _ point: NSPoint, _ offset: Double) -> NSEvent? {
                 NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: base + offset,
