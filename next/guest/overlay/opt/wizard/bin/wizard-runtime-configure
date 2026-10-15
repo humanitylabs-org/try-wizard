@@ -82,7 +82,7 @@ http { access_log off;
 }
 '''.replace('GATEWAY',gateway)
  write(Path('/opt/wizard/runtime-proxy.conf'),proxy)
- command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--main-container',engine['Name'].lstrip('/'),'--tinfoil-key-file',str(OS/'runtime-secrets/tinfoil-key')]
+ command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--proxy-image','ghcr.io/tinfoilsh/tinfoil-proxy@sha256:24edd55928bb9204c37bc6f48609de381d6513a4ce456c816394af307f02aa68','--main-container',engine['Name'].lstrip('/'),'--tinfoil-key-file',str(OS/'runtime-secrets/tinfoil-key')]
  # Tinfoil remains unconfigured unless the recipient separately configures that provider.
  write(Path('/etc/systemd/system/wizard-runtime-secrets.service'),'[Unit]\nBefore=docker.service wizard-agent-runtime.service\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/opt/wizard/bin/wizard-runtime-configure --secrets-only\n[Install]\nWantedBy=multi-user.target\n')
  for name,execstart,user in [('wizard-agent-runtime',' '.join(command),'wizard'),('wizard-runtime-proxy','/usr/sbin/nginx -c /opt/wizard/runtime-proxy.conf -g "daemon off;"','root')]:
