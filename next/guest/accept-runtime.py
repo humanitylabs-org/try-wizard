@@ -10,7 +10,9 @@ def check(k,v):
  assert v,k
 
 def api(path,body=None,method=None,headers=None,base='http://127.0.0.1:8924'):
- h={'Content-Type':'application/json'};h.update(headers or {})
+ h={'Content-Type':'application/json'}
+ if base=='http://127.0.0.1:8924':h['Host']='127.0.0.1:48023'
+ h.update(headers or {})
  data=body if isinstance(body,bytes) else None if body is None else json.dumps(body).encode()
  req=urllib.request.Request(base+path,data=data,headers=h,method=method)
  try:r=urllib.request.urlopen(req,timeout=180)

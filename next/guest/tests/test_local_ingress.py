@@ -7,6 +7,19 @@ class Upstream(http.server.BaseHTTPRequestHandler):
   self.send_response(200);self.end_headers();self.wfile.write(self.headers.get('Tailscale-User-Login','').encode())
  def log_message(self,*args):pass
 class Ingress(unittest.TestCase):
+ def test_setup_shell_uses_public_authority_not_transport_port(self):
+  import ast, asyncio
+  from urllib.parse import urlsplit
+  tree=ast.parse((CONFIG.parent/'setup/server.py').read_text())
+  function=next(node for node in tree.body if isinstance(node,ast.AsyncFunctionDef) and node.name=='shell')
+  namespace={'Any':object,'urlsplit':urlsplit,'PUBLIC_UX_ORIGIN':'http://127.0.0.1:48023','SHELL_ORIGIN':'http://127.0.0.1:8924'}
+  calls=[]
+  async def request(*args):calls.append(args);return (200,{'ok':True})
+  namespace['_request']=request
+  exec(compile(ast.Module(body=[function],type_ignores=[]),'<production-shell>','exec'),namespace)
+  asyncio.run(namespace['shell']('GET','/wizard/v1/agents'))
+  self.assertEqual(calls[0][1],'http://127.0.0.1:8924/wizard/v1/agents')
+  self.assertEqual(calls[0][3]['Host'],'127.0.0.1:48023')
  def test_exact_authorities_before_owner_injection(self):
   with tempfile.TemporaryDirectory() as td:
    root=pathlib.Path(td)

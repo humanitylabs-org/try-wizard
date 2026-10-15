@@ -28,6 +28,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -248,7 +249,7 @@ async def hermes(method: str, path: str, body: Any = None, *, timeout: float = 2
 async def shell(method: str, path: str, body: Any = None, *, timeout: float = 60,
                 headers: dict[str, str] | None = None) -> tuple[int, Any]:
     """The Agent Service API (what Wizard UX itself calls), on the VM's loopback."""
-    all_headers = {"Content-Type": "application/json", **(headers or {})}
+    all_headers = {"Content-Type": "application/json", "Host": urlsplit(PUBLIC_UX_ORIGIN).netloc, **(headers or {})}
     return await _request(method, f"{SHELL_ORIGIN}{path}", body, all_headers, timeout)
 
 

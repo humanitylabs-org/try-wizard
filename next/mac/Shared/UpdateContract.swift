@@ -123,6 +123,10 @@ enum WizardUpdate {
     /// Owner-local admission lease, not the UX queue projection. Never targets a connected remote backend.
     static let maintenanceJournal = dir.appendingPathComponent("maintenance-lease.json")
     static func maintenance(_ token: String, release: Bool = false, _ done: @escaping (String?) -> Void) {
+        if !release {
+            do { try write(["token": token], maintenanceJournal) }
+            catch { done("Cannot retain local maintenance recovery token"); return }
+        }
         var components = URLComponents(url: WizardShared.localUXHealthURL, resolvingAgainstBaseURL: false)!
         components.path = "/wizard/v1/maintenance"
         var req = URLRequest(url: components.url!); req.timeoutInterval = 10

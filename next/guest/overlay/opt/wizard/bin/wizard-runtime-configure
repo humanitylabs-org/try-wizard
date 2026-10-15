@@ -49,7 +49,7 @@ def main():
   'WIZARD_UPLOAD_STATE_PATH':'/state/uploads.sqlite3','WIZARD_UPLOAD_STAGING_DIR':'/state/upload-staging',
   'WIZARD_UPLOAD_RESERVE_BYTES':'1073741824','WIZARD_USER_FILES_ROOT':'/media','WIZARD_USER_FILES_INDEX_PATH':'/state/user-files.json',
   'WIZARD_MEDIA_ROOT':'/media','WIZARD_MEDIA_AGENT_ROOT':'/media','WIZARD_FILES_ROOT':'/media',
-  'WIZARD_AUTH_MODE':'none','WIZARD_REQUIRE_CF_ACCESS':'0'})
+  'WIZARD_AUTH_MODE':'none','WIZARD_REQUIRE_CF_ACCESS':'0','WIZARD_ALLOWED_HOSTS':'127.0.0.1:48023'})
  volumes=svc.setdefault('volumes',[])
  for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
   if mount not in volumes:volumes.append(mount)
