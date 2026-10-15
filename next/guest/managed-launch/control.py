@@ -22,12 +22,12 @@ def snapshot():
    if not args or not Path(args[0]).name.startswith('python'):continue
    # Linux ptrace rules also protect /proc from uid-0 without CAP_SYS_PTRACE.
    # Read only this process's metadata as its actual owner, then restore root.
-   uid=p.stat().st_uid
+   uid=p.stat().st_uid;gid=p.stat().st_gid
    try:
-    os.seteuid(uid)
+    os.setegid(gid);os.seteuid(uid)
     exe=(p/'exe').readlink().as_posix()
     env=dict(x.split('=',1) for x in (p/'environ').read_bytes().decode().split('\0') if '=' in x)
-   finally:os.seteuid(0)
+   finally:os.seteuid(0);os.setegid(0)
    role='session'
    # Only exact stock supervised daemon commands receive cooperative retirement.
    if '/opt/hermes/.venv/bin/hermes' in args:
