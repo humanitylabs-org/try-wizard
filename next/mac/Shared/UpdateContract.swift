@@ -143,7 +143,7 @@ enum WizardUpdate {
                     if release { try? FileManager.default.removeItem(at: maintenanceJournal) }
                     else { try? write(["token": token], maintenanceJournal) }
                 }
-                done(ok ? nil : "Local maintenance deferred: \(body?["error"] as? String ?? "cannot verify all local runtimes")")
+                done(ok ? nil : "Local maintenance deferred: \(body?["message"] as? String ?? body?["error"] as? String ?? "cannot verify all local runtimes")")
             }
         }.resume()
     }

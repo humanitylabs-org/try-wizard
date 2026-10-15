@@ -30,11 +30,18 @@ def main():
  if os.geteuid()!=0:raise SystemExit('Run as root in guest')
  for p in [OS/'agents',OS/'runtime-secrets',ROOT/'app-data/wizardapps/wizard-shell/data/upload-staging']:mkdir(p)
  for name in ['runtime-token','delivery-token']:token(OS/'runtime-secrets'/name)
+ managed_path=Path('/opt/wizard/managed-runtime.json')
+ managed=json.loads(managed_path.read_text()) if managed_path.exists() else None
+ if managed:
+  sys.path.insert(0,'/opt/wizard/agent-runtime')
+  from managed_maintenance import ManagedMaintenance
+  ManagedMaintenance('/var/lib/wizard/managed')
  if sys.argv[1:]==['--secrets-only']:return
  engine=container('hermes-agent-engine');service=container('wizard-shell')
- image=engine['Image']
+ image=managed['image'] if managed else engine['Image']
  meta=json.loads(run(['docker','image','inspect',image]))[0]
  if meta['Architecture']!='arm64':raise SystemExit('arm64 stock image required')
+ if managed and (meta['Config'].get('Labels') or {}).get('ai.wizards.managed-launch')!='1':raise SystemExit('Managed executable boundary missing')
  nets=service['NetworkSettings']['Networks']
  gateways={v['Gateway'] for v in nets.values() if v.get('Gateway')}
  if len(gateways)!=1:raise SystemExit('Ambiguous Service bridge gateway')
@@ -51,6 +58,10 @@ def main():
   'WIZARD_MEDIA_ROOT':'/media','WIZARD_MEDIA_AGENT_ROOT':'/media','WIZARD_FILES_ROOT':'/media',
   'WIZARD_AUTH_MODE':'none','WIZARD_REQUIRE_CF_ACCESS':'0','WIZARD_ALLOWED_HOSTS':'127.0.0.1:48023'})
  volumes=svc.setdefault('volumes',[])
+ if managed:
+  env['WIZARD_MAINTENANCE_LEASE_PATH']='/wizard-maintenance/lease.json'
+  mount='/var/lib/wizard/managed:/wizard-maintenance:ro'
+  if mount not in volumes:volumes.append(mount)
  for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
   if mount not in volumes:volumes.append(mount)
  with CONF.open('w') as f:
@@ -84,6 +95,7 @@ http { access_log off;
  write(Path('/opt/wizard/runtime-proxy.conf'),proxy)
  command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--proxy-image','ghcr.io/tinfoilsh/tinfoil-proxy@sha256:24edd55928bb9204c37bc6f48609de381d6513a4ce456c816394af307f02aa68','--main-container',engine['Name'].lstrip('/'),'--tinfoil-key-file',str(OS/'runtime-secrets/tinfoil-key')]
  # Tinfoil remains unconfigured unless the recipient separately configures that provider.
+ if managed:command+=['--managed-maintenance-dir','/var/lib/wizard/managed']
  write(Path('/etc/systemd/system/wizard-runtime-secrets.service'),'[Unit]\nBefore=docker.service wizard-agent-runtime.service\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/opt/wizard/bin/wizard-runtime-configure --secrets-only\n[Install]\nWantedBy=multi-user.target\n')
  for name,execstart,user in [('wizard-agent-runtime',' '.join(command),'wizard'),('wizard-runtime-proxy','/usr/sbin/nginx -c /opt/wizard/runtime-proxy.conf -g "daemon off;"','root')]:
   write(Path('/etc/systemd/system')/(name+'.service'),'[Unit]\nAfter=docker.service network-online.target wizard-runtime-secrets.service\nRequires=docker.service wizard-runtime-secrets.service\n[Service]\nUser='+user+'\nEnvironment=HOME=/home/'+user+'\nExecStart='+execstart+'\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n')

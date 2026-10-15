@@ -29,11 +29,15 @@ def snapshot():
     env=dict(x.split('=',1) for x in (p/'environ').read_bytes().decode().split('\0') if '=' in x)
    finally:os.seteuid(0);os.setegid(0)
    role='session'
-   # Only exact stock supervised daemon commands receive cooperative retirement.
-   if '/opt/hermes/.venv/bin/hermes' in args:
+   # Only s6-owned shipped daemon slots receive cooperative retirement. A TUI's
+   # private backend, a manual serve, or a foreground gateway is lifetime-busy.
+   stat=(p/'stat').read_text();ppid=stat[stat.rindex(')')+2:].split()[1]
+   parent_args=(Path('/proc')/ppid/'cmdline').read_bytes().decode().split('\0')[:-1]
+   supervised=len(parent_args)>=2 and Path(parent_args[0]).name=='s6-supervise'
+   if supervised and '/opt/hermes/.venv/bin/hermes' in args:
     at=args.index('/opt/hermes/.venv/bin/hermes');rest=args[at+1:]
-    if rest[:2]==['gateway','run']:role='gateway'
-    elif rest and rest[0] in ['dashboard','serve']:role='backend'
+    if rest[:2]==['gateway','run'] and parent_args[1].startswith('gateway-'):role='gateway'
+    elif rest and rest[0]=='dashboard' and parent_args[1]=='dashboard':role='backend'
    rows.append({'pid':int(p.name),'start':identity(p.name),'managed':locked(p.name),'role':role,'home':env.get('HERMES_HOME','/opt/data')})
   except (FileNotFoundError,ProcessLookupError):continue
  return rows
