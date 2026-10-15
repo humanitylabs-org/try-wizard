@@ -32,6 +32,10 @@ for src in (data/'config.yaml',root/'user-config/wizardapps/wizard-shell/docker-
 def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 protected=[data/'SOUL.md',data/'.env',data/'auth.json']
 before={str(p):digest(p) for p in protected}
+before_env=(data/'.env').read_bytes()
+managed_key=Path('/home/wizard/.wizard-os/agent-ssh/id_ed25519')
+managed_key_before=digest(managed_key)
+legacy_key_before=digest(data/'.ssh-vm/id_ed25519')
 before_model=yaml.safe_load((data/'config.yaml').read_text()).get('model')
 runtime_tokens=root/'app-data/wizard-os/runtime-secrets'
 tokens_before={p.name:digest(p) for p in runtime_tokens.glob('*') if p.is_file()}
@@ -65,8 +69,9 @@ subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=Tr
 # Runtipi's supported lifecycle recreates containers, preserving all mounted app data.
 subprocess.run(['sudo','-iu','wizard','wam','fresh-agent','connect'],check=True,stdout=subprocess.DEVNULL)
 # The agent's terminal key now mounts from ~/.wizard-os/agent-ssh (read-only), out of reach of Runtipi's start-time chmod.
+ssh_report={}
 if Path('/opt/wizard/bin/wizard-agent-ssh-migrate').is_file():
- subprocess.run(['/opt/wizard/bin/wizard-agent-ssh-migrate'],check=True,stdout=subprocess.DEVNULL)
+ ssh_report=json.loads(subprocess.check_output(['/opt/wizard/bin/wizard-agent-ssh-migrate'],text=True))
 subprocess.run(['/opt/wizard/bin/wizard-runtime-configure'],check=True)
 # A re-applied payload may change only the local image, not the generated overlay; force this one app to reload it.
 restart_service = """import sys
@@ -101,10 +106,11 @@ after_auth_hash,after_auth=auth_snapshot()
 after[str(data/'auth.json')]=after_auth_hash
 auth_report=guard.compare_auth(before_auth,after_auth)
 changed=[Path(p).name for p in before if before[p]!=after[p]]
-other_changed=[p for p in changed if p!='auth.json']
-report={'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
+env_report=guard.compare_env(before_env,(data/'.env').read_bytes(),managed_ssh_verified=bool(ssh_report.get('ssh_probe') and managed_key_before and managed_key_before==legacy_key_before==digest(managed_key)))
+other_changed=[p for p in changed if p not in ('auth.json','.env')]
+report={'env':env_report,'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
-if other_changed or not auth_report['stable_identity_credentials_preserved']:
+if other_changed or not env_report['stable_credentials_preserved'] or not auth_report['stable_identity_credentials_preserved']:
     (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')
     raise SystemExit('Protected state mutation: '+repr(other_changed)+'; unexpected auth paths='+repr([c['path'] for c in auth_report['unexpected_field_changes']])+'; retained backup, no success receipt')
 (b/'applied.json').write_text(json.dumps(report,sort_keys=True)+'\n')

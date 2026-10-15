@@ -27,6 +27,25 @@ CLEAR_STATUS_PATHS = frozenset('/credential_pool/nous/0/'+field for field in
 CLEAR_STATUS_TYPE_PATHS = frozenset(path+'/@type' for path in CLEAR_STATUS_PATHS)
 TTL_PATHS = frozenset(base+'/'+field for base in NOUS_BASES for field in ('expires_in','agent_key_expires_in'))
 
+def compare_env(before: bytes, after: bytes, *, managed_ssh_verified: bool = False):
+    """Allow one exact managed key-path line; every other byte remains pinned.
+
+    This is a filesystem path migration, NEVER a credential-value exception.
+    Duplicate/quoted/exported/unknown lines and any adjacent byte mutation fail.
+    """
+    old = b'TERMINAL_SSH_KEY=/opt/data/.ssh-vm/id_ed25519'
+    new = b'TERMINAL_SSH_KEY=/opt/agent-ssh/id_ed25519'
+    lines = before.splitlines(keepends=True)
+    candidates = [i for i,line in enumerate(lines) if line.rstrip(b'\r\n') == old]
+    path_migrated = False
+    if len(candidates) == 1 and sum(line.startswith(b'TERMINAL_SSH_KEY=') for line in lines) == 1:
+        i = candidates[0]
+        expected = list(lines); expected[i] = new + lines[i][len(old):]
+        path_migrated = before != after and b''.join(expected) == after and managed_ssh_verified
+    return {'stable_credentials_preserved': before == after or path_migrated,
+            'managed_terminal_key_path_migrated': path_migrated,
+            'other_bytes_unchanged': before == after or path_migrated}
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 

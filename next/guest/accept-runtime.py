@@ -22,7 +22,7 @@ def api(path,body=None,method=None,headers=None,base='http://127.0.0.1:8924'):
 def wait():
  for i in range(60):
   try:
-   if api('/wizard/health')[0]==200:return
+   if api('/wizard/health')[0]==200 and api('/wizard/v1/agents')[1]['agents'][0]['status']=='running':return
   except OSError:pass
   time.sleep(1)
  raise RuntimeError('Service restart health deadline')
