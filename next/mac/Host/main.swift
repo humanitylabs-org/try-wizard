@@ -557,12 +557,18 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func quitAll() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if quitting { return .terminateNow }
-        if preparingUpdate || guestPatchBusy { return .terminateCancel }
-        quitting = true
-        if vm.canTerminateWithoutStopping { return .terminateNow }
-        vm.stop { NSApp.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
+        switch WizardHostTermination.decide(quitting: quitting,
+                    canTerminateWithoutStopping: vm.canTerminateWithoutStopping,
+                    updateBusy: preparingUpdate || guestPatchBusy) {
+        case .terminate: return .terminateNow
+        case .cancel: return .terminateCancel
+        case .stopThenRetry:
+            quitting = true
+            vm.stop { NSApp.terminate(nil) }
+            // Return to the main queue before waiting for VZ callbacks. Do not
+            // nest AppKit's terminateLater loop inside a notification callback.
+            return .terminateCancel
+        }
     }
 }
 
