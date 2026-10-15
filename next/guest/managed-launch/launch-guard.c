@@ -69,7 +69,7 @@ static int restoring(const char *host) {
   if(stat(path,&st)||st.st_uid!=0)continue;
   snprintf(path,sizeof path,"/proc/%ld/comm",p);f=fopen(path,"r");
   if(!f)continue;
-  if(fgets(comm,sizeof comm,f)&&!strcmp(comm,"s6-supervise\n"))supervised=1;
+  if(fgets(comm,sizeof comm,f)&&(!strcmp(comm,"s6-supervise\n")||!strcmp(comm,"rc.init\n")))supervised=1;
   fclose(f);
  }
  return p==1&&supervised;

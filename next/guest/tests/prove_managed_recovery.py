@@ -63,7 +63,7 @@ for fault in ['drop','crash']:
  assert before!=after
  save('real_backend_'+fault+'_commit_response_recovers',replacementObserved=True,recoveryAdmissionDenied=True)
 # Real synthetic import/undo: the VM itself is the disposable used-disk clone.
-script='/opt/wizard/bin/wizard-import-hermes';data=Path('/home/wizard/runtipi/app-data/hermes-agent/data');soul=data/'SOUL.md'
+script='/opt/wizard/bin/wizard-import-hermes';data=Path('/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data');soul=data/'SOUL.md'
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
 before={x:digest(data/x) for x in ['SOUL.md','.env','auth.json']}
 z=a.output/'synthetic-import.zip'

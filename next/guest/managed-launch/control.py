@@ -115,7 +115,17 @@ def main(req):
  if action=='resume-gateway':
   import re,subprocess
   row=req['runtime'];slot=row.get('serviceSlot','')
-  if row.get('role')!='gateway' or not re.fullmatch(r'gateway-[a-zA-Z0-9_-]+',slot):raise RuntimeError('gateway_slot_unknown')
+  if row.get('role')!='gateway':raise RuntimeError('gateway_slot_unknown')
+  # Older durable leases predate serviceSlot. Resolve their recorded home via
+  # the unchanged stock service mapping; never guess an arbitrary slot.
+  if not slot:
+   from hermes_cli.service_manager import _profile_dir_for_gateway_service
+   matches=[p.name for p in Path('/run/service').glob('gateway-*') if str(_profile_dir_for_gateway_service(p.name))==row['home']]
+   if not matches:return {'ok':False,'pending':True}
+   if len(matches)!=1:raise RuntimeError('gateway_slot_unknown')
+   slot=matches[0]
+  if not re.fullmatch(r'gateway-[a-zA-Z0-9_-]+',slot):raise RuntimeError('gateway_slot_unknown')
+  if not Path('/run/service',slot).exists():return {'ok':False,'pending':True}
   subprocess.run(['/command/s6-svc','-u','/run/service/'+slot],check=True,timeout=10)
   return {'ok':True}
  if action=='stop-backend':
