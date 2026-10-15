@@ -353,8 +353,7 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     if Path("/opt/wizard/bin/wizard-product-configure").is_file():   # newer images: product plugin + app origin
         run(["/opt/wizard/bin/wizard-product-configure"])
     run(["chown", "-R", f"{UID}:{GID}", str(DATA)])
-    rec["setup_before"] = set_setup({"done": True, "verified": True,
-                                     "brain": {"kind": "imported", "label": "Your Hermes"}})
+    rec["setup_before"] = set_setup(None)
     (ROOT / "last.json").write_text(json.dumps(rec, indent=2))   # undo needs setup_before even if a later step fails
     log("starting the agent")
     rec["agent"] = lifecycle("start")
@@ -363,6 +362,9 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     gw = connect_check()
     rec["gateway"] = bool(gw.get("ok"))
     rec["sessions_after"] = session_count()
+    if rec["agent"] != "running" or rec["api"] is not True or rec["gateway"] is not True:
+        raise RuntimeError("import readiness failed: agent/api/gateway")
+    set_setup({"done": True, "verified": True, "brain": {"kind": "imported", "label": "Your Hermes"}})
     rec["complete"] = True
     (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
     os.chmod(ROOT / "last.json", 0o600)
@@ -406,7 +408,13 @@ def undo() -> dict:
     tighten_vm_key()
     api = wait_api()
     gw = connect_check()
-    shutil.rmtree(aside, ignore_errors=True)        # the imported copy (it holds the imported sign-ins)
+    restored = agent == "running" and api is True and gw.get("ok") is True
+    rec["complete"] = False
+    rec["restoration_verified"] = restored
+    if not restored:
+        (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
+        return {"ok": False, "agent": agent, "api": api, "gateway": bool(gw.get("ok")), "error": "restoration_not_ready"}
+    shutil.rmtree(aside, ignore_errors=True)        # discard imported credentials only after restoration is ready
     rec["undone"] = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
     return {"ok": agent == "running" and api and bool(gw.get("ok")), "agent": agent, "api": api,
