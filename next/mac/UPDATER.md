@@ -21,7 +21,7 @@ Required build environment:
 - `SPARKLE_PUBLIC_KEY`: **public** base64 Ed25519 key. No private key is bundled/committed.
 - `BUILD`: new positive monotonic release number (never reuse for a newer artifact).
 - `RELEASE_ID`: exact source/cohort identity; native QA uses explicitly labeled local-stage identity.
-- `SPARKLE_FEED`: HTTPS GitHub release appcast, or loopback HTTP for developer QA only. Default preserves GitHub: `https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-updates/appcast.xml`.
+- `SPARKLE_FEED`: HTTPS public appcast, or loopback HTTP for developer QA only. Default: `https://downloads.aiwizards.com/mac/appcast.xml` (Cloudflare R2, see `next/mac/DOWNLOADS.md`).
 - Optional `SIGN_IDENTITY`: defaults to ad hoc `-` for developer QA. Actual Developer ID + notarization remain separate external gates.
 - Optional `GUEST_UPDATE_PAYLOAD`: exact assembled bounded runtime migration payload below, not a factory disk.
 
