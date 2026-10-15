@@ -13,12 +13,15 @@ def main():
  p=argparse.ArgumentParser();p.add_argument('--workspace',type=Path,required=True);a=p.parse_args();r=a.workspace
  assert platform.machine()=='aarch64','Build only in arm64 guest'
  pins=json.loads((r/'source-pins.json').read_text());assert all(pins[k]==v for k,v in PINS.items())
+ assert run(['docker','image','inspect',BASE,'--format','{{.Id}}'])==BASE
+ base_tag='wizard-shell:release-base-b2f114e0520b'
+ subprocess.run(['docker','tag',BASE,base_tag],check=True)
  tag='wizard-shell:mac-release-'+pins['source'][:12]
  with tempfile.TemporaryDirectory(prefix='wizard-runtime-',dir='/var/lib/wizard') as d:
   b=Path(d)
   for source,dest in [(r/'service/server',b/'server'),(r/'ux/web',b/'ux')]:shutil.copytree(source,dest)
   for name in ['package.json','package-lock.json']:shutil.copy2(r/'service'/name,b/name)
-  (b/'Dockerfile').write_text('FROM '+BASE+'\nUSER root\nCOPY package*.json ./\nRUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force\nRUN rm -rf /app/server /app/ux\nCOPY server /app/server\nCOPY ux /app/ux\nLABEL org.opencontainers.image.revision="'+pins['service']+'" org.opencontainers.image.wizard-ux-revision="'+pins['ux']+'" org.opencontainers.image.wizard-guest-revision="'+pins['source']+'"\nUSER 1000:1000\n')
+  (b/'Dockerfile').write_text('FROM '+base_tag+'\nUSER root\nCOPY package*.json ./\nRUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force\nRUN rm -rf /app/server /app/ux\nCOPY server /app/server\nCOPY ux /app/ux\nLABEL org.opencontainers.image.revision="'+pins['service']+'" org.opencontainers.image.wizard-ux-revision="'+pins['ux']+'" org.opencontainers.image.wizard-guest-revision="'+pins['source']+'"\nUSER 1000:1000\n')
   subprocess.run(['docker','build','-t',tag,str(b)],check=True)
  subprocess.run(['docker','tag',tag,'wizard-shell:mac-mvp-20261013'],check=True)
  subprocess.run(['docker','save','-o',str(r/'wizard-shell.tar'),tag,'wizard-shell:mac-mvp-20261013'],check=True)
