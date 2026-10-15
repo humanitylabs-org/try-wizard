@@ -14,6 +14,25 @@ from pathlib import Path
 OVERLAY = Path("/home/wizard/runtipi/user-config/wizardapps/hermes-agent/docker-compose.yml")
 KEY = Path("/home/wizard/.wizard-os/agent-ssh/id_ed25519")
 NEW = "/opt/agent-ssh/id_ed25519"
+OLD = "/opt/data/.ssh-vm/id_ed25519"
+
+
+def uses_managed_terminal(terminal: dict) -> bool:
+    """Only migrate Wizard's managed route; never repoint a user's explicit terminal."""
+    return (terminal.get("backend") == "ssh" and terminal.get("ssh_host") == "wizard-vm"
+            and terminal.get("ssh_user") == "wizard" and str(terminal.get("ssh_port", 22)) == "22"
+            and terminal.get("ssh_key") in (OLD, NEW))
+
+
+def configured_terminal(cid: str) -> dict:
+    code = "import json,yaml;print(json.dumps((yaml.safe_load(open('/opt/data/config.yaml')) or {}).get('terminal') or {}))"
+    for python in ("python3", "/opt/hermes/.venv/bin/python"):
+        r = sh(["docker", "exec", "-u", "1000:1000", cid, python, "-c", code])
+        if r.returncode == 0:
+            value = json.loads(r.stdout)
+            if not isinstance(value, dict): raise ValueError("Invalid terminal settings")
+            return value
+    raise RuntimeError("Cannot read terminal settings; refusing migration")
 
 
 def sh(argv, **kw):
@@ -22,6 +41,7 @@ def sh(argv, **kw):
 
 def engine() -> str:
     ids = sh(["docker", "ps", "-q", "--filter", "label=com.docker.compose.service=hermes-agent-engine"]).stdout.split()
+    if len(ids) > 1: raise RuntimeError("Ambiguous agent engine; refusing migration")
     return ids[0] if ids else ""
 
 
@@ -37,6 +57,12 @@ def configured_key(cid: str) -> str:
 
 def main() -> int:
     out = {"ok": False}
+    cid = engine()
+    if not cid:
+        out["error"] = "agent not running"
+        print(json.dumps(out)); return 1
+    if not uses_managed_terminal(configured_terminal(cid)):
+        print(json.dumps({"ok": True, "skipped": "explicit_or_unmanaged_terminal_preserved"})); return 0
     if not KEY.is_file():
         out["error"] = "no agent key yet (wizard-firstboot makes it)"
         print(json.dumps(out)); return 1
@@ -55,6 +81,9 @@ def main() -> int:
         r = sh(["docker", "exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid, "/opt/hermes/.venv/bin/hermes",
                 "config", "set", "terminal.ssh_key", NEW])
         out["config_set"] = r.returncode == 0
+        if r.returncode != 0:
+            out["error"] = "could not set managed terminal key"
+            print(json.dumps(out)); return 1
         # The running agent keeps the terminal settings it started with: restart it so it uses the new key now.
         out["restarted"] = sh(["docker", "restart", cid]).returncode == 0
         cid = engine() or cid

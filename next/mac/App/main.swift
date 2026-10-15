@@ -1705,6 +1705,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         win.addItem(withTitle: "Previous Desktop", action: #selector(previousWizardDesktop(_:)), keyEquivalent: "\t").target = self
         win.items.last?.keyEquivalentModifierMask = [.control, .shift]
         win.items.last?.isAlternate = true
+        win.addItem(.separator())
+        // The guest owns dynamic workspace state. Forward the visible Home-first slots,
+        // including the next (+) slot; nonexistent slots remain inert in the guest.
+        for slot in 1...9 {
+            let item = win.addItem(withTitle: slot == 1 ? "Home" : "App Workspace \(slot - 1)",
+                                   action: #selector(selectWizardWorkspace(_:)), keyEquivalent: "\(slot)")
+            item.target = self; item.tag = slot; item.keyEquivalentModifierMask = [.option]
+        }
+        let move = NSMenu(title: "Move App to Workspace")
+        for slot in 2...9 { // Home is not a move destination.
+            let item = move.addItem(withTitle: "App Workspace \(slot - 1)",
+                                   action: #selector(moveWizardAppToWorkspace(_:)), keyEquivalent: "\(slot)")
+            item.target = self; item.tag = slot; item.keyEquivalentModifierMask = [.option, .shift]
+        }
+        win.addItem(withTitle: "Move App to Workspace", action: nil, keyEquivalent: "").submenu = move
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
@@ -2006,6 +2021,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                   "bubbles": true, "cancelable": true]
         guard let data = try? JSONSerialization.data(withJSONObject: event), let json = String(data: data, encoding: .utf8) else { return }
         controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', \(json)))")
+    }
+    @objc func selectWizardWorkspace(_ sender: NSMenuItem) {
+        guard (1...9).contains(sender.tag) else { return }
+        dispatchDesktopKey("\(sender.tag)", "Digit\(sender.tag)", option: true)
+    }
+    @objc func moveWizardAppToWorkspace(_ sender: NSMenuItem) {
+        guard (2...9).contains(sender.tag) else { return }
+        dispatchDesktopKey("\(sender.tag)", "Digit\(sender.tag)", shift: true, option: true)
     }
     @objc func newWizardChat(_ sender: Any?) { dispatchDesktopKey("n", "KeyN") }
     @objc func newWizardVoiceChat(_ sender: Any?) { dispatchDesktopKey("N", "KeyN", shift: true) }

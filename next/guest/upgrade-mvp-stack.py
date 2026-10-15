@@ -36,7 +36,8 @@ before_engine_image=subprocess.check_output(['docker','inspect',before_engine_ci
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
-            'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','setup/server.py'):
+            'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','setup/server.py',
+            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): shutil.copytree(src,dst,dirs_exist_ok=True)
