@@ -21,7 +21,12 @@ def launch_command(app, uid):
         raise ValueError('Install the tool in Applications; keep QA work data on the external volume')
     if isinstance(uid, bool) or not isinstance(uid, int) or uid <= 0:
         raise ValueError('A logged-in non-root GUI user is required')
-    return ['/bin/launchctl', 'asuser', str(uid), '/usr/bin/open', '-g', '-j', str(app)]
+    # SSH may have the right UID but the wrong audit session. asuser requires
+    # root to switch that session; immediately drop back to the console UID for
+    # open(1), so neither the app nor its preferences are root-owned.
+    return ['/usr/bin/sudo', '-n', '/bin/launchctl', 'asuser', str(uid),
+            '/usr/bin/sudo', '-n', '-u', '#' + str(uid),
+            '/usr/bin/open', '-g', '-j', str(app)]
 
 
 def launch_installed(app):

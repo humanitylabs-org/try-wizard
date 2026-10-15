@@ -11,7 +11,12 @@ own LaunchServices lifecycle and privacy attribution. An internal DataHome can
 hide this difference; it is not an external-storage fix.
 
 `tools/native_qa_launch.py` verifies the installed MVP identity/signature and
-current console owner, then uses `launchctl asuser <uid> open -g -j <app>`.
+current console owner, then uses noninteractive sudo to enter the GUI audit
+session with `launchctl asuser <uid>`, drops back to that UID, and invokes
+`open -g -j <app>`. Plain non-root `launchctl asuser` from SSH can fail with
+`Could not switch to audit session: Operation not permitted`; the same UID is
+not proof of the same audit session. Both privilege steps use `sudo -n` and
+fail closed rather than prompting or broadening permissions.
 It neither raises the window nor resets/grants privacy permissions. A successful
 `open` is admission only. If macOS requires consent, record the exact prompt and
 stop at the owner gate; never grant broad Full Disk Access just to make QA pass.

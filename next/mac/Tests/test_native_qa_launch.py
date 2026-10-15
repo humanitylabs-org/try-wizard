@@ -14,7 +14,8 @@ spec.loader.exec_module(launch)
 class InstalledLaunchTests(unittest.TestCase):
     def test_background_first_gui_launch_not_direct_executable(self):
         self.assertEqual(launch.launch_command('/Applications/Wizard.app', 501),
-                         ['/bin/launchctl', 'asuser', '501', '/usr/bin/open', '-g', '-j', '/Applications/Wizard.app'])
+                         ['/usr/bin/sudo', '-n', '/bin/launchctl', 'asuser', '501',
+                          '/usr/bin/sudo', '-n', '-u', '#501', '/usr/bin/open', '-g', '-j', '/Applications/Wizard.app'])
 
     def test_user_app_install_is_allowed(self):
         p = pathlib.Path.home() / 'Applications/Wizard.app'
