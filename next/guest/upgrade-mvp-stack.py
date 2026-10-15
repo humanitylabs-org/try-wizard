@@ -16,6 +16,11 @@ for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wiz
 bom=json.loads((a.payload/'runtime-bom.json').read_text())
 with (a.payload/'wizard-shell.tar').open('rb') as f: payload_sha256=hashlib.file_digest(f,'sha256').hexdigest()
 if payload_sha256!=bom['payload_sha256']: raise SystemExit('Payload digest mismatch')
+managed=bom.get('managed_runtime')
+if managed:
+ with (a.payload/'wizard-hermes-managed.tar').open('rb') as f:
+  if hashlib.file_digest(f,'sha256').hexdigest()!=managed['sha256']:raise SystemExit('Managed image digest mismatch')
+ if managed.get('stock')!='f97608f178d1ffeca59860195ab7da295f7c8e5f':raise SystemExit('Unknown stock maintenance contract')
 for relative,expected in bom.get('files',{}).items():
  p=a.payload/relative
  if Path(relative).is_absolute() or '..' in Path(relative).parts or p.is_symlink(): raise SystemExit('Unsafe BOM member')
@@ -65,12 +70,30 @@ for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh
  if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
 subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=True,stdout=subprocess.DEVNULL)
+if managed:
+ subprocess.run(['docker','load','-i',str(a.payload/'wizard-hermes-managed.tar')],check=True,stdout=subprocess.DEVNULL)
+ base=json.loads(subprocess.check_output(['docker','image','inspect',bom['stock_hermes']['image_id']],text=True))[0]
+ image=json.loads(subprocess.check_output(['docker','image','inspect',managed['image']],text=True))[0]
+ if image['RootFS']['Layers'][:len(base['RootFS']['Layers'])]!=base['RootFS']['Layers'] or image['Config']['Labels'].get('ai.wizards.managed-launch')!='1':raise SystemExit('Managed runtime is not the pinned stock packaging layer')
+ shutil.copy2(a.payload/'managed-runtime.json','/opt/wizard/managed-runtime.json');os.chmod('/opt/wizard/managed-runtime.json',0o644)
+ sys.path.insert(0,'/opt/wizard/agent-runtime')
+ from managed_maintenance import ManagedMaintenance
+ ManagedMaintenance()
 # This source pin intentionally retains the shipped local image tag; docker load replaces only that local tag.
 # Runtipi's supported lifecycle recreates containers, preserving all mounted app data.
-subprocess.run(['sudo','-iu','wizard','wam','fresh-agent','connect'],check=True,stdout=subprocess.DEVNULL)
+held=Path('/var/lib/wizard/managed/lease.json').is_file()
+if held:
+ refresh="import sys;sys.path.insert(0,'/home/wizard/wizard-app-manager');from wam import cli,fresh_agent;fresh_agent.maintenance_refresh(cli.Config())"
+ subprocess.run(['sudo','-u','wizard','env','HOME=/home/wizard','python3','-c',refresh],check=True,stdout=subprocess.DEVNULL)
+else:subprocess.run(['sudo','-iu','wizard','wam','fresh-agent','connect'],check=True,stdout=subprocess.DEVNULL)
 # The agent's terminal key now mounts from ~/.wizard-os/agent-ssh (read-only), out of reach of Runtipi's start-time chmod.
 ssh_report={}
-if Path('/opt/wizard/bin/wizard-agent-ssh-migrate').is_file():
+if held:
+ # The maintenance boot must not launch ordinary Hermes config/inspection CLIs.
+ # This owned new-VM contract already migrated the key; preserve it, fail closed
+ # on an older layout instead of silently bypassing executable admission.
+ if yaml.safe_load((data/'config.yaml').read_text()).get('terminal',{}).get('ssh_key')!='/opt/agent-ssh/id_ed25519' or not managed_key.is_file():raise SystemExit('SSH key requires pre-maintenance migration')
+elif Path('/opt/wizard/bin/wizard-agent-ssh-migrate').is_file():
  ssh_report=json.loads(subprocess.check_output(['/opt/wizard/bin/wizard-agent-ssh-migrate'],text=True))
 subprocess.run(['/opt/wizard/bin/wizard-runtime-configure'],check=True)
 # A re-applied payload may change only the local image, not the generated overlay; force this one app to reload it.
@@ -90,7 +113,7 @@ subprocess.run(['systemctl','restart','wizard-local-proxy','wizard-setup'],check
 cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
 if not cid or '\n' in cid: raise SystemExit('Ambiguous Hermes engine; refusing restart')
 after_engine_image=subprocess.check_output(['docker','inspect',cid,'--format','{{.Image}}'],text=True).strip()
-if after_engine_image!=before_engine_image: raise SystemExit('Stock engine image changed unexpectedly; no success receipt')
+if after_engine_image!=(managed['image'] if managed else before_engine_image): raise SystemExit('Engine image differs from authenticated packaging BOM; no success receipt')
 subprocess.run(['docker','restart','-t','20',cid],check=True,stdout=subprocess.DEVNULL)
 expected_image=subprocess.check_output(['docker','image','inspect','wizard-shell:mac-mvp-20261013','--format','{{.Id}}'],text=True).strip()
 service_cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=wizard-shell'],text=True).strip()
@@ -109,6 +132,8 @@ changed=[Path(p).name for p in before if before[p]!=after[p]]
 env_report=guard.compare_env(before_env,(data/'.env').read_bytes(),managed_ssh_verified=bool(ssh_report.get('ssh_probe') and managed_key_before and managed_key_before==legacy_key_before==digest(managed_key)))
 other_changed=[p for p in changed if p not in ('auth.json','.env')]
 report={'env':env_report,'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
+if managed:
+ report['managed_runtime_image']=managed['image'];report['stock_base_image_preserved']=bom['stock_hermes']['image_id'];report['maintenance_admission_held']=held
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
 if other_changed or not env_report['stable_credentials_preserved'] or not auth_report['stable_identity_credentials_preserved']:
     (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')

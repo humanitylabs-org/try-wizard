@@ -12,6 +12,8 @@ for name,src in [('wam',r/'wam'),('overlay',r/'source/next/guest/overlay'),('age
 for name in ['upgrade-mvp-stack.py','stack-preservation.py','test-stack-preservation.py']:
  d=dst/'source/next/guest'/name;d.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(r/'source/next/guest'/name,d)
 shutil.copy2(r/'wizard-shell.tar',dst/'wizard-shell.tar')
+if bom.get('managed_runtime'):
+ for name in ['wizard-hermes-managed.tar','managed-runtime.json']:shutil.copy2(r/name,dst/name)
 bom['stock_hermes'].update(upstream_commit=up['upstream']['upstream_commit'],upstream_repository=up['upstream']['repository'],upstream_commit_verified=True,verified_runtime_python_files=up['runtime_python_files'],matching_upstream_python_files=up['matching_files'],changed_upstream_python_files=up['changed'])
 bom['stock_hermes'].pop('packaging_commit',None)
 bom['stock_hermes']['packaging_label_revision']='f97608f178d1ffeca59860195ab7da295f7c8e5f'

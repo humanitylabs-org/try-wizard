@@ -4,7 +4,7 @@ Run inside the owned Linux QA guest, with archives extracted in --workspace.
 """
 import argparse,hashlib,json,platform,shutil,subprocess,tempfile
 from pathlib import Path
-PINS={'ux':'eee6e3fba678c734be0322645b90c2691ee4ff35','service':'714b8201550c360d96fcb3b77b6b559625d2fa1b','wam':'56edd6853716510e6b36b338da42ad95615212ac'}
+PINS={'ux':'31bdc3ecb0586f61323b72227ab70506d2627e5d','service':'ec1c5f177df36dedb67cba19e82f95542b4f54be','wam':'6cb7e763e38c2a7c704c9e9f59cfd92cdf11b513'}
 BASE='sha256:b2f114e0520b4f210fd7e99dab08ccae44bb6bb47c870b00581f2cec30c24aca'
 def run(args):return subprocess.check_output(list(map(str,args)),text=True).strip()
 def sha(path):
@@ -25,9 +25,17 @@ def main():
   subprocess.run(['docker','build','-t',tag,str(b)],check=True)
  subprocess.run(['docker','tag',tag,'wizard-shell:mac-mvp-20261013'],check=True)
  subprocess.run(['docker','save','-o',str(r/'wizard-shell.tar'),tag,'wizard-shell:mac-mvp-20261013'],check=True)
+ managed_tag='wizard-hermes:managed-'+pins['source'][:12]
+ subprocess.run(['docker','build','-t',managed_tag,str(r/'source/next/guest/managed-launch')],check=True)
+ managed=json.loads(run(['docker','image','inspect',managed_tag]))[0]
+ subprocess.run(['docker','save','-o',str(r/'wizard-hermes-managed.tar'),managed_tag],check=True)
+ manifest={'image':managed['Id'],'stock':'f97608f178d1ffeca59860195ab7da295f7c8e5f'}
+ (r/'managed-runtime.json').write_text(json.dumps(manifest,indent=2)+'\n')
  meta=json.loads(run(['docker','image','inspect',tag]))[0];assert meta['Architecture']=='arm64'
  bom={'schema':1,'sources':pins,'architecture':'arm64','service_image_id':meta['Id'],'service_tag':tag,'base_image_id':BASE,'payload_sha256':sha(r/'wizard-shell.tar'),'payload_bytes':(r/'wizard-shell.tar').stat().st_size,'recipe':'combined Service/UX compatibility package; exact split sources, existing Mac topology retained','stock_hermes':{'image_id':'sha256:666d6c659574fa09c1ea47b7ec5f03e8d2c35a8aa8055fe60c1e2fe3d3e03e9b','upstream_tag':'v2026.9.24','packaging_commit':'f97608f178d1ffeca59860195ab7da295f7c8e5f','upstream_commit_verified':False},'scope_gates':{'phone_enrollment':'not-activated-ingress-unaccepted','generic_builder':'separate-owner-not-in-this-freeze','optional_apps':'not-installed-no-new-licensing-approval','defleur':'amd64-only-not-arm64-ready'}}
  bom['optional_images']={'tinfoil_proxy':{'tag_inspected':'0.2.3','index_digest':'sha256:90584b70ed0636b08f6bee4657f947854b1dabe1842acbbcae8466019b559c9c','arm64_image':'ghcr.io/tinfoilsh/tinfoil-proxy@sha256:24edd55928bb9204c37bc6f48609de381d6513a4ce456c816394af307f02aa68','manifest_verified':True,'executed':False,'provider_key':'recipient-supplied-not-bundled'}}
+ bom['managed_runtime']={**manifest,'archive':'wizard-hermes-managed.tar','sha256':sha(r/'wizard-hermes-managed.tar'),'bytes':(r/'wizard-hermes-managed.tar').stat().st_size}
  bom['files']={str(f.relative_to(r)):sha(f) for root in [r/'wam',r/'overlay',r/'agent-runtime',r/'source/next/guest'] for f in sorted(root.rglob('*')) if f.is_file() and '__pycache__' not in f.parts}
+ bom['files']['managed-runtime.json']=sha(r/'managed-runtime.json')
  (r/'runtime-bom.json').write_text(json.dumps(bom,indent=2)+'\n');print(json.dumps(bom))
 if __name__=='__main__':main()
