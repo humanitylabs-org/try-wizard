@@ -50,7 +50,9 @@ def main():
  volumes=svc.setdefault('volumes',[])
  for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
   if mount not in volumes:volumes.append(mount)
- with CONF.open('w') as f:yaml.safe_dump(doc,f,sort_keys=False)
+ with CONF.open('w') as f:
+  f.write('# Written by wam; extended by Wizard Mac runtime provisioning\n')
+  yaml.safe_dump(doc,f,sort_keys=False)
  os.chown(CONF,1000,1000)
  # The helper remains loopback-only. The bridge is token-authenticated and has no owner-control routes.
  proxy='''pid /run/wizard-runtime-proxy.pid;
