@@ -54,7 +54,10 @@ import Darwin
             if reply["state"] as? String == "applied", let receipt = reply["receipt"] as? [String: Any] {
                 do { try WizardUpdate.write(receipt, WizardUpdate.dir.appendingPathComponent("guest-receipt.json")) }
                 catch { finish("Could not retain guest activation receipt"); return }
-                WizardUpdate.idle { reason in self.finish(reason) }
+                // The authenticated receipt is produced while executable admission is
+                // held. Live-agent health is deliberately unavailable until the
+                // maintenance VM stops and the normal Host releases that lease.
+                finish(nil)
                 return
             }
         }
@@ -99,8 +102,24 @@ import Darwin
                 try? FileManager.default.removeItem(at: WizardUpdate.request)
                 HostControl.ensureRunning()
                 HostControl.waitForLocalWizard(timeout: 300, tick: { _ in }) { ready in
-                    self.onDone(ready ? migrationError.map { "Prior guest restored — \($0)" } : "Normal boot did not pass health checks; prior disk and app remain available")
+                    guard ready else { self.onDone("Normal boot did not pass health checks; prior disk and app remain available"); return }
+                    self.waitForNormalRuntime(Date().addingTimeInterval(180), migrationError)
                 }
             } catch { onDone("Rollback/activation failed — \(error.localizedDescription); prior disk retained") }
+    }
+    private func waitForNormalRuntime(_ deadline: Date, _ migrationError: String?) {
+        // Host owns lease release and verifies its authenticated response. HTTP200
+        // alone does not mean the retained user runtime has resumed.
+        let running = HostControl.isRunning && WizardUpdate.json(WizardShared.statusFile)["state"] as? String == "running"
+        let held = FileManager.default.fileExists(atPath: WizardUpdate.maintenanceJournal.path)
+        func retry() {
+            guard Date() < deadline else { self.onDone("Normal runtime did not reconnect after maintenance; prior disk and app remain available"); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitForNormalRuntime(deadline, migrationError) }
+        }
+        guard running, !held else { retry(); return }
+        WizardUpdate.idle { reason in
+            guard reason == nil else { retry(); return }
+            self.onDone(migrationError.map { "Prior guest restored — \($0)" })
+        }
     }
 }
