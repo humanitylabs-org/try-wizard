@@ -11,11 +11,16 @@ p=argparse.ArgumentParser(); p.add_argument('payload',type=Path); p.add_argument
 if os.geteuid()!=0: raise SystemExit('Run as root inside the Wizard guest')
 root=Path('/home/wizard/runtipi'); data=root/'app-data/wizardapps/hermes-agent/data'
 if not (data/'config.yaml').is_file(): raise SystemExit('Existing MVP Hermes config not found; refusing unknown layout')
-for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wizard/local-proxy.conf','overlay/opt/wizard/bin/wizard-product-configure','wizard-shell.tar'):
+for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wizard/local-proxy.conf','overlay/opt/wizard/bin/wizard-product-configure','overlay/opt/wizard/bin/wizard-runtime-configure','agent-runtime/agent_runtime.py','runtime-bom.json','wizard-shell.tar'):
  if not (a.payload/required).is_file(): raise SystemExit('Incomplete payload: '+required)
+bom=json.loads((a.payload/'runtime-bom.json').read_text())
+with (a.payload/'wizard-shell.tar').open('rb') as f: payload_sha256=hashlib.file_digest(f,'sha256').hexdigest()
+if payload_sha256!=bom['payload_sha256']: raise SystemExit('Payload digest mismatch')
 if not a.apply: print('Preflight passed. Quit chat activity and back up the stopped VM disk before --apply.'); raise SystemExit(0)
 # Owned metadata backup only; it contains private account config, stays in guest mode0700, never logs bytes.
 b=Path('/var/lib/wizard/patches/mac-stack-v1'); b.mkdir(parents=True,exist_ok=True,mode=0o700); os.chmod(b,0o700)
+# A failed new attempt must never leave a stale success receipt.
+if (b/'applied.json').exists(): (b/'applied.json').replace(b/('applied-history-'+str(time.time_ns())+'.json'))
 for src in (data/'config.yaml',root/'user-config/wizardapps/wizard-shell/docker-compose.yml',Path('/opt/wizard/local-proxy.conf'),Path('/home/wizard/.wizard-os/app-manager.json')):
  dst=b/(str(src).replace('/','_'))
  if src.is_file() and not dst.exists(): shutil.copy2(src,dst); os.chmod(dst,0o600)
@@ -36,13 +41,14 @@ before_engine_image=subprocess.check_output(['docker','inspect',before_engine_ci
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
-            'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','setup/server.py',
+            'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
             'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): shutil.copytree(src,dst,dirs_exist_ok=True)
  else: shutil.copy2(src,dst)
-for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps'):
+shutil.copytree(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
+for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure'):
  if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
 subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=True,stdout=subprocess.DEVNULL)
@@ -52,6 +58,7 @@ subprocess.run(['sudo','-iu','wizard','wam','fresh-agent','connect'],check=True,
 # The agent's terminal key now mounts from ~/.wizard-os/agent-ssh (read-only), out of reach of Runtipi's start-time chmod.
 if Path('/opt/wizard/bin/wizard-agent-ssh-migrate').is_file():
  subprocess.run(['/opt/wizard/bin/wizard-agent-ssh-migrate'],check=True,stdout=subprocess.DEVNULL)
+subprocess.run(['/opt/wizard/bin/wizard-runtime-configure'],check=True)
 # A re-applied payload may change only the local image, not the generated overlay; force this one app to reload it.
 restart_service = """import sys
 sys.path.insert(0, '/home/wizard/wizard-app-manager')
@@ -75,6 +82,7 @@ expected_image=subprocess.check_output(['docker','image','inspect','wizard-shell
 service_cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=wizard-shell'],text=True).strip()
 if not service_cid or '\n' in service_cid: raise SystemExit('Ambiguous MVP Service container')
 actual_image=subprocess.check_output(['docker','inspect',service_cid,'--format','{{.Image}}'],text=True).strip()
+if actual_image!=bom['service_image_id']: raise SystemExit('Running Service differs from immutable BOM')
 if actual_image!=expected_image: raise SystemExit('Service did not load the new image; no success receipt written')
 after={str(p):digest(p) for p in protected}
 after_auth_hash,after_auth=auth_snapshot()

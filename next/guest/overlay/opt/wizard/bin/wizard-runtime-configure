@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Provision recipient-owned guest runtime without touching account/provider state.
+Called after WAM connect, before restarting Service. Factory uses the same path.
+"""
+import json,os,secrets,subprocess,sys
+from pathlib import Path
+from ruamel.yaml import YAML
+ROOT=Path('/home/wizard/runtipi')
+OS=ROOT/'app-data/wizard-os'
+CONF=ROOT/'user-config/wizardapps/wizard-shell/docker-compose.yml'
+def run(args):return subprocess.check_output(args,text=True).strip()
+def container(service):
+ ids=run(['docker','ps','-q','--filter','label=com.docker.compose.service='+service]).split()
+ if len(ids)!=1:raise SystemExit('Ambiguous '+service)
+ return json.loads(run(['docker','inspect',ids[0]]))[0]
+def mkdir(path):
+ path.mkdir(parents=True,exist_ok=True,mode=0o700);os.chown(path,1000,1000);os.chmod(path,0o700)
+def token(path):
+ if path.is_symlink():raise SystemExit('Refuse symlink token')
+ try:
+  fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+ except FileExistsError:
+  if len(path.read_text().strip())<32:raise SystemExit('Invalid existing runtime token')
+ else:
+  with os.fdopen(fd,'w') as f:f.write(secrets.token_urlsafe(48)+'\n')
+ os.chown(path,1000,1000);os.chmod(path,0o600)
+def write(path,text,mode=0o644):
+ path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.runtime-new');tmp.write_text(text);os.chmod(tmp,mode);tmp.replace(path)
+def main():
+ if os.geteuid()!=0:raise SystemExit('Run as root in guest')
+ engine=container('hermes-agent-engine');service=container('wizard-shell')
+ image=engine['Image']
+ meta=json.loads(run(['docker','image','inspect',image]))[0]
+ if meta['Architecture']!='arm64':raise SystemExit('arm64 stock image required')
+ nets=service['NetworkSettings']['Networks']
+ gateways={v['Gateway'] for v in nets.values() if v.get('Gateway')}
+ if len(gateways)!=1:raise SystemExit('Ambiguous Service bridge gateway')
+ gateway=gateways.pop()
+ for p in [OS/'agents',OS/'runtime-secrets',ROOT/'app-data/wizardapps/wizard-shell/data/upload-staging'] :mkdir(p)
+ for name in ['runtime-token','delivery-token']:token(OS/'runtime-secrets'/name)
+ # Keep the recipient's existing state paths and all other overlay keys.
+ yaml=YAML();doc=yaml.load(CONF.read_text());svc=doc['services']['wizard-shell'];env=svc.setdefault('environment',{})
+ env.update({'WIZARD_AGENTS_DIR':'/wizard-agents','WIZARD_AGENT_RUNTIME_URL':'http://wizard-app-lifecycle:7796',
+  'WIZARD_AGENT_RUNTIME_TOKEN_FILE':'/wizard-runtime/runtime-token','WIZARD_AGENT_DELIVERY_TOKEN_FILE':'/wizard-runtime/delivery-token',
+  'WIZARD_AGENT_UPSTREAM':'network','WIZARD_AGENT_GATEWAY_URL':'http://wizard-shell:8787/wizard/mcp',
+  'WIZARD_UPLOAD_STATE_PATH':'/state/uploads.sqlite3','WIZARD_UPLOAD_STAGING_DIR':'/state/upload-staging',
+  'WIZARD_UPLOAD_RESERVE_BYTES':'1073741824','WIZARD_USER_FILES_ROOT':'/media','WIZARD_USER_FILES_INDEX_PATH':'/state/user-files.json',
+  'WIZARD_MEDIA_ROOT':'/media','WIZARD_MEDIA_AGENT_ROOT':'/media','WIZARD_FILES_ROOT':'/media',
+  'WIZARD_AUTH_MODE':'none','WIZARD_REQUIRE_CF_ACCESS':'0'})
+ volumes=svc.setdefault('volumes',[])
+ for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
+  if mount not in volumes:volumes.append(mount)
+ with CONF.open('w') as f:yaml.dump(doc,f)
+ os.chown(CONF,1000,1000)
+ # The helper remains loopback-only. The bridge is token-authenticated and has no owner-control routes.
+ proxy='''pid /run/wizard-runtime-proxy.pid;
+error_log stderr warn;
+events { worker_connections 64; }
+http { access_log off;
+ server { listen GATEWAY:7796; client_max_body_size 512k;
+  location / { proxy_pass http://127.0.0.1:7795; proxy_read_timeout 1800s; }
+ }
+ # Machine delivery only: retained Service token validation, never generic owner access.
+ server { listen GATEWAY:7797; client_max_body_size 512k;
+  location ~ ^/wizard/v1/(apps|agents)/[a-z][a-z0-9-]{0,30}/deliveries$ {
+   limit_except POST { deny all; }
+   if ($http_origin != "") { return 403; }
+   proxy_pass http://127.0.0.1:8796;
+   proxy_set_header Host 127.0.0.1:8796;
+   proxy_set_header Tailscale-User-Login owner@wizard.local;
+   proxy_set_header Forwarded ""; proxy_set_header X-Forwarded-For "";
+   proxy_set_header X-Forwarded-Host ""; proxy_set_header X-Forwarded-Proto "";
+   proxy_read_timeout 180s;
+  }
+  location / { return 404; }
+ }
+}
+'''.replace('GATEWAY',gateway)
+ write(Path('/opt/wizard/runtime-proxy.conf'),proxy)
+ command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--main-container',engine['Name'].lstrip('/')]
+ # Tinfoil remains unconfigured unless the recipient separately configures that provider.
+ for name,execstart,user in [('wizard-agent-runtime',' '.join(command),'wizard'),('wizard-runtime-proxy','/usr/sbin/nginx -c /opt/wizard/runtime-proxy.conf -g "daemon off;"','root')]:
+  write(Path('/etc/systemd/system')/(name+'.service'),'[Unit]\nAfter=docker.service network-online.target\nRequires=docker.service\n[Service]\nUser='+user+'\nEnvironment=HOME=/home/'+user+'\nExecStart='+execstart+'\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n')
+ subprocess.run(['nginx','-t','-c','/opt/wizard/runtime-proxy.conf'],check=True)
+ subprocess.run(['systemctl','daemon-reload'],check=True)
+ subprocess.run(['systemctl','enable','--now','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
+ subprocess.run(['systemctl','restart','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
+ print(json.dumps({'runtime_provisioned':True,'engine_image':image,'architecture':meta['Architecture'],'runtime_bind':'127.0.0.1:7795','bridge':gateway,'credentials':'recipient-generated-preserved','phone_enrollment':'not-activated','builder':'separate-owner-deferred'}))
+if __name__=='__main__':main()
