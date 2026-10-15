@@ -62,7 +62,7 @@ http { access_log off;
  }
  # Machine delivery only: retained Service token validation, never generic owner access.
  server { listen GATEWAY:7797; client_max_body_size 512k;
-  location ~ ^/wizard/v1/(apps|agents)/[a-z][a-z0-9-]{0,30}/deliveries$ {
+  location ~ "^/wizard/v1/(apps|agents)/[a-z][a-z0-9-]{0,30}/deliveries$" {
    limit_except POST { deny all; }
    if ($http_origin != "") { return 403; }
    proxy_pass http://127.0.0.1:8796;
