@@ -46,7 +46,8 @@ def snapshot():
    # Only s6-owned shipped daemon slots receive cooperative retirement. A TUI's
    # private backend, a manual serve, or a foreground gateway is lifetime-busy.
    stat=(p/'stat').read_text();ppid=stat[stat.rindex(')')+2:].split()[1]
-   parent_args=(Path('/proc')/ppid/'cmdline').read_bytes().decode().split('\0')[:-1]
+   try:parent_args=(Path('/proc')/ppid/'cmdline').read_bytes().decode().split('\0')[:-1]
+   except FileNotFoundError:parent_args=[] # docker exec's parent is outside this PID namespace
    supervised=len(parent_args)>=2 and Path(parent_args[0]).name=='s6-supervise'
    if supervised and '/opt/hermes/.venv/bin/hermes' in args:
     at=args.index('/opt/hermes/.venv/bin/hermes');rest=args[at+1:]
