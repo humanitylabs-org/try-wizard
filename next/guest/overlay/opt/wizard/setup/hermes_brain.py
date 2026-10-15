@@ -107,7 +107,7 @@ def soul():
         # recipient's custom persona. Used-guest migration never calls this path.
         from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
         existing = path.read_text()
-        if existing != DEFAULT_SOUL_MD and not is_legacy_template_soul(existing):
+        if existing not in (DEFAULT_SOUL_MD, DEFAULT_SOUL_MD + "\n") and not is_legacy_template_soul(existing):
             say({"ok": True, "name": name, "preserved": True})
             return
     path.write_text(

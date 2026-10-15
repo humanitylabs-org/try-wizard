@@ -14,6 +14,11 @@ class Persona(unittest.TestCase):
    p=Path(d)/'SOUL.md';p.write_text(DEFAULT_SOUL_MD)
    with patch.object(hermes_constants,'get_hermes_home',return_value=Path(d)),patch.object(sys,'stdin',io.StringIO(json.dumps({'name':'Aster QA'}))),contextlib.redirect_stdout(io.StringIO()):brain.soul()
    self.assertTrue(p.read_text().startswith('# Aster QA\n\nYou are Aster QA,'))
+ def test_stock_on_disk_trailing_newline_becomes_recipient_name(self):
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d)/'SOUL.md';p.write_text(DEFAULT_SOUL_MD + "\n")
+   with patch.object(hermes_constants,'get_hermes_home',return_value=Path(d)),patch.object(sys,'stdin',io.StringIO(json.dumps({'name':'Aster QA'}))),contextlib.redirect_stdout(io.StringIO()):brain.soul()
+   self.assertTrue(p.read_text().startswith('# Aster QA\n\nYou are Aster QA,'))
  def test_custom_persona_byte_preserved(self):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/'SOUL.md';original=b'# Existing Name\n\nCustom persona stays byte-identical.\n';p.write_bytes(original)
