@@ -459,6 +459,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A successful stop keeps the durable guest gate closed until the next local boot.
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             guard let self, self.vm.state == .running, !self.preparingUpdate, !self.guestPatchBusy,
+                  WizardShared.guestUpdatePayload == nil,
                   let token = WizardUpdate.json(WizardUpdate.maintenanceJournal)["token"] as? String else { return }
             WizardUpdate.releaseMaintenance(token)
         }
@@ -491,7 +492,8 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         WizardUpdate.maintenance(nonce) { reason in
             if let reason { self.guestPatchBusy = false; try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": reason], response); return }
             self.vm.runGuestPatch { receipt in
-                WizardUpdate.releaseMaintenance(nonce)
+                // Keep admission closed until the maintenance guest is stopped and
+                // the normal boot (or restored rollback disk) explicitly releases.
                 self.guestPatchBusy = false
                 if let receipt { try? WizardUpdate.write(["nonce": nonce, "state": "applied", "receipt": receipt], response) }
                 else { try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Guest migration failed; private updater.log retained"], response) }
