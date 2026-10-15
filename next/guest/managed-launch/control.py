@@ -54,7 +54,7 @@ def snapshot():
     at=args.index('/opt/hermes/.venv/bin/hermes');rest=args[at+1:]
     if rest[:2]==['gateway','run'] and parent_args[1].startswith('gateway-'):role='gateway'
     elif rest and rest[0]=='dashboard' and parent_args[1]=='dashboard':role='backend'
-   rows.append({'pid':int(p.name),'start':identity(p.name),'bootId':BOOT,'managed':locked(p.name),'role':role,'home':env.get('HERMES_HOME','/opt/data')})
+   rows.append({'pid':int(p.name),'start':identity(p.name),'bootId':BOOT,'managed':locked(p.name),'role':role,'serviceSlot':parent_args[1] if supervised else None,'home':env.get('HERMES_HOME','/opt/data')})
   except (FileNotFoundError,ProcessLookupError):continue
  return rows
 def live(row):
@@ -97,7 +97,27 @@ def main(req):
   result=query_gateway_control(Path(row['home']),verb,timeout=5)
   if result is None:raise RuntimeError('gateway_ack_unknown')
   return result
- if action=='backend':return client()('/api/health/retirement',{'action':req['verb'],**req.get('body',{})})
+ if action in ['backend','backend-ready']:
+  row=req['runtime']
+  def check():
+   if row.get('role')!='backend' or not live(row):raise RuntimeError('backend_epoch_changed')
+   if request('/api/host/identity').get('pid')!=row['pid'] or not live(row):raise RuntimeError('backend_identity_unknown')
+  if not live(row):raise RuntimeError('backend_epoch_changed')
+  request=client();check()
+  if action=='backend-ready':
+   permit=request('/api/health/retirement',{'action':'prepare'})
+   if permit.get('ok') is not True or not permit.get('token'):raise RuntimeError('backend_admission_not_ready')
+   check()
+   result=request('/api/health/retirement',{'action':'cancel','token':permit['token']})
+   if result.get('ok') is not True:raise RuntimeError('backend_admission_not_restored')
+  else:result=request('/api/health/retirement',{'action':req['verb'],**req.get('body',{})})
+  check();return result
+ if action=='resume-gateway':
+  import re,subprocess
+  row=req['runtime'];slot=row.get('serviceSlot','')
+  if row.get('role')!='gateway' or not re.fullmatch(r'gateway-[a-zA-Z0-9_-]+',slot):raise RuntimeError('gateway_slot_unknown')
+  subprocess.run(['/command/s6-svc','-u','/run/service/'+slot],check=True,timeout=10)
+  return {'ok':True}
  if action=='stop-backend':
   row=req['runtime'];assert row['role']=='backend'
   if live(row):os.kill(row['pid'],signal.SIGTERM)

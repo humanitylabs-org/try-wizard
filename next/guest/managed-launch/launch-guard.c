@@ -52,6 +52,28 @@ static int descendant(const char *host) {
  }
  return 0;
 }
+/* Recovery retains a fence for independent CLI/exec launches. Only the
+ * original owned container's stock s6 tree may bootstrap its replacement
+ * daemons. docker exec has a namespace-external parent (0), not this tree.
+ * This is admission coordination, not a hostile-root/Docker boundary. */
+static int restoring(const char *host) {
+ char path[512],comm[80]={0};struct stat st;
+ snprintf(path,sizeof path,ROOT "/resume-%s",host);
+ if(lstat(path,&st)||!S_ISREG(st.st_mode))return 0;
+ FILE *f=fopen("/proc/1/comm","r");if(!f)return 0;
+ if(!fgets(comm,sizeof comm,f)){fclose(f);return 0;}fclose(f);
+ if(strcmp(comm,"s6-svscan\n"))return 0;
+ long p=getppid();int supervised=0;
+ for(int i=0;p>1&&i<128;i++,p=parent(p)) {
+  snprintf(path,sizeof path,"/proc/%ld",p);
+  if(stat(path,&st)||st.st_uid!=0)continue;
+  snprintf(path,sizeof path,"/proc/%ld/comm",p);f=fopen(path,"r");
+  if(!f)continue;
+  if(fgets(comm,sizeof comm,f)&&!strcmp(comm,"s6-supervise\n"))supervised=1;
+  fclose(f);
+ }
+ return p==1&&supervised;
+}
 int main(int argc,char **argv) {
  (void)argc;
  int executable=open(REAL_PATH,O_RDONLY|O_CLOEXEC);
@@ -64,6 +86,8 @@ int main(int argc,char **argv) {
  struct stat st;
  if(lstat(ROOT "/lease.json",&st)==0&&!descendant(host))fail("update holds launch admission; retry after update or cancel");
  if(errno!=ENOENT&&lstat(ROOT "/lease.json",&st)<0)fail("lease state unknown");
+ if(lstat(ROOT "/resume.json",&st)==0&&!descendant(host)&&!restoring(host))fail("update recovery holds launch admission");
+ if(errno!=ENOENT&&lstat(ROOT "/resume.json",&st)<0)fail("recovery state unknown");
  char path[512];snprintf(path,sizeof path,ROOT "/launch/%s-%ld",host,(long)getpid());
  int reserve=open(path,O_RDWR|O_CREAT|O_TRUNC|O_NOFOLLOW,0600);
  if(reserve<0||flock(reserve,LOCK_EX|LOCK_NB))fail("cannot reserve process lifetime");

@@ -51,6 +51,13 @@ EXCLUDE_RE = re.compile(r"(\.lock$|\.pid$|-wal$|-shm$|\.bak$|^state\.db\.|^\.upd
 # .env lines Wizard owns: the API server the Agent Service talks to, Wizard tokens, the dashboard login.
 WIZARD_ENV = re.compile(r"^\s*(export\s+)?(API_SERVER_[A-Z_]*|WIZARD_[A-Z0-9_]*|HERMES_DASHBOARD[A-Z_]*)\s*=")
 WIZARD_PLUGINS = ("wizard-os", "wizard-product")
+RESERVATION = None
+
+
+def managed_runtime():
+    sys.path.insert(0, '/home/wizard/wizard-app-manager')
+    from wam import managed_runtime as managed
+    return managed
 
 
 def out(obj: dict, code: int = 0):
@@ -100,6 +107,14 @@ def in_engine(image: str, argv: list[str], mounts: list[str] = (), stdin: str | 
     """Run stock Hermes from the agent app's own image against its home, while the app is stopped."""
     cmd = ["docker", "run", "--rm", "-i", "--network", "none", "-u", f"{UID}:{GID}", "-e", "HERMES_HOME=/opt/data",
            "-e", "HOME=/opt/data", "-v", f"{DATA}:/opt/data"]
+    managed = managed_runtime()
+    cfg = managed.configuration()
+    if cfg:
+        if RESERVATION is None or RESERVATION.closed:
+            raise RuntimeError('managed import requires an owned operation reservation')
+        if image != cfg['image']:
+            raise RuntimeError('managed import image does not match installed manifest')
+        cmd += ['-v', managed.STATE + ':/wizard-managed-state']
     for m in mounts:
         cmd += ["-v", m]
     cmd += ["--entrypoint", argv[0], image, *argv[1:]]
@@ -443,13 +458,15 @@ def main() -> None:
         out({"ok": True, "last": json.loads(p.read_text()) if p.is_file() else None})
     lock = open(ROOT / ".lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX)
+    global RESERVATION
     try:
-        if cmd == "file" and len(sys.argv) == 3:
-            out(do_import(Path(sys.argv[2])))
-        elif cmd == "undo":
-            out(undo())
-        else:
-            out({"ok": False, "error": "usage: file <zip> | undo | status"}, 2)
+        with managed_runtime().operation() as RESERVATION:
+            if cmd == "file" and len(sys.argv) == 3:
+                out(do_import(Path(sys.argv[2])))
+            elif cmd == "undo":
+                out(undo())
+            else:
+                out({"ok": False, "error": "usage: file <zip> | undo | status"}, 2)
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001 - the caller reads one JSON line
