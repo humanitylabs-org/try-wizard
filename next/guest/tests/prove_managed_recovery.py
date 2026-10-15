@@ -62,33 +62,5 @@ for fault in ['drop','crash']:
  after={(c['name'],r['pid'],r['start']) for c in m.containers() for r in m.control(c,'snapshot')['processes'] if r['role']=='backend'}
  assert before!=after
  save('real_backend_'+fault+'_commit_response_recovers',replacementObserved=True,recoveryAdmissionDenied=True)
-# Real synthetic import/undo: the VM itself is the disposable used-disk clone.
-script='/opt/wizard/bin/wizard-import-hermes';data=Path('/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data');soul=data/'SOUL.md'
-def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
-before={x:digest(data/x) for x in ['SOUL.md','.env','auth.json']}
-z=a.output/'synthetic-import.zip'
-with zipfile.ZipFile(z,'w') as f:f.writestr('SOUL.md','# Synthetic Recovery QA\n\nThis is a disposable import proof.\n')
-token=str(uuid.uuid4());assert m.acquire(token)['phase']=='held'
-try:
- result=sp.run([script,'file',str(z)],capture_output=True,text=True,timeout=30)
- payload=json.loads(result.stdout);assert result.returncode!=0 and payload['error']=='maintenance_active'
- assert before=={x:digest(data/x) for x in before};save('real_import_refused_during_update_before_mutation')
-finally:m.release(token)
-proc=sp.Popen([script,'file',str(z)],stdout=sp.PIPE,stderr=sp.PIPE,text=True)
-try:
- for _ in range(100):
-  if m.operation_busy():break
-  assert proc.poll() is None;time.sleep(.05)
- else:raise AssertionError('import never held reservation')
- try:m.acquire(str(uuid.uuid4()));raise AssertionError('update admitted during import')
- except MaintenanceError as e:assert str(e)=='operation_in_flight',str(e)
- out,err=proc.communicate(timeout=240);payload=json.loads(out)
- assert proc.returncode==0 and payload['ok'],{'exit':proc.returncode,'error':payload.get('error'),'rollback':payload.get('rolled_back',{}).get('ok')}
- assert soul.read_text().startswith('# Synthetic Recovery QA');save('real_guarded_import_with_owned_operation')
-finally:
- if proc.poll() is None:proc.wait(timeout=240)
-result=sp.run([script,'undo'],capture_output=True,text=True,timeout=240);payload=json.loads(result.stdout)
-assert result.returncode==0 and payload['ok'],{'exit':result.returncode,'error':payload.get('error')}
-assert before=={x:digest(data/x) for x in before};ready(m);assert not m.operation_busy()
-save('real_guarded_undo_restores_identity_and_auth_hashes',hashesEqual=True)
-z.unlink()
+# F2 is intentionally a separate fixture (prove_managed_import.py). Pace
+# successive fixtures beyond stock's unchanged ten password-logins/minute.
