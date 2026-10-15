@@ -46,15 +46,39 @@ class InstalledLaunchTests(unittest.TestCase):
         with self.assertRaises(ValueError): launch.launch_installed('/Applications/Wizard.app')
         run.assert_not_called()
 
+    @patch.object(launch.subprocess, 'check_output', return_value=plistlib.dumps({'IOConsoleLocked': False, 'IOConsoleUsers': [{'kCGSSessionUserIDKey': 501, 'kCGSSessionOnConsoleKey': True}]}))
     @patch.object(launch.subprocess, 'run')
     @patch.object(launch.pathlib.Path, 'read_bytes', return_value=plistlib.dumps({'CFBundleIdentifier': launch.APP_ID}))
     @patch.object(launch.os, 'stat', return_value=types.SimpleNamespace(st_uid=501))
     @patch.object(launch.os, 'getuid', return_value=501)
-    def test_signature_verification_precedes_launch_and_no_privacy_commands(self, uid, stat, read, run):
+    def test_signature_verification_precedes_launch_and_no_privacy_commands(self, uid, stat, read, run, registry):
         launch.launch_installed('/Applications/Wizard.app')
         self.assertEqual(run.call_count, 2)
         self.assertEqual(run.call_args_list[0].args[0], ['/usr/bin/codesign', '--verify', '--deep', '--strict', '/Applications/Wizard.app'])
         self.assertEqual(run.call_args_list[1].args[0], launch.launch_command('/Applications/Wizard.app', 501))
+
+    def test_unlocked_selected_console_is_accepted(self):
+        data = {'IOConsoleLocked': False, 'IOConsoleUsers': [{'kCGSSessionUserIDKey': 501, 'kCGSSessionOnConsoleKey': True}]}
+        self.assertTrue(launch.console_unlocked(data, 501))
+        self.assertTrue(launch.console_unlocked([data], 501))
+
+    def test_locked_or_unknown_or_other_console_is_rejected(self):
+        for data in ({}, {'IOConsoleLocked': True},
+                     {'IOConsoleLocked': False, 'IOConsoleUsers': []},
+                     {'IOConsoleLocked': False, 'IOConsoleUsers': [{'kCGSSessionUserIDKey': 502, 'kCGSSessionOnConsoleKey': True}]},
+                     {'IOConsoleLocked': False, 'IOConsoleUsers': [{'kCGSSessionUserIDKey': 501, 'kCGSSessionOnConsoleKey': False}]},
+                     {'IOConsoleLocked': False, 'IOConsoleUsers': [{'kCGSSessionUserIDKey': 501, 'kCGSSessionOnConsoleKey': True, 'CGSSessionScreenIsLocked': True}]}):
+            with self.subTest(data=data): self.assertFalse(launch.console_unlocked(data, 501))
+
+    @patch.object(launch.subprocess, 'check_output', return_value=plistlib.dumps({'IOConsoleLocked': True}))
+    @patch.object(launch.subprocess, 'run')
+    @patch.object(launch.pathlib.Path, 'read_bytes', return_value=plistlib.dumps({'CFBundleIdentifier': launch.APP_ID}))
+    @patch.object(launch.os, 'stat', return_value=types.SimpleNamespace(st_uid=501))
+    @patch.object(launch.os, 'getuid', return_value=501)
+    def test_locked_console_launch_fails_before_signature_or_process_start(self, uid, stat, read, run, registry):
+        with self.assertRaisesRegex(RuntimeError, 'Unlock the Mac console'):
+            launch.launch_installed('/Applications/Wizard.app')
+        run.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()

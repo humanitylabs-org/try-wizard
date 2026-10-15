@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import plistlib
+import re
 import signal
 import subprocess
 import time
@@ -34,9 +35,10 @@ def owned_processes(app):
 
 def assert_no_other_mvp():
     for line in subprocess.check_output(['ps', '-axo', 'args'], text=True).splitlines():
-        if not line.startswith('/') or '/Contents/MacOS/Wizard' not in line:
+        match = re.match(r'^(/.*?\.app)/Contents/MacOS/Wizard(?: Host)?(?:$| )', line)
+        if not match:
             continue
-        info = pathlib.Path(line.split(' --')[0]).parent.parent / 'Info.plist'
+        info = pathlib.Path(match.group(1)) / 'Contents/Info.plist'
         if info.is_file() and plistlib.loads(info.read_bytes()).get('CFBundleIdentifier') in (APP_ID, APP_ID + '.host'):
             raise RuntimeError('Another MVP App/Host is live; preserve its owner')
 

@@ -29,6 +29,20 @@ def launch_command(app, uid):
             '/usr/bin/open', '-g', '-j', str(app)]
 
 
+def console_unlocked(registry, uid):
+    """Require positive evidence of the selected user's unlocked console."""
+    roots = registry if isinstance(registry, list) else [registry]
+    for root in roots:
+        if not isinstance(root, dict) or root.get('IOConsoleLocked') is not False:
+            continue
+        for session in root.get('IOConsoleUsers', []):
+            if (session.get('kCGSSessionUserIDKey') == uid
+                    and session.get('kCGSSessionOnConsoleKey') is True
+                    and not session.get('CGSSessionScreenIsLocked', False)):
+                return True
+    return False
+
+
 def launch_installed(app):
     """Background-first launch; callers must verify the exact PID and Host status.
 
@@ -43,5 +57,9 @@ def launch_installed(app):
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
     if info.get('CFBundleIdentifier') != APP_ID:
         raise ValueError('Refuse a non-MVP bundle')
+    registry = plistlib.loads(subprocess.check_output(
+        ['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a'], timeout=10))
+    if not console_unlocked(registry, uid):
+        raise RuntimeError('Unlock the Mac console and inspect pending macOS consent before installed-App QA; no process launched')
     subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)], check=True, timeout=30)
     subprocess.run(command, check=True, timeout=30)
