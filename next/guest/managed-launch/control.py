@@ -76,7 +76,7 @@ def main(req):
   result=query_gateway_control(Path(row['home']),verb,timeout=5)
   if result is None:raise RuntimeError('gateway_ack_unknown')
   return result
- if action=='backend':return client()('/api/health/retirement/'+req['verb'],req.get('body',{}))
+ if action=='backend':return client()('/api/health/retirement',{'action':req['verb'],**req.get('body',{})})
  if action=='stop-backend':
   row=req['runtime'];assert row['role']=='backend'
   if live(row):os.kill(row['pid'],signal.SIGTERM)
