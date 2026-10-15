@@ -102,9 +102,14 @@ def soul():
     from hermes_constants import get_hermes_home
     path = get_hermes_home() / "SOUL.md"
     if path.exists():
-        # Existing user personas are never migration targets. Product help lives in wizard-product.
-        say({"ok": True, "name": name, "preserved": True})
-        return
+        # Stock Hermes seeds a default SOUL before onboarding. Replace only that
+        # exact stock template (or a stock-recognized legacy template), never a
+        # recipient's custom persona. Used-guest migration never calls this path.
+        from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
+        existing = path.read_text()
+        if existing != DEFAULT_SOUL_MD and not is_legacy_template_soul(existing):
+            say({"ok": True, "name": name, "preserved": True})
+            return
     path.write_text(
         f"# {name}\n\n"
         f"You are {name}, the user's personal AI wizard. You live on Wizard OS, a small computer running inside "
