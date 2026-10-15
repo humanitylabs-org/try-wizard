@@ -107,6 +107,12 @@ def factory(hermes_image: str | None) -> None:
         subprocess.run(["sudo", "tee", str(HERMES_IMAGE_FILE)], input=hermes_image + "\n", text=True,
                        capture_output=True, check=True)
         shared_vm_terminal(c, rt)
+    # Image selection above replaces the override. Reapply OS-owned mounts after
+    # it and after the SSH terminal settings, before declaring the factory ready.
+    # Import here makes the minimum compatible WAM version an explicit gate.
+    from wam import builder_bundle
+    if builder_bundle.main(["fresh", "--restart"]) != 0:
+        raise SystemExit("stock builder provisioning failed; factory is incomplete")
     for app in LATER:   # app data left behind by the uninstall (the Whisper model lives here)
         p = c.runtipi_root / "app-data" / cli.STORE / app
         if p.exists():
