@@ -28,6 +28,9 @@ def write(path,text,mode=0o644):
  path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.runtime-new');tmp.write_text(text);os.chmod(tmp,mode);tmp.replace(path)
 def main():
  if os.geteuid()!=0:raise SystemExit('Run as root in guest')
+ for p in [OS/'agents',OS/'runtime-secrets',ROOT/'app-data/wizardapps/wizard-shell/data/upload-staging']:mkdir(p)
+ for name in ['runtime-token','delivery-token']:token(OS/'runtime-secrets'/name)
+ if sys.argv[1:]==['--secrets-only']:return
  engine=container('hermes-agent-engine');service=container('wizard-shell')
  image=engine['Image']
  meta=json.loads(run(['docker','image','inspect',image]))[0]
@@ -79,13 +82,14 @@ http { access_log off;
 }
 '''.replace('GATEWAY',gateway)
  write(Path('/opt/wizard/runtime-proxy.conf'),proxy)
- command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--main-container',engine['Name'].lstrip('/')]
+ command=['/usr/bin/python3','/opt/wizard/agent-runtime/agent_runtime.py','--agents-dir',str(OS/'agents'),'--token-file',str(OS/'runtime-secrets/runtime-token'),'--driver','runtipi','--wam','/home/wizard/wizard-app-manager','--home-mount','stock','--image',image,'--main-container',engine['Name'].lstrip('/'),'--tinfoil-key-file',str(OS/'runtime-secrets/tinfoil-key')]
  # Tinfoil remains unconfigured unless the recipient separately configures that provider.
+ write(Path('/etc/systemd/system/wizard-runtime-secrets.service'),'[Unit]\nBefore=docker.service wizard-agent-runtime.service\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/opt/wizard/bin/wizard-runtime-configure --secrets-only\n[Install]\nWantedBy=multi-user.target\n')
  for name,execstart,user in [('wizard-agent-runtime',' '.join(command),'wizard'),('wizard-runtime-proxy','/usr/sbin/nginx -c /opt/wizard/runtime-proxy.conf -g "daemon off;"','root')]:
-  write(Path('/etc/systemd/system')/(name+'.service'),'[Unit]\nAfter=docker.service network-online.target\nRequires=docker.service\n[Service]\nUser='+user+'\nEnvironment=HOME=/home/'+user+'\nExecStart='+execstart+'\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n')
+  write(Path('/etc/systemd/system')/(name+'.service'),'[Unit]\nAfter=docker.service network-online.target wizard-runtime-secrets.service\nRequires=docker.service wizard-runtime-secrets.service\n[Service]\nUser='+user+'\nEnvironment=HOME=/home/'+user+'\nExecStart='+execstart+'\nRestart=on-failure\nRestartSec=5\n[Install]\nWantedBy=multi-user.target\n')
  subprocess.run(['nginx','-t','-c','/opt/wizard/runtime-proxy.conf'],check=True)
  subprocess.run(['systemctl','daemon-reload'],check=True)
- subprocess.run(['systemctl','enable','--now','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
+ subprocess.run(['systemctl','enable','--now','wizard-runtime-secrets','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
  subprocess.run(['systemctl','restart','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
  print(json.dumps({'runtime_provisioned':True,'engine_image':image,'architecture':meta['Architecture'],'runtime_bind':'127.0.0.1:7795','bridge':gateway,'credentials':'recipient-generated-preserved','phone_enrollment':'not-activated','builder':'separate-owner-deferred'}))
 if __name__=='__main__':main()

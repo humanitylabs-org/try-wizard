@@ -33,7 +33,9 @@ def main():
  code,d,_=api('/wizard/v1/agents',body,headers={'Idempotency-Key':'release-private-r1'})
  check('private_provider_fail_closed',code in [200,201] and d['agent']['status_detail']=='provider_not_configured' and not d['agent']['model']['fallback'])
  code,bad,_=api('/wizard/v1/agents/private',{'model':{'provider':'anthropic','model':'claude-opus-5-5'}},method='PATCH')
- check('private_public_provider_rejected',code==409 and bad['check']=='agent.confidential_provider')
+ check('unconfigured_public_provider_rejected',code==400 and bad['check']=='agent.model.provider')
+ code,bad,_=api('/wizard/v1/agents/private',{'model':{'provider':'tinfoil','model':'glm-5-3','fallback':True}},method='PATCH')
+ check('private_fallback_rejected',code==409 and bad['check']=='agent.fallback')
  home=Path('/home/wizard/runtipi/app-data/wizard-os/agents/private/home')
  check('private_no_main_credentials',not (home/'auth.json').exists() and not (home/'state.db').exists())
  # No app package is invented: register a declared QA app solely to exercise real binding and stock DB delivery.
@@ -57,7 +59,7 @@ def main():
  finally:apps.write_bytes(original)
  # Durable uploads survive an actual Service container restart midway, then complete into shared Files.
  data=os.urandom(3*1024*1024+7);digest=hashlib.sha256(data).hexdigest();key=uuid.uuid4().hex
- code,u,_=api('/wizard/v1/uploads',{'client_upload_id':key,'filename':'release-'+key+'.bin','mime':'application/octet-stream','bytes':len(data),'sha256':digest,'destination':{'folder':'Documents/Release-QA'}})
+ code,u,_=api('/wizard/v1/uploads',{'client_upload_id':key,'filename':'release-'+key+'.bin','mime':'application/octet-stream','bytes':len(data),'sha256':digest,'destination':{'folder':'Documents'}})
  check('upload_create',code==201);path='/wizard/v1/uploads/'+u['upload_id'];split=1024*1024
  check('upload_chunk',api(path,data[:split],method='PATCH',headers={'Content-Type':'application/offset+octet-stream','Upload-Offset':'0'})[0]==204)
  subprocess.run(['docker','restart','wizard-shell_wizardapps-wizard-shell-1'],check=True,stdout=subprocess.DEVNULL);wait()

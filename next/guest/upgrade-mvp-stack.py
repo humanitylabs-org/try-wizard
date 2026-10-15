@@ -2,7 +2,7 @@
 """Apply this bounded Mac MVP runtime patch inside an existing guest. No factory trim/reset.
 Payload: wam/wam/, overlay/opt/wizard/, wizard-shell.tar; invoke --apply only after host disk backup.
 """
-import argparse, hashlib, importlib.util, json, os, shutil, subprocess, sys, time
+import argparse, hashlib, importlib.util, json, os, shutil, subprocess, sys, time, yaml
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('stack_preservation',Path(__file__).with_name('stack-preservation.py'))
 if spec is None or spec.loader is None: raise SystemExit('Missing preservation helper')
@@ -16,6 +16,11 @@ for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wiz
 bom=json.loads((a.payload/'runtime-bom.json').read_text())
 with (a.payload/'wizard-shell.tar').open('rb') as f: payload_sha256=hashlib.file_digest(f,'sha256').hexdigest()
 if payload_sha256!=bom['payload_sha256']: raise SystemExit('Payload digest mismatch')
+for relative,expected in bom.get('files',{}).items():
+ p=a.payload/relative
+ if Path(relative).is_absolute() or '..' in Path(relative).parts or p.is_symlink(): raise SystemExit('Unsafe BOM member')
+ with p.open('rb') as f: actual=hashlib.file_digest(f,'sha256').hexdigest()
+ if actual!=expected: raise SystemExit('BOM file mismatch: '+relative)
 if not a.apply: print('Preflight passed. Quit chat activity and back up the stopped VM disk before --apply.'); raise SystemExit(0)
 # Owned metadata backup only; it contains private account config, stays in guest mode0700, never logs bytes.
 b=Path('/var/lib/wizard/patches/mac-stack-v1'); b.mkdir(parents=True,exist_ok=True,mode=0o700); os.chmod(b,0o700)
@@ -27,6 +32,9 @@ for src in (data/'config.yaml',root/'user-config/wizardapps/wizard-shell/docker-
 def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 protected=[data/'SOUL.md',data/'.env',data/'auth.json']
 before={str(p):digest(p) for p in protected}
+before_model=yaml.safe_load((data/'config.yaml').read_text()).get('model')
+runtime_tokens=root/'app-data/wizard-os/runtime-secrets'
+tokens_before={p.name:digest(p) for p in runtime_tokens.glob('*') if p.is_file()}
 def auth_snapshot():
     path=data/'auth.json'
     raw=path.read_bytes() if path.is_file() else None
@@ -42,13 +50,14 @@ shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
             'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
-            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png'):
+            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png',
+            'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): shutil.copytree(src,dst,dirs_exist_ok=True)
  else: shutil.copy2(src,dst)
 shutil.copytree(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
-for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure'):
+for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure','wizard-media','wizard-ux-bridge','wizard-env','wizard-firstboot'):
  if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
 subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=True,stdout=subprocess.DEVNULL)
@@ -84,13 +93,16 @@ if not service_cid or '\n' in service_cid: raise SystemExit('Ambiguous MVP Servi
 actual_image=subprocess.check_output(['docker','inspect',service_cid,'--format','{{.Image}}'],text=True).strip()
 if actual_image!=bom['service_image_id']: raise SystemExit('Running Service differs from immutable BOM')
 if actual_image!=expected_image: raise SystemExit('Service did not load the new image; no success receipt written')
+subprocess.run(['systemctl','is-active','--quiet','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
+if yaml.safe_load((data/'config.yaml').read_text()).get('model')!=before_model: raise SystemExit('Configured model changed')
+if any(digest(runtime_tokens/n)!=v for n,v in tokens_before.items()): raise SystemExit('Existing runtime token changed')
 after={str(p):digest(p) for p in protected}
 after_auth_hash,after_auth=auth_snapshot()
 after[str(data/'auth.json')]=after_auth_hash
 auth_report=guard.compare_auth(before_auth,after_auth)
 changed=[Path(p).name for p in before if before[p]!=after[p]]
 other_changed=[p for p in changed if p!='auth.json']
-report={'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
+report={'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')
 if other_changed or not auth_report['stable_identity_credentials_preserved']:
     (b/'preservation-failure.json').write_text(json.dumps(report,sort_keys=True)+'\n')
