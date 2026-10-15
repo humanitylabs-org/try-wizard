@@ -18,9 +18,16 @@ def snapshot():
  for p in Path('/proc').iterdir():
   if not p.name.isdigit() or int(p.name)==os.getpid():continue
   try:
-   exe=(p/'exe').readlink().as_posix();args=(p/'cmdline').read_bytes().decode().split('\0')[:-1]
-   if 'python' not in Path(exe).name and '/private/' not in exe:continue
-   env=dict(x.split('=',1) for x in (p/'environ').read_bytes().decode().split('\0') if '=' in x)
+   args=(p/'cmdline').read_bytes().decode().split('\0')[:-1]
+   if not args or not Path(args[0]).name.startswith('python'):continue
+   # Linux ptrace rules also protect /proc from uid-0 without CAP_SYS_PTRACE.
+   # Read only this process's metadata as its actual owner, then restore root.
+   uid=p.stat().st_uid
+   try:
+    os.seteuid(uid)
+    exe=(p/'exe').readlink().as_posix()
+    env=dict(x.split('=',1) for x in (p/'environ').read_bytes().decode().split('\0') if '=' in x)
+   finally:os.seteuid(0)
    role='session'
    # Only exact stock supervised daemon commands receive cooperative retirement.
    if '/opt/hermes/.venv/bin/hermes' in args:
