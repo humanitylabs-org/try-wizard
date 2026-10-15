@@ -272,7 +272,14 @@ def set_setup(done_record: dict | None) -> dict:
 def connect_check() -> dict:
     p = as_wizard([WAM, "fresh-agent", "connect"], check=False, timeout=1800)
     try:
-        return json.loads(p.stdout)
+        result = json.loads(p.stdout)
+        runtime = Path('/opt/wizard/bin/wizard-runtime-configure')
+        if result.get('ok') and runtime.is_file():
+            # WAM owns/regenerates this overlay. Restore the guest's bounded
+            # runtime extension after import AND undo, before returning success.
+            run([str(runtime)])
+            as_wizard([WAM, 'restart', 'wizard-shell'], timeout=1800)
+        return result
     except ValueError:
         return {"ok": False, "detail": (p.stderr or p.stdout).strip()[-300:]}
 
