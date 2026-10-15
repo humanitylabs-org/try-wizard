@@ -29,6 +29,15 @@ static long parent(long pid) {
  if(end)sscanf(end+1," %c %ld",&state,&pp);
  return pp;
 }
+static unsigned long long started(long pid) {
+ char path[128],buf[4096];snprintf(path,sizeof path,"/proc/%ld/stat",pid);
+ FILE *f=fopen(path,"r");if(!f)return 0;
+ if(!fgets(buf,sizeof buf,f)){fclose(f);return 0;}fclose(f);
+ char *end=strrchr(buf,')'),*save=NULL;if(!end)return 0;
+ char *field=strtok_r(end+2," ",&save);
+ for(int n=0;field&&n<19;n++)field=strtok_r(NULL," ",&save);
+ return field?strtoull(field,NULL,10):0;
+}
 static int descendant(const char *host) {
  long p=getppid();
  for(int i=0;p>1&&i<128;i++,p=parent(p)) {
@@ -36,6 +45,9 @@ static int descendant(const char *host) {
   int fd=open(path,O_RDONLY|O_NOFOLLOW);
   if(fd<0)continue;
   int held=flock(fd,LOCK_EX|LOCK_NB)<0&&(errno==EAGAIN||errno==EWOULDBLOCK);
+  char record[128]={0};long owner=0;unsigned long long epoch=0;
+  if(read(fd,record,sizeof(record)-1)>0)sscanf(record,"%ld %llu",&owner,&epoch);
+  held=held&&owner==p&&epoch!=0&&epoch==started(p);
   close(fd);if(held)return 1;
  }
  return 0;
@@ -55,7 +67,7 @@ int main(int argc,char **argv) {
  char path[512];snprintf(path,sizeof path,ROOT "/launch/%s-%ld",host,(long)getpid());
  int reserve=open(path,O_RDWR|O_CREAT|O_TRUNC|O_NOFOLLOW,0600);
  if(reserve<0||flock(reserve,LOCK_EX|LOCK_NB))fail("cannot reserve process lifetime");
- dprintf(reserve,"%ld\n",(long)getpid());
+ dprintf(reserve,"%ld %llu\n",(long)getpid(),started(getpid()));
  /* Deliberately inherited across exec/fork: ownership is actual process lifetime,
     never an idle sample or an environment-variable assertion. */
  if(fcntl(reserve,F_SETFD,0))fail("cannot retain reservation");

@@ -10,9 +10,23 @@ def identity(pid):
 def locked(pid):
  try:
   with (STATE/'launch'/f'{HOST}-{pid}').open() as f:
+   fields=f.read().split()
+   if fields!=[str(pid),identity(pid)]:return False
    try:fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB);return False
    except BlockingIOError:return True
  except FileNotFoundError:return False
+def reservations():
+ result=[]
+ for p in (STATE/'launch').glob(HOST+'-*'):
+  pid=p.name.rsplit('-',1)[-1]
+  try:
+   args=(Path('/proc')/pid/'cmdline').read_bytes().split(b'\0')[:-1]
+   # Stock main-wrapper deliberately execs this inert keepalive after handing
+   # the real gateway to s6. It cannot create work and is not a terminal session.
+   if args==[b'sleep',b'infinity']:continue
+   if locked(pid):result.append(p.name)
+  except (FileNotFoundError,ProcessLookupError):pass
+ return result
 def snapshot():
  rows=[]
  for p in Path('/proc').iterdir():
@@ -60,7 +74,8 @@ def client():
 
 def main(req):
  action=req['action']
- if action=='snapshot':return {'processes':snapshot()}
+ if action=='snapshot':return {'processes':snapshot(),'reservations':reservations()}
+ if action=='alive':return {'alive':live(req['runtime'])}
  if action=='clear-drain':
   os.environ['HERMES_HOME']=req['home']
   from gateway.drain_control import clear_drain_request
