@@ -278,7 +278,7 @@ def connect_check() -> dict:
             # WAM owns/regenerates this overlay. Restore the guest's bounded
             # runtime extension after import AND undo, before returning success.
             run([str(runtime)])
-            as_wizard([WAM, 'restart', 'wizard-shell'], timeout=1800)
+            as_wizard(['python3', '-c', "import sys;sys.path.insert(0, '/home/wizard/wizard-app-manager');from wam import cli;r=cli.Config().runtipi();urn='wizard-shell:wizardapps';r.req('POST','/app-lifecycle/'+urn+'/stop',{},timeout=300);r.wait_status(urn,{'stopped'},timeout=600);r.req('POST','/app-lifecycle/'+urn+'/start',{},timeout=300);r.wait_status(urn,{'running'},timeout=600)"], timeout=1800)
         return result
     except ValueError:
         return {"ok": False, "detail": (p.stderr or p.stdout).strip()[-300:]}
