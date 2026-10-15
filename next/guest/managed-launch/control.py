@@ -5,6 +5,7 @@ Input/output are private control messages. Never return credentials or prompts.
 import fcntl,http.cookiejar,json,os,signal,socket,sys,time,urllib.request,urllib.error
 from pathlib import Path
 STATE=Path('/wizard-managed-state');HOST=socket.gethostname()
+BOOT=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 def identity(pid):
  p=Path('/proc')/str(pid);s=(p/'stat').read_text();return s[s.rindex(')')+2:].split()[19]
 def locked(pid):
@@ -53,11 +54,11 @@ def snapshot():
     at=args.index('/opt/hermes/.venv/bin/hermes');rest=args[at+1:]
     if rest[:2]==['gateway','run'] and parent_args[1].startswith('gateway-'):role='gateway'
     elif rest and rest[0]=='dashboard' and parent_args[1]=='dashboard':role='backend'
-   rows.append({'pid':int(p.name),'start':identity(p.name),'managed':locked(p.name),'role':role,'home':env.get('HERMES_HOME','/opt/data')})
+   rows.append({'pid':int(p.name),'start':identity(p.name),'bootId':BOOT,'managed':locked(p.name),'role':role,'home':env.get('HERMES_HOME','/opt/data')})
   except (FileNotFoundError,ProcessLookupError):continue
  return rows
 def live(row):
- try:return identity(row['pid'])==row['start']
+ try:return row.get('bootId')==BOOT and identity(row['pid'])==row['start']
  except (FileNotFoundError,ProcessLookupError):return False
 
 def client():
