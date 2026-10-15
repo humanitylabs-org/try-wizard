@@ -2,7 +2,7 @@
 """Root-only packaging controller. Stock modules are imported, never altered.
 Input/output are private control messages. Never return credentials or prompts.
 """
-import fcntl,http.cookiejar,json,os,signal,socket,sys,time,urllib.request
+import fcntl,http.cookiejar,json,os,signal,socket,sys,time,urllib.request,urllib.error
 from pathlib import Path
 STATE=Path('/wizard-managed-state');HOST=socket.gethostname()
 def identity(pid):
@@ -46,7 +46,9 @@ def client():
  jar=http.cookiejar.CookieJar();opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
  def request(path,body=None):
   req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','Origin':base})
-  with opener.open(req,timeout=10) as response:return json.load(response)
+  try:
+   with opener.open(req,timeout=10) as response:return json.load(response)
+  except urllib.error.HTTPError as e:raise RuntimeError('backend_http_'+str(e.code)+'_'+path.replace('/','_')) from None
  user=os.environ.get('HERMES_DASHBOARD_BASIC_AUTH_USERNAME');password=os.environ.get('HERMES_DASHBOARD_BASIC_AUTH_PASSWORD')
  if not user or not password:raise RuntimeError('backend_auth_contract_unknown')
  request('/auth/password-login',{'provider':'basic','username':user,'password':password})
