@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 SRC=$PWD
 SPARKLE_DIR=${SPARKLE_DIR:?Set SPARKLE_DIR to verified Sparkle 2.10.0 distribution on Thales}
 SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:?Set the public Ed25519 key; private key must stay on signer}
-SPARKLE_FEED=${SPARKLE_FEED:-https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-updates/appcast.xml}
+SPARKLE_FEED=${SPARKLE_FEED:-https://downloads.aiwizards.com/mac/appcast.xml}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
 RELEASE_ID=${RELEASE_ID:-$(git rev-parse HEAD)}
 OUT=$SRC/dist

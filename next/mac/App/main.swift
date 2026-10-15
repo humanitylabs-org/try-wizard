@@ -31,9 +31,12 @@ enum Store {
         return b.indices.contains(activeIndex) ? b[activeIndex] : b.first
     }
     static var osFeedURL: URL {
-        // GitHub release feed. QA and testers can point a build elsewhere with
-        // `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-20261013/latest.json")!
+        // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
+        // QA and testers can point a build elsewhere with `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
+        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/latest.json")!
+    }
+    static let downloadsBase = "https://downloads.aiwizards.com/"
+    static var downloadsPage: URL { URL(string: downloadsBase + "index.html")!
     }
 }
 
@@ -56,8 +59,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var lastProgress = Date.distantPast
     private var failure: Error?
 
-    /// A feed names one archive, or the same archive split into ordered parts (each under GitHub's 2 GiB asset
-    /// limit). `sha256` is always the hash of the whole archive; each part also carries its own hash.
+    /// A feed names one archive, or the same archive split into ordered parts (each small enough for Cloudflare to
+    /// cache at its edge). `sha256` is always the hash of the whole archive; each part also carries its own hash.
     struct Part: Decodable { let url: String; let bytes: Int64?; let sha256: String }
     /// Apps Wizard OS fetches by itself right after first launch (voice), so the space they take is never a surprise.
     struct Background: Decodable { let label: String; let bytes: Int64?; let installBytes: Int64? }
@@ -1170,7 +1173,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         installer.onDone = { [weak self] err in
             guard let self else { return }
             if let err {
-                // A bad picked file says so; an unreachable feed just shows the GitHub steps.
+                // A bad picked file says so; an unreachable feed just shows the manual download steps.
                 if err.localizedDescription.contains("free space") {
                     self.showOverlay("Not enough space for Wizard OS", err.localizedDescription, spinning: false,
                                      actions: [("Try Again", #selector(self.retryInstall)), ("Back", #selector(self.backToChooser))])
@@ -1189,15 +1192,15 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Your GitHub download may require signing in in your browser. Other guest versions are not compatible with this build.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
                     spinning: false,
                     actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
                               ("Back", #selector(backToChooser))])
     }
 
-    /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the try-wizard
-    /// releases page if the feed itself can't be read.
+    /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the downloads page
+    /// if the feed itself can't be read.
     @objc func openReleasePage() {
         var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
         URLSession.shared.dataTask(with: req) { data, resp, _ in
@@ -1205,7 +1208,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             let names = f.map { $0.parts?.map(\.url) ?? ($0.url.map { [$0] } ?? []) } ?? []
             let urls = names.compactMap { URL(string: $0, relativeTo: Store.osFeedURL)?.absoluteURL }
             DispatchQueue.main.async {
-                if urls.isEmpty { NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/tag/mac-mvp-20261013")!) }
+                if urls.isEmpty { NSWorkspace.shared.open(Store.downloadsPage) }
                 else { urls.forEach { NSWorkspace.shared.open($0) } }
             }
         }.resume()
