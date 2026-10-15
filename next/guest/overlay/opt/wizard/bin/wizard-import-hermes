@@ -396,6 +396,18 @@ def undo() -> dict:
                     continue
                 raise RuntimeError("unsafe snapshot member")
         t.extractall(DATA.parent, members=members, numeric_owner=True)
+        # Verify original bytes before a restarted runtime may legitimately mutate its state.
+        for member in members:
+            if not member.isfile():
+                continue
+            with t.extractfile(member) as source, (DATA.parent / member.name).open('rb') as restored:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if restored.read(len(chunk) or 1) != chunk:
+                        raise RuntimeError("undo byte verification failed")
+                    if not chunk:
+                        break
+    rec["restored_original_bytes_verified"] = True
     sb = rec.get("setup_before") or {}
     state = json.loads(SETUP_STATE.read_text()) if SETUP_STATE.is_file() else {}
     for k, v in sb.items():

@@ -456,6 +456,12 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: nil, suspensionBehavior: .deliverImmediately)
         refresh()
         vm.start()
+        // A successful stop keeps the durable guest gate closed until the next local boot.
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            guard let self, self.vm.state == .running, !self.preparingUpdate, !self.guestPatchBusy,
+                  let token = WizardUpdate.json(WizardUpdate.maintenanceJournal)["token"] as? String else { return }
+            WizardUpdate.releaseMaintenance(token)
+        }
     }
 
     @objc func command(_ n: Notification) {
@@ -482,9 +488,10 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let response = WizardUpdate.dir.appendingPathComponent("guest-response.json")
         if WizardUpdate.json(response)["nonce"] as? String == nonce { return }
         guestPatchBusy = true
-        WizardUpdate.idle { reason in
+        WizardUpdate.maintenance(nonce) { reason in
             if let reason { self.guestPatchBusy = false; try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": reason], response); return }
             self.vm.runGuestPatch { receipt in
+                WizardUpdate.releaseMaintenance(nonce)
                 self.guestPatchBusy = false
                 if let receipt { try? WizardUpdate.write(["nonce": nonce, "state": "applied", "receipt": receipt], response) }
                 else { try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Guest migration failed; private updater.log retained"], response) }
@@ -505,14 +512,14 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stopWhenIdle: (String?) -> Void = { [weak self] reason in
             guard let self else { return }
             if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
-            self.vm.stop(forceOnTimeout: false, onTimeout: { self.preparingUpdate = false }) {
+            self.vm.stop(forceOnTimeout: false, onTimeout: { WizardUpdate.releaseMaintenance(nonce); self.preparingUpdate = false }) {
                 try? WizardUpdate.write(["nonce": nonce, "state": "stopped", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path], WizardUpdate.response)
                 self.quitting = true
                 NSApp.terminate(nil)
             }
         }
-        if request["maintenance"] as? Bool == true, WizardShared.guestUpdatePayload != nil { stopWhenIdle(nil) }
-        else { WizardUpdate.idle(stopWhenIdle) }
+        if self.vm.state == .stopped || self.vm.state == .notInstalled { stopWhenIdle(nil) }
+        else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
     }
 
     func refresh() {

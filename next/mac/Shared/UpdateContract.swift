@@ -120,6 +120,28 @@ enum WizardUpdate {
             DispatchQueue.main.async { done(reason) }
         }.resume()
     }
+    /// Owner-local admission lease, not the UX queue projection. Never targets a connected remote backend.
+    static let maintenanceJournal = dir.appendingPathComponent("maintenance-lease.json")
+    static func maintenance(_ token: String, release: Bool = false, _ done: @escaping (String?) -> Void) {
+        var components = URLComponents(url: WizardShared.localUXHealthURL, resolvingAgainstBaseURL: false)!
+        components.path = "/wizard/v1/maintenance"
+        var req = URLRequest(url: components.url!); req.timeoutInterval = 10
+        req.httpMethod = release ? "DELETE" : "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
+        URLSession.shared.dataTask(with: req) { data, response, _ in
+            let body = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let ok = (response as? HTTPURLResponse)?.statusCode == (release ? 200 : 201) && body?["ok"] as? Bool == true
+            DispatchQueue.main.async {
+                if ok {
+                    if release { try? FileManager.default.removeItem(at: maintenanceJournal) }
+                    else { try? write(["token": token], maintenanceJournal) }
+                }
+                done(ok ? nil : "Local maintenance deferred: \(body?["error"] as? String ?? "cannot verify all local runtimes")")
+            }
+        }.resume()
+    }
+    static func releaseMaintenance(_ token: String) { maintenance(token, release: true) { _ in } }
     static func run(_ path: String, _ args: [String]) throws {
         let p = Process(); p.executableURL = URL(fileURLWithPath: path); p.arguments = args
         p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
