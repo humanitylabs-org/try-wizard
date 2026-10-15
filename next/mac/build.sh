@@ -24,8 +24,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" 
 
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-"${SWIFTC[@]}" Shared/Shared.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
-"${SWIFTC[@]}" Shared/Shared.swift Shared/UpdateContract.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/Brand.swift Shared/UpdateContract.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra
 cat > "$1" <<EOF
@@ -97,10 +98,13 @@ PY
 mkdir -p "$APP/Contents/Resources/bring-hermes"
 install -m 755 bring-hermes/wizard-bring-hermes "$APP/Contents/Resources/bring-hermes/wizard-bring-hermes"
 
-if [[ -f assets/Wizard.icns ]]; then
-  cp assets/Wizard.icns "$APP/Contents/Resources/Wizard.icns"
-  cp assets/Wizard.icns "$HOST/Contents/Resources/Wizard.icns"
-fi
+python3 assets/build-icon.py assets/brand "$OUT/obj/Wizard.icns"
+for bundle in "$APP" "$HOST"; do
+  cp "$OUT/obj/Wizard.icns" "$bundle/Contents/Resources/Wizard.icns"
+  cp assets/brand/wizard-mark-{purple,white}.png "$bundle/Contents/Resources/"
+  cp assets/brand/provenance.json "$bundle/Contents/Resources/WizardBrandProvenance.json"
+done
+
 
 cat > "$OUT/obj/host.entitlements" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

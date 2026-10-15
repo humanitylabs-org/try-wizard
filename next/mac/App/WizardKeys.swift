@@ -432,9 +432,7 @@ final class WizardStatusMenu: NSObject, NSMenuDelegate {
 
     func install(_ actions: WizardStatusActions) {
         self.actions = actions
-        let image = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: "Wizard")
-        image?.isTemplate = true
-        item.button?.image = image
+        item.button?.image = WizardBrand.menuBarImage()
         let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
         item.menu = menu
     }

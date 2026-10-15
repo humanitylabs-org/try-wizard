@@ -790,9 +790,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildOverlay() {
-        let mark = NSTextField(labelWithString: "✦")
-        mark.font = .systemFont(ofSize: 44, weight: .light)
-        mark.textColor = NSColor(calibratedRed: 0.72, green: 0.62, blue: 1, alpha: 1)
+        let mark = NSImageView(image: WizardBrand.image())
+        mark.identifier = NSUserInterfaceItemIdentifier("wizard-brand-hat")
+        mark.imageScaling = .scaleProportionallyUpOrDown
+        mark.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 62).isActive = true
         title.font = .systemFont(ofSize: 24, weight: .semibold)
         title.textColor = .white
         title.alignment = .center
@@ -1917,6 +1919,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             s["url"] = controller.web.url?.absoluteString ?? ""
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-meeting.json"))
+            }
+        case "brand-state":
+            let image = statusMenu.item.button?.image
+            let s: [String: Any] = ["menuTemplate": image?.isTemplate ?? false,
+                "menuSize": NSStringFromSize(image?.size ?? .zero),
+                "brandAsset": "wizard-mark-white.png",
+                "overlayBrand": controller.stack.arrangedSubviews.contains { $0.identifier?.rawValue == "wizard-brand-hat" },
+                "bundle": Bundle.main.bundlePath]
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: arg.isEmpty ? "/tmp/wizard-mvp-qa-brand.json" : arg))
             }
         case "keys-state":
             let s: [String: Any] = [
