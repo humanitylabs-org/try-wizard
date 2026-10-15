@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Bring an existing Hermes into Wizard OS: its memory, skills, chats, settings and sign-ins become this box's agent.
+
+    wizard-import-hermes file <zip>     import a zip already on this box (the Mac's "Bring My Hermes into Wizard"
+                                        posts it to the front door, which streams it to a root-only folder)
+    wizard-import-hermes undo           put back the agent this box had before the last import
+    wizard-import-hermes status         the last import's record
+
+Runs as root on the Wizard OS VM. Prints exactly one JSON line. The zip is a stock `hermes backup` archive.
+
+What happens:
+  1. The zip is checked (no absolute or parent paths, has config.yaml) and filtered: per-machine files (bin/, logs/,
+     runtime/, caches, locks) and Wizard's own plugins stay out.
+  2. The box's current agent home is saved to /var/lib/wizard/agent-import/<stamp>/before.tar for `undo`.
+  3. The agent app stops, and stock `hermes import --force` restores the archive into its home.
+  4. Wizard's wiring is put back on top: the terminal in this VM, the `wizard` app gateway, Wizard's plugins and skills,
+     and the API server settings the Agent Service uses. Messaging (Telegram, Slack, ...) is switched off and every
+     scheduled job is paused, so this copy never answers or runs jobs alongside the original. Both stay recorded and
+     can be turned back on.
+  5. The agent starts, `wam fresh-agent connect` checks the gateway, and onboarding is marked done.
+The archive (it holds sign-ins) is deleted when the import ends, whatever the outcome.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import time
+import zipfile
+from pathlib import Path
+
+ROOT = Path("/var/lib/wizard/agent-import")
+DATA = Path("/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data")
+SETUP_STATE = Path("/var/lib/wizard/setup.json")
+AGENT_OVERLAY = Path("/home/wizard/runtipi/user-config/wizardapps/hermes-agent/docker-compose.yml")
+WAM = "/home/wizard/.local/bin/wam"
+APP = "hermes-agent"
+ENGINE_LABEL = "label=com.docker.compose.service=hermes-agent-engine"
+MAX_BYTES = 64 << 30
+UID = GID = 1000
+# Per-machine or rebuilt-on-start files that must not cross machines (a Mac's bin/ holds macOS binaries).
+EXCLUDE_DIRS = ("bin/", "logs/", "runtime/", "cache/", "audio_cache/", "image_cache/", ".ssh-vm/",
+                "plugins/wizard-os/", "plugins/wizard-product/", "backups/", "node_modules/", "hermes-agent/")
+EXCLUDE_RE = re.compile(r"(\.lock$|\.pid$|-wal$|-shm$|\.bak$|^state\.db\.|^\.update_check$|^models_dev_cache"
+                        r"|^\.skills_prompt_snapshot\.json$|^gateway_state\.json$|/\.DS_Store$|^\.DS_Store$)")
+# .env lines Wizard owns: the API server the Agent Service talks to, Wizard tokens, the dashboard login.
+WIZARD_ENV = re.compile(r"^\s*(export\s+)?(API_SERVER_[A-Z_]*|WIZARD_[A-Z0-9_]*|HERMES_DASHBOARD[A-Z_]*)\s*=")
+WIZARD_PLUGINS = ("wizard-os", "wizard-product")
+
+
+def out(obj: dict, code: int = 0):
+    print(json.dumps(obj, separators=(",", ":")), flush=True)
+    sys.exit(code)
+
+
+def log(*a):
+    print("wizard-import-hermes:", *a, file=sys.stderr, flush=True)
+
+
+def run(argv, check=True, timeout=900, **kw):
+    if "input" not in kw or kw["input"] is None:
+        kw.pop("input", None)
+        kw["stdin"] = subprocess.DEVNULL     # never hand the vsock stdin to a child
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, **kw)
+    if check and p.returncode:
+        raise RuntimeError(f"{argv[0]} {' '.join(argv[1:3])}: {(p.stderr or p.stdout).strip()[-400:]}")
+    return p
+
+
+def as_wizard(argv, **kw):
+    uid = run(["id", "-u", "wizard"]).stdout.strip()
+    env = [f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+           "HOME=/home/wizard", "PATH=/home/wizard/.local/bin:/usr/local/bin:/usr/bin:/bin"]
+    return run(["sudo", "-u", "wizard", "env", *env, *argv], **kw)
+
+
+def lifecycle(action: str) -> str:
+    """Stop/start the agent app through Runtipi (the same calls wizard-apps makes)."""
+    want = {"stop": "stopped", "start": "running"}[action]
+    code = ("import sys,json; sys.path.insert(0,'/home/wizard/wizard-app-manager'); from wam import cli; "
+            "c=cli.Config(); rt=c.runtipi(); u='hermes-agent:'+cli.STORE; "
+            f"rt.req('POST', f'/app-lifecycle/{{u}}/{action}', {{}}, timeout=300); "
+            f"print(rt.wait_status(u, {{'{want}'}}, timeout=900))")
+    return as_wizard(["python3", "-c", code]).stdout.strip().splitlines()[-1]
+
+
+def engine_image() -> str:
+    cid = run(["docker", "ps", "-aq", "--filter", ENGINE_LABEL]).stdout.split()
+    if not cid:
+        raise RuntimeError("the agent app (hermes-agent) is not installed")
+    return run(["docker", "inspect", cid[0], "--format", "{{.Config.Image}}"]).stdout.strip()
+
+
+def in_engine(image: str, argv: list[str], mounts: list[str] = (), stdin: str | None = None) -> str:
+    """Run stock Hermes from the agent app's own image against its home, while the app is stopped."""
+    cmd = ["docker", "run", "--rm", "-i", "--network", "none", "-u", f"{UID}:{GID}", "-e", "HERMES_HOME=/opt/data",
+           "-e", "HOME=/opt/data", "-v", f"{DATA}:/opt/data"]
+    for m in mounts:
+        cmd += ["-v", m]
+    cmd += ["--entrypoint", argv[0], image, *argv[1:]]
+    return run(cmd, input=stdin).stdout
+
+
+# ------------------------------------------------------------------------------------------------ the archive
+
+def check_and_filter(src: Path, dst: Path) -> dict:
+    kept, skipped = 0, []
+    with zipfile.ZipFile(src) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        firsts = {Path(n).parts[0] for n in names if len(Path(n).parts) > 1}
+        prefix = (firsts.pop() + "/") if len(firsts) == 1 and firsts <= {".hermes", "hermes"} else ""
+        rels = [n[len(prefix):] for n in names]
+        if "config.yaml" not in rels:
+            raise ValueError("this isn't a Hermes backup (no config.yaml)")
+        total = 0
+        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as w:
+            for name, rel in zip(names, rels):
+                p = Path(rel)
+                if not rel or p.is_absolute() or ".." in p.parts or "\\" in rel or "\x00" in rel:
+                    raise ValueError(f"unsafe path in the backup: {name[:120]}")
+                info = z.getinfo(name)
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    skipped.append(rel); continue          # symlinks never cross machines
+                if rel.startswith(EXCLUDE_DIRS) or EXCLUDE_RE.search(rel):
+                    skipped.append(rel); continue
+                total += info.file_size
+                if total > MAX_BYTES:
+                    raise ValueError("the backup is larger than 64 GB")
+                with z.open(name) as r, w.open(rel, "w", force_zip64=True) as f:
+                    shutil.copyfileobj(r, f, 1 << 20)
+                kept += 1
+    return {"files": kept, "skipped": len(skipped), "skipped_examples": sorted({s.split("/")[0] for s in skipped})[:12]}
+
+
+# ------------------------------------------------------------------------------------------ Wizard's own wiring
+
+POST_IMPORT = r'''
+import json, sys
+sys.path.insert(0, "/opt/hermes")
+keep = json.load(sys.stdin)
+from hermes_cli.config import read_raw_config, atomic_config_write, get_config_path
+cfg = read_raw_config() or {}
+report = {"disabled_messaging": [], "paused_jobs": []}
+
+# 1. Wizard's wiring wins: the VM terminal, the app gateway, Wizard's skills and plugins, the API server.
+if keep.get("terminal") is not None:
+    cfg["terminal"] = keep["terminal"]
+if keep.get("mcp_wizard") is not None:
+    cfg.setdefault("mcp_servers", {})
+    if not isinstance(cfg["mcp_servers"], dict): cfg["mcp_servers"] = {}
+    cfg["mcp_servers"]["wizard"] = keep["mcp_wizard"]
+skills = cfg.get("skills") if isinstance(cfg.get("skills"), dict) else {}
+dirs = [d for d in (keep.get("external_dirs") or [])] + [d for d in (skills.get("external_dirs") or []) if d not in (keep.get("external_dirs") or [])]
+if dirs:
+    skills["external_dirs"] = dirs; cfg["skills"] = skills
+plugins = cfg.get("plugins") if isinstance(cfg.get("plugins"), dict) else {}
+enabled = list(plugins.get("enabled") or [])
+for p in keep.get("plugins") or []:
+    if p not in enabled: enabled.append(p)
+if enabled:
+    plugins["enabled"] = enabled; cfg["plugins"] = plugins
+platforms = cfg.get("platforms") if isinstance(cfg.get("platforms"), dict) else {}
+if keep.get("api_server") is not None:
+    platforms["api_server"] = keep["api_server"]
+else:
+    platforms.pop("api_server", None)
+
+# 2. Messaging off: an explicit `enabled: false` beats credentials in .env, and the credentials stay for later.
+from gateway.config import Platform
+try:
+    from gateway.config_env import _ENV_ENABLE_CREDENTIALS as CREDS
+except Exception:
+    CREDS = {}
+from hermes_cli.config import load_env
+env = load_env() or {}
+names = set(platforms) - {"api_server"}
+for plat, keys in CREDS.items():
+    if any(env.get(k) for k in keys):
+        names.add(plat.value)
+for name in sorted(names):
+    if name in ("api_server",): continue
+    try:
+        Platform(name)
+    except ValueError:
+        continue
+    block = platforms.get(name) if isinstance(platforms.get(name), dict) else {}
+    if block.get("enabled") is False and name not in {p.value for p, k in CREDS.items() if any(env.get(x) for x in k)}:
+        continue
+    block["enabled"] = False
+    platforms[name] = block
+    report["disabled_messaging"].append(name)
+cfg["platforms"] = platforms
+atomic_config_write(get_config_path(), cfg)
+
+# 3. Scheduled jobs paused (the original keeps running them).
+from cron.jobs import load_jobs, pause_job
+for job in load_jobs():
+    if job.get("enabled", True) and job.get("state") != "paused":
+        pause_job(job["id"], reason="Brought into Wizard: paused so it doesn't run twice. Resume it here when ready.")
+        report["paused_jobs"].append(job.get("name") or job["id"])
+print(json.dumps(report))
+'''
+
+
+def wizard_wiring() -> dict:
+    """What Wizard set in the box's current agent home, to put back after the import."""
+    import yaml
+    cfg = yaml.safe_load((DATA / "config.yaml").read_text()) if (DATA / "config.yaml").is_file() else {}
+    cfg = cfg if isinstance(cfg, dict) else {}
+    plugins = (cfg.get("plugins") or {}).get("enabled") or []
+    return {"terminal": cfg.get("terminal"),
+            "mcp_wizard": (cfg.get("mcp_servers") or {}).get("wizard"),
+            "external_dirs": [d for d in ((cfg.get("skills") or {}).get("external_dirs") or []) if "wizard" in str(d)],
+            "plugins": [p for p in plugins if p in WIZARD_PLUGINS],
+            "api_server": (cfg.get("platforms") or {}).get("api_server")}
+
+
+def env_merge(wizard_lines: list[str]) -> list[str]:
+    """Imported .env without Wizard-owned keys, then Wizard's lines. Returns the imported keys we replaced."""
+    envp = DATA / ".env"
+    lines = envp.read_text().splitlines() if envp.is_file() else []
+    replaced = [ln.split("=", 1)[0].strip() for ln in lines if WIZARD_ENV.match(ln)]
+    keep = [ln for ln in lines if not WIZARD_ENV.match(ln)]
+    text = "\n".join(keep + ["", "# Wizard OS (kept by wizard-import-hermes)"] + wizard_lines) + "\n"
+    tmp = envp.with_name(".env.wizard-import")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.chown(tmp, UID, GID)
+    os.replace(tmp, envp)
+    return sorted(set(replaced))
+
+
+def tighten_vm_key() -> None:
+    """Runtipi runs `chmod -R a+rwx` on an app's data folder at every start/stop (stock app-files-manager), and ssh
+    then refuses the agent's VM key. Put 0700/0600 back once the start has happened."""
+    sshd = DATA / ".ssh-vm"
+    if sshd.is_dir():
+        os.chmod(sshd, 0o700)
+        for f in sshd.iterdir():
+            if f.is_file():
+                os.chmod(f, 0o600)
+
+
+def session_count() -> int | None:
+    import sqlite3
+    try:
+        c = sqlite3.connect(f"file:{DATA / 'state.db'}?mode=ro", uri=True)
+        n = c.execute("select count(*) from sessions").fetchone()[0]
+        c.close()
+        return n
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def set_setup(done_record: dict | None) -> dict:
+    state = json.loads(SETUP_STATE.read_text()) if SETUP_STATE.is_file() else {}
+    before = {k: state.get(k) for k in ("done", "brain", "verified")}
+    if done_record is None:
+        return before
+    state.update(done_record)
+    SETUP_STATE.write_text(json.dumps(state, indent=2))
+    os.chmod(SETUP_STATE, 0o600)
+    return before
+
+
+def connect_check() -> dict:
+    p = as_wizard([WAM, "fresh-agent", "connect"], check=False, timeout=1800)
+    try:
+        return json.loads(p.stdout)
+    except ValueError:
+        return {"ok": False, "detail": (p.stderr or p.stdout).strip()[-300:]}
+
+
+def wait_api(seconds=240) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        cid = run(["docker", "ps", "-q", "--filter", ENGINE_LABEL], check=False).stdout.split()
+        if cid and run(["docker", "exec", cid[0], "sh", "-c",
+                        "curl -fsS -o /dev/null http://127.0.0.1:${API_SERVER_PORT:-8642}/health"], check=False).returncode == 0:
+            return True
+        time.sleep(3)
+    return False
+
+
+def do_import(zip_path: Path) -> dict:
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    work = ROOT / stamp
+    work.mkdir(parents=True, mode=0o700)
+    filtered = work / "import.zip"
+    stopped = False
+    try:
+        archive = check_and_filter(zip_path, filtered)
+        os.chmod(filtered, 0o644)          # read by the one-off container user; the folder stays root-only 0700
+        os.chmod(work, 0o711)
+        if not DATA.is_dir():
+            raise RuntimeError("the agent app has no home yet; finish Wizard setup first")
+        image = engine_image()
+        wiring = wizard_wiring()
+        if ":/opt/agent-ssh:ro" in (AGENT_OVERLAY.read_text() if AGENT_OVERLAY.is_file() else "") and wiring.get("terminal"):
+            wiring["terminal"] = {**wiring["terminal"], "ssh_key": "/opt/agent-ssh/id_ed25519"}   # key outside app-data
+        envp = DATA / ".env"
+        wizard_env = [ln for ln in (envp.read_text().splitlines() if envp.is_file() else []) if WIZARD_ENV.match(ln)]
+        sessions_before = session_count()
+        log("stopping the agent")
+        lifecycle("stop")
+        stopped = True
+        log("saving the current agent for undo")
+        with tarfile.open(work / "before.tar", "w") as t:
+            t.add(DATA, arcname="data")
+        rec = {"stamp": stamp, "at": stamp, "snapshot": str(work / "before.tar"), "image": image, "archive": archive,
+               "sessions_before": sessions_before, "complete": False}
+        (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
+        os.chmod(ROOT / "last.json", 0o600)
+        try:
+            return _import_into(work, image, wiring, wizard_env, rec)
+        except Exception as e:
+            # Never leave the box without its agent: put the saved one back, then report the failure.
+            log("import failed, putting the previous agent back:", e)
+            try:
+                restored = undo()
+            except Exception as e2:  # noqa: BLE001
+                restored = {"ok": False, "detail": str(e2)[:300]}
+            return {"ok": False, "error": type(e).__name__, "detail": str(e)[:400], "rolled_back": restored}
+    except Exception:
+        if stopped and not (work / "before.tar").is_file():
+            lifecycle("start")                  # stopped but nothing changed yet
+        raise
+    finally:
+        filtered.unlink(missing_ok=True)
+
+
+def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], rec: dict) -> dict:
+    log("restoring the backup with stock hermes import")
+    in_engine(image, ["/opt/hermes/.venv/bin/hermes", "import", "--force", "/import/import.zip"],
+              mounts=[f"{work}:/import:ro"])
+    rec["env_replaced"] = env_merge(wizard_env)
+    report = json.loads(in_engine(image, ["/opt/hermes/.venv/bin/python", "-c", POST_IMPORT],
+                                  stdin=json.dumps(wiring)).strip().splitlines()[-1])
+    rec.update(report)
+    if Path("/opt/wizard/bin/wizard-product-configure").is_file():   # newer images: product plugin + app origin
+        run(["/opt/wizard/bin/wizard-product-configure"])
+    run(["chown", "-R", f"{UID}:{GID}", str(DATA)])
+    rec["setup_before"] = set_setup({"done": True, "verified": True,
+                                     "brain": {"kind": "imported", "label": "Your Hermes"}})
+    (ROOT / "last.json").write_text(json.dumps(rec, indent=2))   # undo needs setup_before even if a later step fails
+    log("starting the agent")
+    rec["agent"] = lifecycle("start")
+    tighten_vm_key()
+    rec["api"] = wait_api()
+    gw = connect_check()
+    rec["gateway"] = bool(gw.get("ok"))
+    rec["sessions_after"] = session_count()
+    rec["complete"] = True
+    (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
+    os.chmod(ROOT / "last.json", 0o600)
+    ok = rec["agent"] == "running" and rec["api"] and rec["gateway"]
+    return {"ok": ok, **{k: rec[k] for k in ("stamp", "archive", "sessions_before", "sessions_after",
+                                             "disabled_messaging", "paused_jobs", "env_replaced", "agent", "api",
+                                             "gateway")},
+            "gateway_detail": None if gw.get("ok") else gw}
+
+
+def undo() -> dict:
+    rec = json.loads((ROOT / "last.json").read_text())
+    snap = Path(rec["snapshot"])
+    if not snap.is_file():
+        raise RuntimeError("no saved agent to put back")
+    try:
+        lifecycle("stop")
+    except Exception as e:  # noqa: BLE001 - already stopped (a failed import stops it first)
+        log("stop before undo:", e)
+    aside = DATA.with_name(f"data.imported-{rec['stamp']}")
+    if aside.exists():
+        shutil.rmtree(aside)
+    DATA.rename(aside)
+    with tarfile.open(snap) as t:
+        members = [m for m in t.getmembers() if m.name == "data" or m.name.startswith("data/")]
+        for m in members:
+            if m.issym() or m.islnk() or ".." in Path(m.name).parts:
+                if m.issym() or m.islnk():
+                    continue
+                raise RuntimeError("unsafe snapshot member")
+        t.extractall(DATA.parent, members=members, numeric_owner=True)
+    sb = rec.get("setup_before") or {}
+    state = json.loads(SETUP_STATE.read_text()) if SETUP_STATE.is_file() else {}
+    for k, v in sb.items():
+        if v is None:
+            state.pop(k, None)
+        else:
+            state[k] = v
+    SETUP_STATE.write_text(json.dumps(state, indent=2))
+    agent = lifecycle("start")
+    tighten_vm_key()
+    api = wait_api()
+    gw = connect_check()
+    shutil.rmtree(aside, ignore_errors=True)        # the imported copy (it holds the imported sign-ins)
+    rec["undone"] = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
+    return {"ok": agent == "running" and api and bool(gw.get("ok")), "agent": agent, "api": api,
+            "gateway": bool(gw.get("ok")), "sessions": session_count()}
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        out({"ok": False, "error": "run as root"}, 2)
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if cmd == "status":
+        p = ROOT / "last.json"
+        out({"ok": True, "last": json.loads(p.read_text()) if p.is_file() else None})
+    lock = open(ROOT / ".lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        if cmd == "file" and len(sys.argv) == 3:
+            out(do_import(Path(sys.argv[2])))
+        elif cmd == "undo":
+            out(undo())
+        else:
+            out({"ok": False, "error": "usage: file <zip> | undo | status"}, 2)
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 - the caller reads one JSON line
+        log("failed:", e)
+        out({"ok": False, "error": type(e).__name__, "detail": str(e)[:400]}, 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -34,16 +34,23 @@ if not before_engine_cid or '\n' in before_engine_cid: raise SystemExit('Ambiguo
 before_engine_image=subprocess.check_output(['docker','inspect',before_engine_cid,'--format','{{.Image}}'],text=True).strip()
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
-for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf'):
+for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
+            # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
+            'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','setup/server.py'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
+ if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): shutil.copytree(src,dst,dirs_exist_ok=True)
  else: shutil.copy2(src,dst)
-os.chmod('/opt/wizard/bin/wizard-product-configure',0o755)
+for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps'):
+ if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
 subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=True,stdout=subprocess.DEVNULL)
 # This source pin intentionally retains the shipped local image tag; docker load replaces only that local tag.
 # Runtipi's supported lifecycle recreates containers, preserving all mounted app data.
 subprocess.run(['sudo','-iu','wizard','wam','fresh-agent','connect'],check=True,stdout=subprocess.DEVNULL)
+# The agent's terminal key now mounts from ~/.wizard-os/agent-ssh (read-only), out of reach of Runtipi's start-time chmod.
+if Path('/opt/wizard/bin/wizard-agent-ssh-migrate').is_file():
+ subprocess.run(['/opt/wizard/bin/wizard-agent-ssh-migrate'],check=True,stdout=subprocess.DEVNULL)
 # A re-applied payload may change only the local image, not the generated overlay; force this one app to reload it.
 restart_service = """import sys
 sys.path.insert(0, '/home/wizard/wizard-app-manager')

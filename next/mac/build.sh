@@ -93,6 +93,10 @@ r=dict(schema=1,releaseID=os.environ['RELEASE_ID'],build=os.environ['BUILD'],arc
 (a/'Contents/Resources/wizard-release.json').write_text(json.dumps(r,sort_keys=True)+'\n')
 PY
 
+# "Bring My Hermes into Wizard": backs up the Mac's Hermes and posts it to Wizard OS's front door (127.0.0.1:48030).
+mkdir -p "$APP/Contents/Resources/bring-hermes"
+install -m 755 bring-hermes/wizard-bring-hermes "$APP/Contents/Resources/bring-hermes/wizard-bring-hermes"
+
 if [[ -f assets/Wizard.icns ]]; then
   cp assets/Wizard.icns "$APP/Contents/Resources/Wizard.icns"
   cp assets/Wizard.icns "$HOST/Contents/Resources/Wizard.icns"

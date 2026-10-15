@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Move the agent's VM-terminal key out of its app-data folder (run as root on the Wizard OS VM; idempotent).
+
+Runtipi runs `chmod -Rf a+rwx` on an app's data folder at every start/stop/restart, so the old key copy at
+<hermes-agent data>/.ssh-vm/id_ed25519 became 0777 and ssh refused it: the agent lost its terminal until the next
+reboot. wam now mounts ~/.wizard-os/agent-ssh read-only at /opt/agent-ssh. This regenerates the agent overlay (when
+needed) and points the agent's `terminal.ssh_key` there. Prints one JSON line.
+"""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+OVERLAY = Path("/home/wizard/runtipi/user-config/wizardapps/hermes-agent/docker-compose.yml")
+KEY = Path("/home/wizard/.wizard-os/agent-ssh/id_ed25519")
+NEW = "/opt/agent-ssh/id_ed25519"
+
+
+def sh(argv, **kw):
+    return subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=1800, **kw)
+
+
+def engine() -> str:
+    ids = sh(["docker", "ps", "-q", "--filter", "label=com.docker.compose.service=hermes-agent-engine"]).stdout.split()
+    return ids[0] if ids else ""
+
+
+def configured_key(cid: str) -> str:
+    """terminal.ssh_key as written in the agent's config.yaml (`hermes config get` masks values named *key*)."""
+    r = sh(["docker", "exec", "-u", "1000:1000", cid, "python3", "-c",
+            "import yaml;print(((yaml.safe_load(open('/opt/data/config.yaml')) or {}).get('terminal') or {}).get('ssh_key') or '')"])
+    if r.returncode != 0:
+        r = sh(["docker", "exec", "-u", "1000:1000", cid, "/opt/hermes/.venv/bin/python", "-c",
+                "import yaml;print(((yaml.safe_load(open('/opt/data/config.yaml')) or {}).get('terminal') or {}).get('ssh_key') or '')"])
+    return r.stdout.strip()
+
+
+def main() -> int:
+    out = {"ok": False}
+    if not KEY.is_file():
+        out["error"] = "no agent key yet (wizard-firstboot makes it)"
+        print(json.dumps(out)); return 1
+    if ":/opt/agent-ssh:ro" not in (OVERLAY.read_text() if OVERLAY.is_file() else ""):
+        r = sh(["sudo", "-iu", "wizard", "wam", "fresh-agent", "connect"])   # rewrites the overlay, restarts the agent
+        out["overlay_rewritten"] = r.returncode == 0
+    if ":/opt/agent-ssh:ro" not in (OVERLAY.read_text() if OVERLAY.is_file() else ""):
+        out["error"] = "agent overlay has no /opt/agent-ssh mount (wam too old?)"
+        print(json.dumps(out)); return 1
+    cid = engine()
+    if not cid:
+        out["error"] = "agent not running"
+        print(json.dumps(out)); return 1
+    cur = configured_key(cid)
+    if cur != NEW and sh(["docker", "exec", cid, "test", "-r", NEW]).returncode == 0:
+        r = sh(["docker", "exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid, "/opt/hermes/.venv/bin/hermes",
+                "config", "set", "terminal.ssh_key", NEW])
+        out["config_set"] = r.returncode == 0
+        # The running agent keeps the terminal settings it started with: restart it so it uses the new key now.
+        out["restarted"] = sh(["docker", "restart", cid]).returncode == 0
+        cid = engine() or cid
+    out["ssh_key"] = configured_key(cid)
+    # Prove it: the agent's container reaches the box over ssh with the new key.
+    probe = sh(["docker", "exec", "-u", "1000:1000", cid, "ssh", "-i", NEW, "-o", "BatchMode=yes", "-o",
+                "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=15",
+                "wizard@wizard-vm", "echo AGENT_SSH_OK"])
+    out["ssh_probe"] = "AGENT_SSH_OK" in probe.stdout
+    out["ok"] = out["ssh_key"] == NEW and out["ssh_probe"]
+    print(json.dumps(out))
+    return 0 if out["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
