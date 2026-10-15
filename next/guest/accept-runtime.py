@@ -32,7 +32,7 @@ def main():
  body={'label':'Private','harness':'hermes','model':{'provider':'tinfoil','model':'glm-5-3'},'permissions':{'preset':'private'}}
  code,d,_=api('/wizard/v1/agents',body,headers={'Idempotency-Key':'release-private-r1'})
  check('private_provider_fail_closed',code in [200,201] and d['agent']['status_detail']=='provider_not_configured' and not d['agent']['model']['fallback'])
- code,bad,_=api('/wizard/v1/agents/private',{'model':{'provider':'nous','model':'nous/welcome'}},method='PATCH')
+ code,bad,_=api('/wizard/v1/agents/private',{'model':{'provider':'anthropic','model':'claude-opus-5-5'}},method='PATCH')
  check('private_public_provider_rejected',code==409 and bad['check']=='agent.confidential_provider')
  home=Path('/home/wizard/runtipi/app-data/wizard-os/agents/private/home')
  check('private_no_main_credentials',not (home/'auth.json').exists() and not (home/'state.db').exists())
