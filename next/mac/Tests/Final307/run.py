@@ -94,7 +94,12 @@ def console():
 def notify(command):
     # Foundation distributed notifications; NOT Apple Events/System Events.
     code = 'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately('+json.dumps(DOMAIN+'.qa')+','+json.dumps(command)+',null,true);'
-    run(['osascript', '-l', 'JavaScript', '-e', code], timeout=10)
+    # GUI applications receive DNC messages in gui/<uid>, not the SSH worker's
+    # bootstrap. This is the same route used by the accepted build306 harness.
+    import pwd
+    uid = os.getuid()
+    run(['sudo', '-n', 'launchctl', 'asuser', str(uid), 'sudo', '-n', '-u',
+         pwd.getpwuid(uid).pw_name, 'osascript', '-l', 'JavaScript', '-e', code], timeout=10)
 
 
 def wait(predicate, seconds, label):
@@ -220,7 +225,24 @@ def main():
     gate('production-AppKit-policy',appkit_policy)
     stage = root/'public-mac307'; package_app = root/'package/Wizard MVP.app'
     def package():
+        nonlocal stage
         assert r['gates']['candidate-signature']['passed']
+        if s.get('reusePackageReport'):
+            previous_path = Path(s['reusePackageReport'])
+            assert sha(previous_path) == s['reusePackageReportSHA256']
+            previous = read(previous_path)
+            assert previous['productionSource'] == PRODUCTION
+            assert previous['candidateApp'] == str(candidate)
+            assert previous['cleanupVerified'] and not previous['published']
+            assert previous['gates']['release-packaging']['passed']
+            evidence = previous['gates']['release-packaging']['evidence']
+            stage = Path(evidence['stage'])
+            assert stage.is_relative_to('/Volumes/ThalesMedia/')
+            assert sorted(p.name for p in stage.iterdir()) == ['Wizard-0.7.0.dmg','Wizard-307.zip','appcast.xml']
+            for name, expected in evidence['files'].items():
+                assert (stage/name).stat().st_size == expected['bytes']
+                assert sha(stage/name) == expected['sha256']
+            return dict(evidence, reusedFrom=str(previous_path), rebuilt=False)
         package_app.parent.mkdir(); run(['cp','-cR',candidate,package_app],timeout=90)
         stage.mkdir()
         logged('feed-package',[s['python'],mac/'tools/make-update-feed.py',package_app,stage,'--base-url',

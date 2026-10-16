@@ -50,6 +50,22 @@ class Contracts(unittest.TestCase):
         self.assertIn('Never migrate in UI policy fixture',fixture)
         self.assertIn('No Host launch in policy fixture',fixture)
         self.assertIn("r['readyForPublication']=False",text)
+    def test_notification_uses_gui_bootstrap(self):
+        import os
+        with patch.object(m, 'run') as call:
+            m.notify('update-state')
+        argv = call.call_args.args[0]
+        self.assertEqual(argv[:5], ['sudo','-n','launchctl','asuser',str(os.getuid())])
+        self.assertIn('osascript', argv)
+        self.assertIn('postNotificationNameObjectUserInfoDeliverImmediately', argv[-1])
+        self.assertIn('update-state', argv[-1])
+        self.assertNotIn('System Events', argv[-1])
+    def test_package_reuse_pins_report_and_bytes(self):
+        text=P.read_text()
+        self.assertIn("assert sha(previous_path) == s['reusePackageReportSHA256']", text)
+        self.assertIn("assert previous['productionSource'] == PRODUCTION", text)
+        self.assertIn("assert sha(stage/name) == expected['sha256']", text)
+        self.assertIn("assert previous['cleanupVerified'] and not previous['published']", text)
     def test_source_unchanged_contract(self):
         root=P.parents[4]
         source=(root/'next/mac/App/WizardUpdater.swift').read_text()
