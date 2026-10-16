@@ -66,6 +66,11 @@ class Contracts(unittest.TestCase):
         self.assertIn("assert previous['productionSource'] == PRODUCTION", text)
         self.assertIn("assert sha(stage/name) == expected['sha256']", text)
         self.assertIn("assert previous['cleanupVerified'] and not previous['published']", text)
+    def test_probe_accepts_durable_inherited_lease(self):
+        text=P.with_name('probe_notifications.py').read_text()
+        self.assertIn("s.get('workerLease') == 'inherited'",text)
+        self.assertIn("assert not m.mvp_processes()",text)
+        self.assertIn("r['cleanupVerified']=props()==before",text)
     def test_source_unchanged_contract(self):
         root=P.parents[4]
         source=(root/'next/mac/App/WizardUpdater.swift').read_text()

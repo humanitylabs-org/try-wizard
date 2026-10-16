@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location('acceptance', Path(__file__).with_
 assert spec is not None and spec.loader is not None
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 s = m.read(sys.argv[1]); root = Path(s['probeRoot']); app = Path(s['probeApp'])
-assert os.environ.get('WIZARD_HEAVY_JOB_ID'), 'durable worker required'
+assert os.environ.get('WIZARD_HEAVY_JOB_ID') or s.get('workerLease') == 'inherited', 'durable worker required'
 assert root.is_relative_to('/Volumes/ThalesMedia/') and not root.exists()
 assert app.parent == Path('/Applications') and app.exists()
 assert not m.mvp_processes()
