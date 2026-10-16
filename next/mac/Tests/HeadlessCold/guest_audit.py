@@ -46,7 +46,7 @@ def rows(path):
     return result
 
 
-def wait_health(timeout=240):
+def wait_health(timeout=240, *, require_managed=False):
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -55,7 +55,10 @@ def wait_health(timeout=240):
                                              headers={'Host': '127.0.0.1:48023'})
             with urllib.request.urlopen(request, timeout=5) as response:
                 health = json.load(response)
-            if isinstance(health, dict):
+            if isinstance(health, dict) and (not require_managed or (
+                    health.get('upstream_reachable') is True and
+                    isinstance(health.get('queue'), dict) and
+                    health['queue'].get('liveness_available') is True)):
                 return health
         except (OSError, ValueError):
             pass
@@ -118,7 +121,7 @@ def same_boot_restart():
 def snapshot():
     import headless_cold_config, headless_preservation, headless_config_expectation
     cold = POLICY.exists() and 'wizard.cold=' in Path('/proc/cmdline').read_text()
-    health = None if cold else wait_health()
+    health = None if cold else wait_health(require_managed=POLICY.exists())
     config_raw = (DATA/'config.yaml').read_bytes()
     expected_config, config_migration = headless_config_expectation.migrate(
         config_raw, headless_cold_config.migrate)

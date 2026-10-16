@@ -28,6 +28,19 @@ class DriverContracts(unittest.TestCase):
         with patch.object(guest_audit.urllib.request,'urlopen',side_effect=ConnectionRefusedError()), patch.object(guest_audit.time,'monotonic',side_effect=[0,1]):
             with self.assertRaises(TimeoutError): guest_audit.wait_health(timeout=0)
 
+    def test_managed_readiness_waits_for_engine_and_liveness(self):
+        import io
+        from unittest.mock import patch
+        import guest_audit
+        responses = [io.BytesIO(b'{"upstream_reachable":false,"queue":{"liveness_available":false}}'),
+                     io.BytesIO(b'{"upstream_reachable":true,"queue":{"liveness_available":false}}'),
+                     io.BytesIO(b'{"upstream_reachable":true,"queue":{"liveness_available":true}}')]
+        with patch.object(guest_audit.urllib.request,'urlopen',side_effect=responses) as opener, patch.object(guest_audit.time,'sleep'):
+            self.assertTrue(guest_audit.wait_health(require_managed=True)['upstream_reachable'])
+            self.assertEqual(opener.call_count, 3)
+        with patch.object(guest_audit.urllib.request,'urlopen',return_value=io.BytesIO(b'{"upstream_reachable":false}')), patch.object(guest_audit.time,'monotonic',side_effect=[0,1]):
+            with self.assertRaises(TimeoutError): guest_audit.wait_health(timeout=0, require_managed=True)
+
     def test_host_layout_precedes_vm_boot(self):
         with tempfile.TemporaryDirectory() as tmp:
             data=Path(tmp)/'isolated/data'
