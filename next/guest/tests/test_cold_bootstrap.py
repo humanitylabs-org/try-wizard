@@ -20,7 +20,33 @@ class ColdTests(unittest.TestCase):
         self.policy = {'phase':'fenced', 'managed':'sha256:managed', 'service':'sha256:service', 'references':{}}
         self.old = {'Image':G.STOCK,'Config':{'Labels':{'com.docker.compose.service':'hermes-agent-engine'}}}
     def request(self, path, method='POST', body=None):
-        return {'RequestMethod':method,'RequestURI':'/v1.54'+path,'RequestBody':base64.b64encode(json.dumps(body or {}).encode()).decode()}
+        return {'RequestMethod':method,'RequestUri':'/v1.54'+path,'RequestBody':base64.b64encode(json.dumps(body or {}).encode()).decode()}
+    def test_docker_wire_json_through_real_http_handler(self):
+        # Docker AuthZ API wire names (RequestUri, not Go field RequestURI).
+        # Literal wire envelopes deliberately do not use the policy-test helper.
+        import http.client, http.server, threading
+        with tempfile.TemporaryDirectory() as tmp, patch.object(G, 'STATE', Path(tmp)):
+            G.write(Path(tmp)/'policy.json', self.policy)
+            with http.server.HTTPServer(('127.0.0.1', 0), G.Handler) as server:
+                worker = threading.Thread(target=server.serve_forever, daemon=True)
+                worker.start()
+                def post(raw):
+                    conn = http.client.HTTPConnection(*server.server_address, timeout=3)
+                    try:
+                        conn.request('POST', '/AuthZPlugin.AuthZReq', raw, {'Content-Type':'application/json'})
+                        response = conn.getresponse()
+                        self.assertEqual(response.status, 200)
+                        return json.loads(response.read())
+                    finally: conn.close()
+                try:
+                    self.assertTrue(post('{"User":"","UserAuthNMethod":"","RequestMethod":"GET","RequestUri":"/v1.54/containers/json?all=1","RequestBody":null,"RequestHeaders":{}}')['Allow'])
+                    denied = post('{"RequestMethod":"POST","RequestUri":"/v1.54/exec/id/start","RequestBody":"e30="}')
+                    self.assertFalse(denied['Allow'])
+                    self.assertEqual(json.loads((Path(tmp)/'denied.jsonl').read_text())['path'], '/v1.54/exec/id/start')
+                    for malformed in ('{"RequestMethod":"GET","RequestURI":"/v1.54/containers/json"}', '{}', 'null', '{', '{"RequestMethod":"GET","RequestUri":null}', '{"RequestUri":"/v1.54/containers/json"}'):
+                        self.assertFalse(post(malformed)['Allow'], malformed)
+                finally: server.shutdown(); worker.join(timeout=3)
+
     def test_all_old_execution_routes_denied(self):
         for action in ('start','restart','unpause','exec','update'):
             self.assertFalse(G.authorize(self.request('/containers/old/'+action, body={'RestartPolicy':{'Name':'always'}}),self.policy,lambda _:self.old),action)

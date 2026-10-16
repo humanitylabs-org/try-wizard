@@ -163,7 +163,9 @@ def permitted_container(c, policy):
 
 def authorize(request, policy, find=lookup):
     # Do not turn malformed/encoded/unknown execution routes into an allow.
-    path = re.sub(r'^/v[0-9]+\.[0-9]+', '', urlsplit(request['RequestURI']).path)
+    uri = request['RequestUri']  # Docker AuthZ JSON tag, not the Go field name.
+    if not isinstance(uri, str) or not uri.startswith('/') or uri.startswith('//'): return False
+    path = re.sub(r'^/v[0-9]+\.[0-9]+', '', urlsplit(uri).path)
     if unquote(path) != path or '..' in path or '//' in path: return False
     method = request['RequestMethod']
     if policy['phase'] not in ('fenced', 'restoring', 'committed'): return False
@@ -175,7 +177,7 @@ def authorize(request, policy, find=lookup):
     # cannot broaden this allowance. It is revoked even if the update fails.
     restore = policy.get('restoration')
     if policy['phase'] == 'restoring' and restore and method == 'POST':
-        if request['RequestURI'] == '/v1.54/containers/'+restore['id']+'/update':
+        if request['RequestUri'] == '/v1.54/containers/'+restore['id']+'/update':
             c = find(restore['id'])
             return (c is not None and c['Image'] == restore['image']
                     and service(c) == restore['service']
@@ -217,7 +219,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = {'Allow': allowed, 'Msg': '' if allowed else 'WIZARD_COLD_DENIED'}
                 if not allowed:
                     with (STATE/'denied.jsonl').open('a') as f:
-                        f.write(json.dumps({'method': req.get('RequestMethod'), 'path': urlsplit(req.get('RequestURI','')).path})+'\n')
+                        f.write(json.dumps({'method': req.get('RequestMethod'), 'path': urlsplit(req.get('RequestUri','')).path})+'\n')
             else: result = {'Allow': False, 'Msg': 'unknown authorization request'}
         except Exception: result = {'Allow': False, 'Msg': 'WIZARD_COLD_POLICY_UNKNOWN'}
         data = json.dumps(result).encode()
