@@ -84,7 +84,7 @@ enum WizardUpdate {
         let unchangedBackup = try String(contentsOf: WizardGuestActivation.backup, encoding: .utf8)
         let replacement = try String(contentsOf: WizardShared.osDir.appendingPathComponent("disk.img"), encoding: .utf8)
         precondition(unchangedBackup == "ORIGINAL" && replacement == "CHANGED_AT_COMPLETION")
-        precondition(WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-applied")
+        precondition(WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-activating")
         precondition(WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))["diskIdentity"] == nil)
         precondition(!FileManager.default.fileExists(atPath: WizardUpdate.dir.appendingPathComponent("legacy-complete.json").path))
         print("COLD_CHANGED_INODE_COMPLETION_REFUSED_PASS")
