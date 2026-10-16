@@ -97,6 +97,7 @@ def main():
         env['PATH'] = str(root/'venv/bin')+':'+env['PATH']
         mac = source/'next/mac'
         check('cold-serial', [python, mac/'Tests/test_cold_serial.py', '--out', root/'serial'])
+        check('update-shutdown', [python, harness/'next/mac/Tests/test_update_shutdown.py', '--out', root/'shutdown'])
         check('guest-policy', [python, source/'next/guest/tests/test_cold_bootstrap.py'])
         check('process-identity', [python, mac/'Tests/test_legacy_process_identity.py'])
         check('compile-admission', ['xcrun','swiftc','-swift-version','5','-target','arm64-apple-macos14.0',mac/'Shared/UpdateContract.swift',mac/'Tests/LegacyAdmission/main.swift','-o',root/'admission'])

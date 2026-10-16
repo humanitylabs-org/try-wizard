@@ -113,10 +113,24 @@ final class VMController {
     precondition(NSApp.terminations == 0 && machine.forced == 0)
     print("STOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=\(cold) applyFailure=\(failedApply) concurrent=\(concurrent)")
 }
+@MainActor func cleanStop(cold: Bool) throws {
+    WizardShared.cold = cold; HostControl.host = ProductionHost(); HostControl.isRunning = true
+    NSApp.terminations = 0
+    let machine = HostControl.host.vm.vm!
+    let nonce = UUID().uuidString
+    try WizardUpdate.write(["nonce":nonce,"pid":getpid(),"appPath":Bundle.main.bundleURL.standardizedFileURL.path,
+                            "peer":WizardRelease.peer,"expires":Date().addingTimeInterval(30).timeIntervalSince1970],WizardUpdate.request)
+    HostControl.host.send(); HostControl.host.vm.signalLateGuestStop()
+    precondition(WizardUpdate.json(WizardUpdate.response)["state"] as? String == "stopped")
+    precondition(WizardUpdate.json(WizardUpdate.response)["nonce"] as? String == nonce)
+    precondition(NSApp.terminations == 1 && machine.forced == 0 && HostControl.host.quitting)
+    print("ACTUAL_PREPARE_CLEAN_STOP_PASS cold=\(cold)")
+}
 try MainActor.assumeIsolated {
     for cold in [false,true] {
         for failed in [false,true] { try scenario(cold:cold,failedApply:failed) }
     }
     try scenario(cold:true,failedApply:false,concurrent:true)
-    print("UPDATE_SHUTDOWN_SCENARIOS_PASS 5")
+    try cleanStop(cold:false); try cleanStop(cold:true)
+    print("UPDATE_SHUTDOWN_SCENARIOS_PASS 7")
 }

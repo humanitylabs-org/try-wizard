@@ -16,7 +16,7 @@ var finished = false
 var exitStatus: Int32 = 1
 var result: [String: Any] = ["mode":mode, "realVM":true, "physicalConsent":false,
     "consent":"test-authorized stopped admission adapter", "preferencesTouched":false,
-    "GUIStarted":false, "productionReleaseID":"98049a6cdc7285e10cf8c66e41b769e40cffc508"]
+    "GUIStarted":false, "productionReleaseID":"93b0b3b1c2666d5810405aa303c7780849f5880b"]
 func record(_ key: String, _ value: Any) {
     result[key] = value
     try? JSONSerialization.data(withJSONObject: result, options:[.prettyPrinted,.sortedKeys]).write(to:output.appendingPathComponent("result.json"),options:.atomic)
@@ -91,7 +91,7 @@ func diskHolders() -> [Int32]? {
     static func stop(_ done: @escaping (Bool)->Void) {
         releaseTimer?.invalidate()
         guard running else { closed(done); return }
-        // Stricter than the cold production timeout: a force-stop cannot pass QA.
+        // Match production update shutdown: a force-stop cannot pass QA.
         vm.stop(forceOnTimeout:false,onTimeout:{ done(false) }) { closed(done) }
     }
     static func send(_ command: String) {
@@ -114,10 +114,13 @@ func diskHolders() -> [Int32]? {
                     }
                     audit("cold-after") { after in
                         if !after { patchReply(nonce,nil,"Post-apply audit failed"); return }
-                        if mode == "fault" {
-                            record("faultInjectedAfterRealApply",true)
-                            patchReply(nonce,nil,"QA injected post-apply response fault (sealed payload unchanged)")
-                        } else { patchReply(nonce,receipt,nil) }
+                        audit("cold-restarted") { restarted in
+                            guard restarted else { patchReply(nonce,nil,"Same-cold-boot daemon replacement failed"); return }
+                            if mode == "fault" {
+                                record("faultInjectedAfterRealApply",true)
+                                patchReply(nonce,nil,"QA injected post-apply response fault (sealed payload unchanged)")
+                            } else { patchReply(nonce,receipt,nil) }
+                        }
                     }
                 }
             }
@@ -161,7 +164,7 @@ func diskHolders() -> [Int32]? {
     connect()
 }
 @MainActor func audit(_ name:String,_ done:@escaping (Bool)->Void) {
-    guard let script = try? String(contentsOf:URL(fileURLWithPath:env["WIZARD_HEADLESS_AUDIT"]!),encoding:.utf8) else { done(false); return }
+    guard let script = try? String(contentsOf:URL(fileURLWithPath:env[name == "cold-restarted" ? "WIZARD_HEADLESS_RESTART_AUDIT" : "WIZARD_HEADLESS_AUDIT"]!),encoding:.utf8) else { done(false); return }
     shell(script, timeout: 360) { text in
         guard let text, let line = text.split(separator:"\n").first(where:{$0.hasPrefix("HEADLESS_AUDIT ")}),
               let data = String(line.dropFirst("HEADLESS_AUDIT ".count)).data(using:.utf8),

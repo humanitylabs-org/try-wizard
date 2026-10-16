@@ -152,6 +152,8 @@ def main():
         audit_script+=f'm=types.ModuleType({name!r});exec(base64.b64decode({encoded!r}),m.__dict__);sys.modules[{name!r}]=m\n'
     audit_script+='exec(compile(base64.b64decode('+repr(base64.b64encode((HERE/'guest_audit.py').read_bytes()).decode())+'),"headless_guest_audit","exec"))\n'
     shell=root/'audit.sh';shell.write_text("python3 - <<'HEADLESS_PY'\n"+audit_script+'HEADLESS_PY\n')
+    restart_shell=root/'restart-audit.sh'
+    restart_shell.write_text("HEADLESS_RESTART=1 python3 - <<'HEADLESS_PY'\n"+audit_script+'HEADLESS_PY\n')
     def gate(name,**data):
         report['gates'].append({'name':name,'passed':True,**data});save(root/'report.json',report)
     def prepare(name,source_disk):
@@ -167,7 +169,8 @@ def main():
         closed(data/'os/disk.img');legacy.assert_no_competing_wizard()
         out=root/label;out.mkdir(mode=0o700)
         environment=dict(os.environ,WIZARD_HEADLESS_DATA=str(data),WIZARD_HEADLESS_APP=str(candidate),
-            WIZARD_HEADLESS_MODE=mode,WIZARD_HEADLESS_OUTPUT=str(out),WIZARD_HEADLESS_AUDIT=str(shell))
+            WIZARD_HEADLESS_MODE=mode,WIZARD_HEADLESS_OUTPUT=str(out),WIZARD_HEADLESS_AUDIT=str(shell),
+            WIZARD_HEADLESS_RESTART_AUDIT=str(restart_shell))
         with (out/'driver.log').open('w') as log:
             child=subprocess.Popen([str(root/'build/headless-cold')],env=environment,stdout=log,stderr=log)
             save(out/'owned-process.json',{'pid':child.pid,'executable':str(root/'build/headless-cold'),'dataHome':str(data)})
@@ -207,10 +210,18 @@ def main():
         upgrade_dir=execute('upgrade',data,'02-upgrade')
         after=json.loads((upgrade_dir/'normal-after.json').read_text())
         gate('upgrade-preservation',comparison=compare(before,after,guard))
-        for label in ('cold-before','cold-after'):
+        for label in ('cold-before','cold-after','cold-restarted'):
             cold=json.loads((upgrade_dir/(label+'.json')).read_text())
             assert cold['coldBoot'] and cold['fence']['historyNotSaturated'] and cold['fence']['forbiddenExecutionEvents']==0
-        gate('real-cold-fence-before-through-apply',limits='Docker history verified unsaturated through post-apply audit; production post-commit denial witness; stopped confirmation follows')
+        restarted=json.loads((upgrade_dir/'cold-restarted.json').read_text())['daemonReplacement']
+        assert restarted['sameBoot'] and restarted['stockStartedAtUnchanged'] and restarted['persistedFenceUnchanged']
+        assert restarted['authorizationPluginActive'] and restarted['forceKillDisabled']
+        assert set(restarted['deniedRoutes'])=={'create','start','restart','unpause','exec'}
+        assert restarted['pidBefore']!=restarted['pidAfter']
+        gate('real-same-cold-boot-daemon-replacement',evidence=restarted)
+        assert after['normalBootRestoration']['originalDaemonBytesRestored']
+        gate('next-normal-boot-restores-original-policies-and-config',evidence=after['normalBootRestoration'])
+        gate('real-cold-fence-before-through-apply',limits='Unsaturated event rings before/after real same-boot daemon replacement; disabled policies and unchanged stock StartedAt; no continuous kernel trace')
         saved={name:sha(data/'updates'/name) for name in ('transaction.json','legacy-complete.json','guest-receipt.json')}
         repeat=execute('repeat',data,'03-repeat')
         assert saved=={name:sha(data/'updates'/name) for name in saved}

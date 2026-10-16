@@ -64,6 +64,57 @@ def wait_health(timeout=240):
         time.sleep(1)
 
 
+def same_boot_restart():
+    """QA-owned daemon replacement, only after a real committed cold migration."""
+    before = snapshot()  # retain the old daemon's bounded event evidence
+    assert before['coldBoot'] and before['fence']['phase'] == 'committed'
+    pid_before = run('systemctl','show','docker.service','--property=MainPID','--value')
+    assert int(pid_before) > 1
+    policy_before = POLICY.read_bytes()
+    daemon = Path('/etc/docker/daemon.json')
+    daemon_before = daemon.read_bytes()
+    ids = run('docker','ps','-aq').split()
+    cs = json.loads(run('docker','inspect',*ids))
+    stock = {c['Id']:c['State']['StartedAt'] for c in cs if c['Image']==STOCK}
+    assert stock, 'Expected retained stock transcriber to exercise internal restore'
+    for c in cs:
+        if c['Id'] in json.loads(policy_before)['containers']:
+            assert c['HostConfig']['RestartPolicy']=={'Name':'no','MaximumRetryCount':0}
+    # Default TimeoutStopSec could force-kill dockerd. Disable that escalation for
+    # this disposable guest service; a timeout is failure, never passing restart.
+    dropin = Path('/run/systemd/system/docker.service.d/headless-clean-restart.conf')
+    dropin.parent.mkdir(parents=True,exist_ok=True)
+    dropin.write_text('[Service]\nTimeoutStopSec=60\nSendSIGKILL=no\n')
+    try:
+        run('systemctl','daemon-reload')
+        run('systemctl','restart','docker.service')
+        pid_after = run('systemctl','show','docker.service','--property=MainPID','--value')
+        assert int(pid_after)>1 and pid_after!=pid_before
+        assert POLICY.read_bytes()==policy_before and daemon.read_bytes()==daemon_before
+        assert json.loads(run('docker','info','--format','{{json .Plugins.Authorization}}'))==['wizard-cold']
+        after_cs = json.loads(run('docker','inspect',*run('docker','ps','-aq').split()))
+        assert stock == {c['Id']:c['State']['StartedAt'] for c in after_cs if c['Image']==STOCK}
+        assert not any(c['Image']==STOCK and c['State']['Running'] for c in after_cs)
+        probes = [['create','--label','com.docker.compose.service=hermes-agent-engine',STOCK,'python3','-c','raise SystemExit(99)']]
+        for cid in stock:
+            probes.extend([[action,cid] for action in ('start','restart','unpause')])
+            probes.append(['exec',cid,'python3','-c','raise SystemExit(99)'])
+        for args in probes:
+            denied = subprocess.run(['docker',*args],capture_output=True,text=True,timeout=30)
+            assert denied.returncode!=0 and 'WIZARD_COLD_DENIED' in denied.stderr, args[0]
+        after = snapshot()
+        assert before['bootID']==after['bootID']
+        after['daemonReplacement']={'sameBoot':True,'pidBefore':int(pid_before),'pidAfter':int(pid_after),
+            'beforeFence':before['fence'],'afterFence':after['fence'],
+            'stockStartedAtUnchanged':True,'persistedFenceUnchanged':True,
+            'authorizationPluginActive':True,'deniedRoutes':sorted({p[0] for p in probes}),
+            'forceKillDisabled':True}
+        return after
+    finally:
+        dropin.unlink(missing_ok=True)
+        run('systemctl','daemon-reload')
+
+
 def snapshot():
     import headless_cold_config, headless_preservation
     cold = POLICY.exists() and 'wizard.cold=' in Path('/proc/cmdline').read_text()
@@ -138,7 +189,8 @@ def snapshot():
                 if actor.get('ID') in old_ids or attrs.get('image') in refs: forbidden.append(e)
         assert not forbidden, 'Old engine execution observed in real daemon event history'
         report['fence']={'phase':policy['phase'],'eventCount':len(events),'since':since,'until':int(until),
-                         'oldEngineRunning':False,'forbiddenExecutionEvents':0,'historyNotSaturated':True}
+                         'oldEngineRunning':False,'forbiddenExecutionEvents':0,'historyNotSaturated':True,
+                         'historyScope':'current daemon event ring; restart boundary audited separately'}
         if policy['phase']=='fenced':
             assert not any(c['State']['Running'] for c in containers), 'Unprimed cold target auto-started a container'
         elif policy['phase']=='committed':
@@ -150,6 +202,20 @@ def snapshot():
         assert isinstance(health, dict), 'Missing ready application health'
         report['health']={k:health.get(k) for k in ('upstream_reachable','queue')}
         if not report['unprimed']:
+            policy = json.loads(POLICY.read_text())
+            assert policy['phase']=='activated' and policy['normalBootID']!=policy['bootID']
+            assert Path('/etc/docker/daemon.json').read_bytes()==(POLICY.parent/'daemon.original.json').read_bytes()
+            assert 'wizard-cold' not in (json.loads(run('docker','info','--format','{{json .Plugins.Authorization}}')) or [])
+            retained = 0
+            for c in containers:
+                old = policy['containers'].get(c['Id'])
+                if old:
+                    assert c['Image']==old['image']
+                    assert c['HostConfig']['RestartPolicy']==old['restart']
+                    retained += 1
+            assert retained > 0
+            report['normalBootRestoration']={'phase':'activated','retainedPoliciesVerified':retained,
+                'originalDaemonBytesRestored':True,'coldPluginRemoved':True}
             assert health.get('upstream_reachable') is True
             assert health.get('queue',{}).get('liveness_available') is True
             assert not Path('/var/lib/wizard/managed/lease.json').exists(), 'Managed lease still held'
@@ -175,4 +241,4 @@ def snapshot():
     return report
 
 if __name__=='__main__':
-    print('HEADLESS_AUDIT '+json.dumps(snapshot(),sort_keys=True),flush=True)
+    print('HEADLESS_AUDIT '+json.dumps(same_boot_restart() if os.environ.get('HEADLESS_RESTART')=='1' else snapshot(),sort_keys=True),flush=True)

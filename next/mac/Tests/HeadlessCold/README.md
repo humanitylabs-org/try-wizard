@@ -12,7 +12,7 @@ then verify preservation, repeat admission, and stopped rollback on a second
 clone. Parent owns execution admission, independent result review, integration,
 and any release. This folder changes no production implementation.
 
-Production pin: `98049a6cdc7285e10cf8c66e41b769e40cffc508` (build 307).
+Production pin: `93b0b3b1c2666d5810405aa303c7780849f5880b` (build 307).
 Harness commit is separate. `build_and_run.py` builds a uniquely named native
 307 candidate from a separate clean checkout at that exact production pin, using
 the unchanged factory and frozen runtime archives. Public 306 and earlier 307
@@ -92,8 +92,19 @@ phases and cleanup checks pass. Failure exits nonzero and retains diagnostics.
 2. Cold production activation. Capture pre/post private-vsock audit and production
    guest receipt. Verify no stock engine running, unsaturated Docker event history
    since cold boot, production live-denial probes including post-commit, normal
-   health and maintenance release. Preserve serial logs before normal boot truncates
-   the production console path. Native source is unchanged.
+   health and maintenance release. Before shutdown, replace dockerd in the SAME
+   cold boot with `SendSIGKILL=no`; require a changed daemon PID, unchanged boot ID,
+   persisted AuthZ config, disabled retained restart policies, unchanged stock
+   StartedAt values, and rejected stock create/start/restart/unpause/exec routes.
+   Keep unsaturated event-ring evidence on both sides of replacement (not a
+   continuous kernel trace). The next normal boot must restore the exact original
+   daemon bytes and retained policies through the production offline prestart gate.
+   Preserve serial logs before normal boot truncates the production console path.
+   The wrapper also runs seven lightweight Swift scenarios through actual Host
+   stop/prepareUpdate and activation implementations (fake VZ I/O, accelerated
+   timeout, fixture bundle path). Cold and modern timeouts and apply failures must
+   retain the backup, refuse activation, never force, and ignore late stopped
+   callbacks; concurrent stop is failure and clean stop still succeeds.
 3. Preservation: production auth/env/model/token guard; compare field-hashed auth,
    exact config bytes after only the production scalar migration, existing session
    and message rows in every discovered SQLite DB, owner content trees (memories,

@@ -101,6 +101,58 @@ class DriverContracts(unittest.TestCase):
         self.assertNotIn("mac/'Tests/legacy061_probe.py'",source)
         self.assertIn("'--worker-lease','inherited'",source)
 
+    def test_real_restart_audit_rejects_missing_fence_or_stock_execution(self):
+        from unittest.mock import patch, Mock
+        import guest_audit
+        for failure in (None, 'same-pid', 'missing-plugin', 'stock-started', 'policy-drift', 'daemon-drift', 'allow-route', 'restart-timeout'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp); policy=root/'policy.json'; daemon=root/'daemon.json'; dropin=root/'runtime/dropin'
+                cid='a'*64
+                policy.write_text(json.dumps({'containers':{cid:{}}})); daemon.write_text('{"authorization-plugins":["wizard-cold"]}')
+                before={'coldBoot':True,'bootID':'same','fence':{'phase':'committed','forbiddenExecutionEvents':0,'historyNotSaturated':True}}
+                container={'Id':cid,'Image':guest_audit.STOCK,'State':{'StartedAt':'original','Running':False},'HostConfig':{'RestartPolicy':{'Name':'no','MaximumRetryCount':0}}}
+                replaced=False
+                def run(*args):
+                    nonlocal replaced
+                    if args[:2]==('systemctl','restart'):
+                        if failure=='restart-timeout': raise TimeoutError('daemon never stopped cleanly')
+                        replaced=True
+                        if failure=='policy-drift': policy.write_text('{}')
+                        if failure=='daemon-drift': daemon.write_text('{}')
+                        return ''
+                    if args[:2]==('systemctl','show'): return '100' if not replaced or failure=='same-pid' else '101'
+                    if args[:2]==('systemctl','daemon-reload'): return ''
+                    if args[:2]==('docker','ps'): return cid
+                    if args[:2]==('docker','info'): return '[]' if failure=='missing-plugin' else '["wizard-cold"]'
+                    if args[:2]==('docker','inspect'):
+                        c=copy.deepcopy(container)
+                        if replaced and failure=='stock-started': c['State']['StartedAt']='new'
+                        return json.dumps([c])
+                    raise AssertionError(args)
+                def path(value):
+                    if value=='/etc/docker/daemon.json': return daemon
+                    if value=='/run/systemd/system/docker.service.d/headless-clean-restart.conf': return dropin
+                    return Path(value)
+                with patch.object(guest_audit,'POLICY',policy), patch.object(guest_audit,'Path',side_effect=path), patch.object(guest_audit,'snapshot',return_value=copy.deepcopy(before)), patch.object(guest_audit,'run',side_effect=run), patch.object(guest_audit.subprocess,'run',return_value=Mock(returncode=0 if failure=='allow-route' else 1,stderr='WIZARD_COLD_DENIED')):
+                    if failure:
+                        with self.assertRaises((AssertionError,TimeoutError)): guest_audit.same_boot_restart()
+                    else:
+                        report=guest_audit.same_boot_restart()['daemonReplacement']
+                        self.assertTrue(report['sameBoot'] and report['forceKillDisabled'])
+                        self.assertEqual(set(report['deniedRoutes']),{'create','start','restart','unpause','exec'})
+                    self.assertFalse(dropin.exists())
+
+    def test_restart_and_normal_recovery_gates_are_mandatory(self):
+        audit=(HERE/'guest_audit.py').read_text(); driver=(HERE/'main.swift').read_text(); run=(HERE/'run.py').read_text()
+        self.assertIn('audit("cold-restarted")',driver)
+        self.assertIn('WIZARD_HEADLESS_RESTART_AUDIT',driver)
+        self.assertIn("for label in ('cold-before','cold-after','cold-restarted')",run)
+        self.assertIn("after['normalBootRestoration']['originalDaemonBytesRestored']",run)
+        self.assertIn("policy['phase']=='activated'",audit)
+        self.assertIn("c['HostConfig']['RestartPolicy']==old['restart']",audit)
+        self.assertIn("'productionReleaseID':PRODUCTION",run)
+        self.assertIn('"productionReleaseID":"'+build_driver.PRODUCTION+'"',driver)
+
     def test_failure_cannot_be_reported_as_acceptance(self):
         source=(HERE/'run.py').read_text()
         self.assertIn("assert rc==0 and result['success'] and result['stopped']",source)
