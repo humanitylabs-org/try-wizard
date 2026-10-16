@@ -52,7 +52,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   + `.full` disk attachment, cold PID1 kernel commandline, serial command, readonly
   sealed payload, vsock patch command, graceful stop, and status writes.
 * Entire `WizardGuestActivation`, `UpdateContract`, `DiskIdentity`, and
-  `GuestPatchCommand` files, unchanged.
+  `GuestPatchCommand` implementations, unchanged (activation's unused AppKit import
+  becomes Foundation; this adapter is recorded separately).
 * The actual stopped admission block from `WizardUpdater`: boot hashes, release
   validation, ownership/lease locks, APFS snapshot, cold transaction creation.
 * Exact `cold-config.py` and `stack-preservation.py` in the private guest auditor;
@@ -60,8 +61,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 
 Every source hash, extracted line range, adapter replacement, and generated Swift
 hash is recorded in `build/provenance.json`. Source checks run before compilation.
-The only production-source adapters are explicit data-root input, refusal of guest
-open-URL requests, and supplying the sealed installed bundle instead of CLI bundle
+The only production-source adapters are replacing the now-unused AppKit import
+with Foundation, explicit data-root input, refusal of guest open-URL requests, and
+supplying the sealed installed bundle instead of CLI bundle
 to stopped admission. `HostControl` replaces notification/AppKit launch transport
 with direct VZ calls; it does not implement migration, snapshot or rollback.
 The CLI signs with only Apple's virtualization entitlement.

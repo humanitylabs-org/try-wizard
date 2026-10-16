@@ -126,6 +126,9 @@ def main():
     locked=console_state(); assert locked['locked'], 'This acceptance requires the console to remain locked (no unlock requested)'
     original_prefs=prefs()
     root.mkdir(mode=0o700)
+    (root/'tmp').mkdir(mode=0o700)
+    os.environ['TMPDIR']=str(root/'tmp')
+    os.environ['CLANG_MODULE_CACHE_PATH']=str(root/'build/module-cache')
     report={'harnessSource':head,'productionReleaseID':PRODUCTION,'success':False,'gates':[],
         'evidenceLayer':'headless real Virtualization + exact production migration/activation; NOT native UI',
         'adapterConsent':True,'physicalClick':False,'GUIStarted':False,'workerLease':'inherited',

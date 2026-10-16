@@ -26,12 +26,13 @@ class DriverContracts(unittest.TestCase):
             self.assertIn('VZSharedDirectory(url: payload, readOnly: true)',vm)
             self.assertIn('func runGuestPatch',vm)
             joined='\n'.join(p.read_text() for p in out.glob('*.swift'))
-            for desktop in ('NSWorkspace.shared','NSApplication.shared','NSApp.','caffeinate','launchctl','osascript'):
+            for desktop in ('import AppKit','NSWorkspace.shared','NSApplication.shared','NSApp.','caffeinate','launchctl','osascript'):
                 self.assertNotIn(desktop,joined)
             self.assertNotIn('UserDefaults', (out/'Shared.swift').read_text())
             for name in ('WizardGuestActivation.swift','UpdateContract.swift','DiskIdentity.swift','GuestPatchCommand.swift'):
                 original = SOURCE/('next/mac/App/' if name=='WizardGuestActivation.swift' else 'next/mac/Shared/')/name
-                self.assertEqual((out/name).read_bytes(),original.read_bytes())
+                expected=original.read_text().replace('import AppKit','import Foundation')
+                self.assertEqual((out/name).read_text(),expected)
             for name,sha in manifest['generated'].items():
                 self.assertEqual(hashlib.sha256((out/name).read_bytes()).hexdigest(),sha)
             self.assertIn('try WizardGuestActivation.snapshotStoppedDisk()', (out/'Admission.swift').read_text())

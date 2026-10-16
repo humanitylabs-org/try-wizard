@@ -47,7 +47,9 @@ def generate(source, out):
     # No NSApplication, menu, notification, NSWorkspace or remote-shell TCP listener.
     host = originals[SOURCES[0]]
     listener = host[host.index('    // Guest -> Mac:'):host.index('    private var coldInput:')]
-    extract(SOURCES[0], 'import AppKit', '// MARK: - Menu bar', 'VM.swift', [(listener,
+    extract(SOURCES[0], 'import AppKit', '// MARK: - Menu bar', 'VM.swift', [
+        ('import AppKit', 'import Foundation', 'CLI VM slice uses Foundation types only; do not link AppKit'),
+        (listener,
         '    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool { return false }\n\n',
         'Refuse guest URL-opening I/O instead of invoking desktop NSWorkspace')])
     shared = originals[SOURCES[1]]
@@ -56,7 +58,14 @@ def generate(source, out):
     (out/'Shared.swift').write_text(shared.replace(old,new))
     manifest['adapters'].append({'destination':'Shared.swift','reason':'Explicit isolated data root; no preference reads/writes','old':old,'new':new})
     for name in SOURCES[2:6]:
-        shutil.copyfile(source/name, out/Path(name).name)
+        text = originals[name]
+        if name.endswith('/WizardGuestActivation.swift'):
+            assert text.count('import AppKit') == 1
+            text = text.replace('import AppKit','import Foundation')
+            manifest['adapters'].append({'destination':Path(name).name,
+                'reason':'Activation uses only Foundation types; implementation unchanged',
+                'old':'import AppKit','new':'import Foundation'})
+        (out/Path(name).name).write_text(text)
     # Exact stopped-admission implementation after adapter-selected consent.
     # Only bundle input is redirected to the already sealed production app.
     full = originals[SOURCES[6]]
@@ -82,8 +91,10 @@ def main():
     if a.extract_only: return
     if not str(a.out.resolve()).startswith('/Volumes/ThalesMedia/'):
         raise RuntimeError('Compilation must use durable Thales external-volume worker')
+    (a.out/'module-cache').mkdir()
     cmd=['xcrun','swiftc','-O','-target','arm64-apple-macos14.0','-swift-version','5',
-         '-framework','AppKit','-framework','Virtualization','-framework','CryptoKit',
+         '-module-cache-path',str(a.out/'module-cache'),
+         '-framework','Foundation','-framework','Virtualization','-framework','CryptoKit',
          *map(str, sorted(a.out.glob('*.swift'))),'-o',str(a.out/'headless-cold')]
     subprocess.run(cmd,check=True)
     ent=Path(__file__).with_name('entitlements.plist')
