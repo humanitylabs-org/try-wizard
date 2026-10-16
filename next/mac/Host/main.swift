@@ -274,11 +274,16 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
     func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
     func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
-        guard let machine = vm, state == .running || state == .starting || state == .error else { completion?(); return }
+        guard let machine = vm else { completion?(); return }
+        guard state == .running || state == .starting || state == .error else {
+            // A concurrent shutdown is not evidence that the disk is stopped.
+            onTimeout?(); return
+        }
         cancelColdSerialWait()
         state = .stopping
         log("stopping Wizard OS")
         var finished = false
+        var timedOut = false
         let done = { [weak self] in
             guard !finished, self?.vm === machine else { return }
             finished = true
@@ -286,7 +291,8 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             self?.cleanupColdSerial()
             self?.vm = nil; self?.socketDevice = nil
             self?.state = .stopped
-            completion?()
+            // A late guest stop must not overwrite a terminal update failure.
+            if !timedOut { completion?() }
         }
         stopCompletion = done
         // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
@@ -301,6 +307,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
             guard !finished else { return }
             if !forceOnTimeout {
+                timedOut = true
                 log("update clean shutdown timed out; keeping prior Host, no forced VM stop")
                 try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "Clean shutdown timed out"], WizardUpdate.response)
                 onTimeout?()
@@ -651,7 +658,11 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stopWhenIdle: (String?) -> Void = { [weak self] reason in
             guard let self else { return }
             if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
-            self.vm.stop(forceOnTimeout: WizardShared.coldBootstrapToken != nil, onTimeout: { if WizardShared.coldBootstrapToken == nil { WizardUpdate.releaseMaintenance(nonce) }; self.preparingUpdate = false }) {
+            self.vm.stop(forceOnTimeout: false, onTimeout: {
+                try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Clean shutdown not confirmed; rollback disk retained"], WizardUpdate.response)
+                if WizardShared.coldBootstrapToken == nil { WizardUpdate.releaseMaintenance(nonce) }
+                self.preparingUpdate = false
+            }) {
                 try? WizardUpdate.write(["nonce": nonce, "state": "stopped", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path], WizardUpdate.response)
                 self.quitting = true
                 NSApp.terminate(nil)
