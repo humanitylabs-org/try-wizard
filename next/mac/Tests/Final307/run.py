@@ -190,7 +190,8 @@ def main():
             r['gates'][name] = {'passed':False,'error':repr(ex)}
             if name.startswith('exact307-'):
                 for pid,cmd in owned_processes(Path(s['testApp'])):
-                    sample=run(['sample',str(pid),'2','-file',root/(name+'-'+str(pid)+'.sample.txt')],timeout=10,check=False)
+                    try: run(['sample',str(pid),'2','-file',root/(name+'-'+str(pid)+'.sample.txt')],timeout=10,check=False)
+                    except Exception as sample_error: r['gates'][name]['sampleError']=repr(sample_error)
                 (root/(name+'-processes.txt')).write_text(run(['ps','-axo','pid=,command='],text=True).stdout)
         save()
     def logged(name, argv, timeout=180):
@@ -319,7 +320,7 @@ def main():
             (data/'os/manifest.json').write_text('{"version":"0.3.0"}')
             notify('switch 1')
             capture['legacyRefusal']=wait(lambda:(q if (q:=state()).get('phase')=='busy' and q.get('recording') else False),10,'exact307 real recording legacy admission refusal')
-            assert not (data/'updates/legacy-pre-upgrade.img').exists() and not (data/'updates/maintenance.json').exists()
+            assert not (data/'updates/previous-disk.img').exists() and not (data/'updates/maintenance-lease.json').exists()
             capture['pause']=command('pause'); capture['resume']=command('resume')
             assert capture['pause']['paused'] is True and capture['resume']['paused'] is False
             capture['stop']=command('stop'); wait(lambda:state().get('recording') is False,15,'capture stop')
@@ -369,6 +370,26 @@ def main():
     try: stop_owned()
     except Exception as ex: r['cleanupError']=repr(ex)
     gate('exact307-direct-Host-IPC',host_ipc)
+    def production_host_launch():
+        # A new diagnostic witness is REQUIRED before the one production retry:
+        # exact Host has just read/written this external volume and exited by IPC.
+        assert r['gates']['exact307-direct-Host-IPC']['passed'], 'No new direct-Host witness; do not retry known stalled transport'
+        assert server is not None and (root/'prefs-before.plist').exists() and not mvp_processes()
+        if (data/'os').exists(): (data/'os').rename(root/'consent-only-os')
+        assert not (data/'os').exists(), 'No VM ever starts in this transport acceptance'
+        values=props() or {}; values['activeBackend']=0; apply(values)
+        pid=launch()
+        wait(lambda:state().get('pid')==pid and state().get('build')=='307',30,'exact307 App before production Host transport')
+        notify('update-host-start') # Calls unchanged production HostControl.ensureRunning/NSWorkspace.
+        status=wait(lambda:(v if (v:=read(data/'host-status.json')).get('state')=='notInstalled' and v.get('build')=='307' and v.get('dataHome')==str(data) else False),25,'one production NSWorkspace no-VM external-data Host launch')
+        assert state().get('hostRunning') is True
+        assert any(p==status['pid'] and '/Wizard Host.app/Contents/MacOS/Wizard Host' in cmd for p,cmd in owned_processes(app))
+        logged('workspace-host-ipc',[fixture,root/'policy-data','host-command','quit'],10)
+        wait(lambda:state().get('hostRunning') is False,20,'production-launched Host clean IPC exit')
+        stop_owned()
+        return {'status':status,'newWitness':'prior exact307 direct inherited Host external-data status + clean IPC exit',
+                'scope':'Actual installed307 App QA invokes production NSWorkspace launch; Host external-data read/write and IPC; no VM boot, physical mouse or permission-dialog claim'}
+    gate('exact307-production-NSWorkspace-Host',production_host_launch)
     try:
         stop_owned()
         if before is not None:
@@ -389,7 +410,10 @@ def main():
         r['foreign78546Unchanged']=r['foreign78546After']==foreign_before
         if not r['foreign78546Unchanged']: r['cleanupVerified']=False
         # Gate remains explicit even if this entire bounded continuation passes.
-        r['remainingAcceptance']=['Exact production NSWorkspace App→Host external-volume launch is NOT certified by direct inherited Host IPC. Prior locked-console transport was not retried.']
+        transport=r['gates'].get('exact307-production-NSWorkspace-Host',{}).get('passed',False)
+        r['launchServicesHostAcceptance']='actual production NSWorkspace no-VM external-data transport passed' if transport else 'not certified; see bounded transport gate and new-witness condition'
+        r['remainingAcceptance']=[] if transport else ['Production NSWorkspace App→Host external-volume transport still unproved. Direct IPC is not a substitute; inspect owned samples, no blind retry or unlock request.']
+        r['readyForParentReview']=bool(r.get('cleanupVerified') and all(g['passed'] for g in r['gates'].values()))
         r['readyForPublication']=False
         save()
     print(json.dumps({'result':str(root/'result.json'),'gates':{k:v['passed'] for k,v in r['gates'].items()},'published':False,'readyForPublication':False}))
