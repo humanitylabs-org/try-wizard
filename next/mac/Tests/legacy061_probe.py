@@ -229,7 +229,26 @@ def main():
         for host in [True, False]:
             for pid, command in rows:
                 if ('/Wizard Host.app/' in command) == host:
-                    run([a.quit_helper, pid], timeout=20)
+                    quit_result = run([a.quit_helper, pid], timeout=20, check=False)
+                    if quit_result.returncode and not host:
+                        # A pre-VM GUI stuck in file access has no guest to stop.
+                        # Never force a Host or an app with any live owned Host.
+                        current = app_processes(app)
+                        if not any(p == pid for p, _ in current):
+                            continue
+                        exact = str(app / 'Contents/MacOS/Wizard')
+                        if any('/Wizard Host.app/' in cmd for _, cmd in current):
+                            raise RuntimeError('Owned Host still running; force cleanup refused')
+                        actual = subprocess.check_output(['ps','-p',str(pid),'-o','command='],text=True).strip()
+                        fds = subprocess.run(['lsof','-p',str(pid),'-Fn'],capture_output=True,text=True)
+                        assert actual == exact and fds.returncode == 0 and 'disk.img' not in fds.stdout
+                        os.kill(pid, signal.SIGTERM)
+                        time.sleep(1)
+                        if any(p == pid for p,_ in app_processes(app)):
+                            os.kill(pid, signal.SIGKILL)
+                        evidence.setdefault('preVMAppCleanup', []).append(pid)
+                    elif quit_result.returncode:
+                        raise RuntimeError('Owned Host refused graceful shutdown')
             deadline = time.monotonic() + 100
             while any(('/Wizard Host.app/' in command) == host for _, command in app_processes(app)):
                 if time.monotonic() >= deadline:
@@ -241,7 +260,16 @@ def main():
         evidence.setdefault("prelaunchDisjointProcesses", []).append(assert_no_competing_wizard())
         launched.append(app)
         uid = str(os.getuid())
-        run(['sudo', '-n', 'launchctl', 'asuser', uid, 'sudo', '-n', '-u', getpass.getuser(), 'open', '-n', '-g', '-j', app])
+        # Keep the authorized SSH/worker responsibility chain. LaunchServices
+        # detaches it and can block the old app on removable-volume consent.
+        # This executes the unchanged signed app, not a substitute migration.
+        log = (a.root / (label + '-native.log')).open('w')
+        child = subprocess.Popen(['sudo', '-n', 'launchctl', 'asuser', uid,
+                                  'sudo', '-n', '-u', getpass.getuser(),
+                                  str(app / 'Contents/MacOS/Wizard')], stdout=log, stderr=subprocess.STDOUT)
+        log.close()
+        evidence.setdefault('directLaunches', []).append({'label':label,'pid':child.pid})
+        save()
         deadline = time.monotonic() + (1800 if a.candidate_source and app == a.new_app else 240)
         consent_clicked = False
         while time.monotonic() < deadline:
