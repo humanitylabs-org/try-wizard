@@ -235,7 +235,7 @@ var signalSources: [DispatchSourceSignal] = []
 for sig in [SIGTERM,SIGINT] {
     signal(sig,SIG_IGN)
     let source = DispatchSource.makeSignalSource(signal:sig,queue:.main)
-    source.setEventHandler { end("Worker cancellation") }; source.resume(); signalSources.append(source)
+    source.setEventHandler { Task { @MainActor in end("Worker cancellation") } }; source.resume(); signalSources.append(source)
 }
 DispatchQueue.main.async { begin() }
 DispatchQueue.main.asyncAfter(deadline:.now()+2100) { end("Bounded CLI deadline") }
