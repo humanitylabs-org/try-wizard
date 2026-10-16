@@ -52,14 +52,17 @@ class Contracts(unittest.TestCase):
         self.assertIn("r['readyForPublication']=False",text)
     def test_notification_uses_gui_bootstrap(self):
         import os
-        with patch.object(m, 'run') as call:
+        with patch.object(m, 'run') as call, patch.object(m,'NATIVE_NOTIFIER','/tested/native-notifier'):
             m.notify('update-state')
         argv = call.call_args.args[0]
         self.assertEqual(argv[:5], ['sudo','-n','launchctl','asuser',str(os.getuid())])
-        self.assertIn('osascript', argv)
-        self.assertIn('postNotificationNameObjectUserInfoDeliverImmediately', argv[-1])
-        self.assertIn('update-state', argv[-1])
-        self.assertNotIn('System Events', argv[-1])
+        self.assertEqual(argv[-2:], ['/tested/native-notifier','update-state'])
+        self.assertNotIn('osascript',argv)
+    def test_native_notifier_hash_mismatch_refuses(self):
+        with patch.object(m,'sha',return_value='actual'):
+            with self.assertRaises(AssertionError): m.configure_notifier('/fixture','different')
+    def test_host_sender_drains_runloop(self):
+        self.assertIn('ProductionHostIPC.send(CommandLine.arguments[3]); RunLoop.current.run(until:',P.read_text())
     def test_package_reuse_pins_report_and_bytes(self):
         text=P.read_text()
         self.assertIn("assert sha(previous_path) == s['reusePackageReportSHA256']", text)

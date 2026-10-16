@@ -91,15 +91,23 @@ def console():
     return bool(x.get('IOConsoleLocked') or any(u.get('CGSSessionScreenIsLocked') for u in x.get('IOConsoleUsers', [])))
 
 
+NATIVE_NOTIFIER = None
+
+
+def configure_notifier(path, digest):
+    global NATIVE_NOTIFIER
+    assert sha(path) == digest, 'Native notifier differs from the acknowledged probe'
+    NATIVE_NOTIFIER = path
+
+
 def notify(command):
-    # Foundation distributed notifications; NOT Apple Events/System Events.
-    code = 'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately('+json.dumps(DOMAIN+'.qa')+','+json.dumps(command)+',null,true);'
-    # GUI applications receive DNC messages in gui/<uid>, not the SSH worker's
-    # bootstrap. This is the same route used by the accepted build306 harness.
+    # Real probe: native Swift delivered; JXA returned zero but never acknowledged,
+    # even with a drained runloop. Keep the accepted native sender hash-pinned.
+    assert NATIVE_NOTIFIER is not None
     import pwd
     uid = os.getuid()
     run(['sudo', '-n', 'launchctl', 'asuser', str(uid), 'sudo', '-n', '-u',
-         pwd.getpwuid(uid).pw_name, 'osascript', '-l', 'JavaScript', '-e', code], timeout=10)
+         pwd.getpwuid(uid).pw_name, NATIVE_NOTIFIER, command], timeout=10)
 
 
 def wait(predicate, seconds, label):
@@ -158,6 +166,7 @@ def main():
     ap.add_argument('--spec', required=True, type=Path)
     ap.add_argument('--preflight-only', action='store_true')
     a = ap.parse_args(); s = read(a.spec)
+    configure_notifier(s['nativeNotifier'], s['nativeNotifierSHA256'])
     source = Path(s['productionDir']); candidate = Path(s['candidateApp']); root = Path(s['evidenceRoot'])
     harness = Path(__file__).resolve().parents[4]
     assert s['productionSource'] == PRODUCTION
@@ -214,7 +223,7 @@ def main():
     def appkit_policy():
         text = (mac/'App/main.swift').read_text()
         ipc = function(text, 'static func send(_ command: String)')
-        (root/'main.swift').write_text('import Foundation\nimport AppKit\nenum ProductionHostIPC {\n'+ipc+'\n}\nif CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "host-command" { ProductionHostIPC.send(CommandLine.arguments[3]) } else { MainActor.assumeIsolated { exercise() } }\n')
+        (root/'main.swift').write_text('import Foundation\nimport AppKit\nenum ProductionHostIPC {\n'+ipc+'\n}\nif CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "host-command" { ProductionHostIPC.send(CommandLine.arguments[3]); RunLoop.current.run(until: Date().addingTimeInterval(0.25)) } else { MainActor.assumeIsolated { exercise() } }\n')
         logged('compile-policy',['xcrun','swiftc','-swift-version','5','-target','arm64-apple-macos14.0',
                mac/'App/WizardUpdater.swift',Path(__file__).with_name('fixture.swift'),root/'main.swift',
                '-F',s['sparkle'],'-framework','Sparkle','-framework','AppKit','-Xlinker','-rpath','-Xlinker',s['sparkle'],'-o',fixture],240)
