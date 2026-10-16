@@ -107,6 +107,7 @@ import Darwin
             try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
             guard leaseFD >= 0, flock(leaseFD, LOCK_EX | LOCK_NB) == 0 else { throw WizardUpdate.error("Another upgrade owns this disk") }
+            guard !HostControl.isRunning, !HostControl.hasForeignRunner, !isRecording() else { throw WizardUpdate.error("Activity changed during validation; disk untouched") }
             preparing = true; activatingGuest = true; onFreeze(true)
             try WizardGuestActivation.snapshotStoppedDisk()
             let nonce = UUID().uuidString

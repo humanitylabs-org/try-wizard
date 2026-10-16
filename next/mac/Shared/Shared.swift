@@ -40,6 +40,11 @@ enum WizardShared {
               let path = journal["appPath"] as? String else { return nil }
         let app = URL(fileURLWithPath: path)
         let nonce = journal["nonce"] as? String ?? ""
+        if journal["kind"] as? String == "legacy-cold" {
+            guard journal["diskIdentity"] as? String == diskIdentity,
+                  let release = try? WizardRelease.read(app),
+                  journal["releaseID"] as? String == release.releaseID else { return nil }
+        }
         if let cached = validatedGuestPayload, cached.app == path, cached.nonce == nonce { return cached.url }
         guard let release = try? WizardRelease.read(app), release.guestPatch == "mac-stack-v1",
               (try? release.validate(app)) != nil else { return nil }

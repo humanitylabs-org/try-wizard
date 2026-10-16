@@ -3,7 +3,11 @@ import Darwin
 
 // Link the production WizardGuestActivation.swift, replacing only its I/O peers.
 // A real APFS clone/rename checks rollback; no VM or user data is used here.
+final class WizardDiskOwnership { func acquire() throws {} ; func release() {} }
 enum WizardShared {
+    static var cold = false
+    static var coldBootstrapToken: String? { cold && WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-activating" ? "test-cold" : nil }
+    static var logsDir: URL { supportDir }
     static let supportDir = URL(fileURLWithPath: CommandLine.arguments[1])
     static var osDir: URL { supportDir.appendingPathComponent("os") }
     static var statusFile: URL { supportDir.appendingPathComponent("host-status.json") }
@@ -29,6 +33,7 @@ enum WizardUpdate {
 }
 @MainActor enum HostControl {
     static var isRunning = false
+    static var hasForeignRunner = false
     static var failAfterApply = false
     static func ensureRunning() {
         isRunning = true
@@ -52,14 +57,16 @@ enum WizardUpdate {
         } else { fatalError("unexpected command") }
     }
 }
-@MainActor func scenario(_ fail: Bool) throws {
+@MainActor func scenario(_ fail: Bool, cold: Bool = false) throws {
+    WizardShared.cold = cold
     HostControl.isRunning = false; HostControl.failAfterApply = fail
     WizardUpdate.heldHealthCalls = 0; WizardUpdate.normalHealthCalls = 0
     try? FileManager.default.removeItem(at: WizardShared.supportDir)
     try FileManager.default.createDirectory(at: WizardShared.osDir, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true)
     try Data("ORIGINAL".utf8).write(to: WizardShared.osDir.appendingPathComponent("disk.img"))
-    try WizardUpdate.write(["applyGuest": true, "phase": "installing"], WizardUpdate.journal)
+    try WizardUpdate.write(["applyGuest": true, "phase": "installing", "kind": cold ? "legacy-cold" : "modern"], WizardUpdate.journal)
+    if cold { try "WIZARD_COLD_FENCED".write(to: WizardShared.logsDir.appendingPathComponent("console.log"), atomically: true, encoding: .utf8) }
     try WizardUpdate.write(["token": "test-owner"], WizardUpdate.maintenanceJournal)
     try WizardGuestActivation.snapshotStoppedDisk()
     var done = false; var result: String?
@@ -70,14 +77,17 @@ enum WizardUpdate {
     while !done && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
     precondition(done, "bounded completion")
     precondition(WizardUpdate.heldHealthCalls == 0, "never demand live-agent health under held admission")
-    precondition(WizardUpdate.normalHealthCalls > 0, "require real normal-runtime health")
+    precondition(fail && cold ? WizardUpdate.normalHealthCalls == 0 : WizardUpdate.normalHealthCalls > 0, "cold rollback stays stopped; success requires normal health")
+    if fail && cold { precondition(!HostControl.isRunning) }
     precondition(!FileManager.default.fileExists(atPath: WizardUpdate.maintenanceJournal.path))
     let disk = try String(contentsOf: WizardShared.osDir.appendingPathComponent("disk.img"), encoding: .utf8)
     precondition(disk == (fail ? "ORIGINAL" : "APPLIED"))
     precondition(fail ? result?.contains("Prior guest restored") == true : result == nil)
-    print(fail ? "POST_APPLY_ROLLBACK_SAME_DISK_PASS" : "HELD_APPLY_NORMAL_RECONNECT_PASS")
+    print((cold ? "COLD_" : "") + (fail ? "POST_APPLY_ROLLBACK_SAME_DISK_PASS" : "HELD_APPLY_NORMAL_RECONNECT_PASS"))
 }
 try MainActor.assumeIsolated {
     try scenario(false)
     try scenario(true)
+    try scenario(false, cold: true)
+    try scenario(true, cold: true)
 }

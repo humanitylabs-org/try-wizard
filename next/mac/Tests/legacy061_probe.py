@@ -78,6 +78,38 @@ def http(path):
     return {'status': status, 'json': parsed, 'bodySHA256': hashlib.sha256(body).hexdigest()}
 
 
+def stopped_content(disk, scratch):
+    """Read the stopped clone through a read-only ext4 reader; retain hashes only.
+    Never mount/boot the baseline, and never execute anything from the guest.
+    """
+    import sqlite3
+    scratch.mkdir(mode=0o700)
+    base=['/opt/homebrew/bin/docker','--context','colima-wb','run','--rm','--network','none','--read-only',
+          '-v',str(disk)+':/disk:ro','--entrypoint','/usr/sbin/debugfs','wizard-os-base:0.3.0']
+    def read(command):
+        return subprocess.run(base+['-R',command,'/disk'],check=True,capture_output=True,timeout=40).stdout
+    out={'databases':{}}
+    guest='/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data/'
+    try:
+        for name in ('state.db','response_store.db','shared-state.db','kanban.db','runs_idempotency.db'):
+            data=read('cat '+guest+name)
+            if not data: continue
+            path=scratch/name;path.write_bytes(data);os.chmod(path,0o600)
+            wal=read('cat '+guest+name+'-wal')
+            if wal: path.with_name(name+'-wal').write_bytes(wal)
+            with sqlite3.connect(path) as db:
+                tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for table in ('sessions','messages'):
+                    if table in tables:
+                        rows=list(db.execute('SELECT * FROM '+table+' ORDER BY id'))
+                        out['databases'][name+'/'+table]={'count':len(rows),'rowsSHA256':hashlib.sha256(json.dumps(rows,default=lambda b:b.hex(),sort_keys=True).encode()).hexdigest()}
+        assert out['databases']['state.db/messages']['count'] > 0, 'Original used-disk chats missing'
+        listing=read('ls -p /home/wizard/runtipi/app-data/wizardapps').decode()
+        out['installedAppDataDirectories']=sorted(line.split('/')[5] for line in listing.splitlines() if len(line.split('/'))>5 and line.split('/')[5] not in ('.','..'))
+        return out
+    finally: shutil.rmtree(scratch)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True)
@@ -88,6 +120,7 @@ def main():
     p.add_argument('--new-app', type=Path, required=True)
     p.add_argument('--quit-helper', type=Path, required=True)
     p.add_argument('--worker-lease', choices=['inherited'], required=True)
+    p.add_argument('--candidate-source', default='', help='build307 production candidate; empty retains the306 diagnostic')
     a = p.parse_args()
     assert os.uname().sysname == 'Darwin', 'Mac-only diagnostic'
     for path in [a.root, a.baseline_disk, a.boot_dir, a.old_app, a.quit_helper]:
@@ -102,7 +135,7 @@ def main():
         assert info['CFBundleShortVersionString'] == version
         assert info['CFBundleIdentifier'] == DOMAIN
     release = read_json(a.new_app / 'Contents/Resources/wizard-release.json')
-    assert release['releaseID'] == FROZEN and release['build'] == '306'
+    assert release['releaseID'] == (a.candidate_source or FROZEN) and release['build'] == ('307' if a.candidate_source else '306')
     assert not any('/Contents/MacOS/Wizard' in command for _, command in process_rows()), 'A Wizard app or Host is already running; do not touch shared preferences'
     assert not app_processes(a.new_app) and not app_processes(a.old_app), 'An app is already running'
     for port in [48000, 48023, 48030]:
@@ -116,8 +149,8 @@ def main():
     data = a.root / 'data'
     files = a.root / 'Files'
     old_copy = a.old_launch_app
-    evidence = {'schema': 1, 'source': FROZEN, 'phase': 'preflight',
-                'purpose': 'unprimed direct replacement gap reproduction',
+    evidence = {'schema': 1, 'source': a.candidate_source or FROZEN, 'phase': 'preflight',
+                'purpose': 'native consented cold candidate' if a.candidate_source else 'unprimed direct replacement gap reproduction',
                 'upgradeAccepted': False, 'private305Used': False,
                 'manualMigrationUsed': False, 'transactionPrimed': False,
                 'maxQAVMs': 1, 'memoryMiB': 4096, 'leaseMode': 'durable-worker-inherited'}
@@ -157,13 +190,25 @@ def main():
         launched.append(app)
         uid = str(os.getuid())
         run(['sudo', '-n', 'launchctl', 'asuser', uid, 'sudo', '-n', '-u', getpass.getuser(), 'open', '-n', '-g', '-j', app])
-        deadline = time.monotonic() + 240
+        deadline = time.monotonic() + (1800 if a.candidate_source and app == a.new_app else 240)
+        consent_clicked = False
         while time.monotonic() < deadline:
+            if a.candidate_source and app == a.new_app:
+                ui = read_json(data/'updates/ui.json')
+                if ui.get('phase') == 'failed': raise RuntimeError('Candidate refused: '+ui.get('message',''))
+                if not consent_clicked and not (data/'updates/transaction.json').exists():
+                    rows = [(pid,cmd) for pid,cmd in app_processes(app) if '/Wizard Host.app/' not in cmd]
+                    if len(rows)==1:
+                        script='tell application "System Events" to tell (first application process whose unix id is '+str(rows[0][0])+') to click button "Upgrade existing Wizard" of window 1'
+                        clicked=run(['osascript','-e',script],check=False,timeout=10)
+                        if clicked.returncode==0:
+                            consent_clicked=True; evidence.setdefault('nativeConsentClicks',[]).append(label); save()
             state = read_json(data / 'host-status.json')
             if state.get('state') == 'running':
                 try:
                     health = http('/wizard/health')
-                    if health['status'] == 200:
+                    completed = not a.candidate_source or app != a.new_app or (data/'updates/legacy-complete.json').exists()
+                    if health['status'] == 200 and completed:
                         evidence[label] = {'host': state, 'health': health,
                                            'runtimeActivity': http('/wizard/v1/runtime/activity')}
                         save()
@@ -199,17 +244,34 @@ def main():
         start(old_copy, 'original061')
         stop(old_copy)
         evidence['phase'] = 'original-stopped'; save()
-        # Normal launch of exact public306 against the same original, unprimed disk.
-        start(a.new_app, 'direct306')
+        if a.candidate_source: evidence['preservationBefore'] = stopped_content(data/'os/disk.img', a.root/'before')
+        # No transaction priming: the real app asks consent and performs the bootstrap.
+        start(a.new_app, 'candidate307' if a.candidate_source else 'direct306')
         evidence['transactionAfterDirectReplacement'] = read_json(data / 'updates/transaction.json')
         evidence['maintenanceJournalAfterReplacement'] = read_json(data / 'updates/maintenance-lease.json')
         evidence['filesSelectionPreserved'] = (data / 'files-folder.json').read_text() == selection
         evidence['sharedSentinelPreserved'] = (files / 'preserve.txt').read_text() == 'LEGACY061_DIRECT_REPLACEMENT_SENTINEL\n'
         assert evidence['filesSelectionPreserved'] and evidence['sharedSentinelPreserved']
-        assert not evidence['transactionAfterDirectReplacement'], 'Behavior changed: investigate rather than claim this old gap'
-        assert evidence['direct306']['runtimeActivity']['status'] == 404, 'Baseline is not the expected unprimed guest'
-        evidence['gapReproduced'] = True
-        evidence['phase'] = 'legacy-bootstrap-blocker-reproduced'
+        if a.candidate_source:
+            receipt=read_json(data/'updates/guest-receipt.json');witness=receipt.get('cold_bootstrap',{})
+            assert witness.get('noOldEngine') and witness.get('forbiddenStartDenied') and witness.get('oldImageRecreationDeniedAfterMigration')
+            assert receipt['permanent_identity_credentials_preserved'] and receipt['configured_model_preserved']
+            assert evidence['nativeConsentClicks']==['candidate307']
+            evidence['coldWitness']=witness; evidence['candidateTested']=True
+            stop(a.new_app)
+            evidence['preservationAfter']=stopped_content(data/'os/disk.img',a.root/'after')
+            assert evidence['preservationBefore']==evidence['preservationAfter'], 'Stored chats/apps changed'
+            before_journal=sha(data/'updates/transaction.json')
+            start(a.new_app,'repeat307')
+            assert before_journal==sha(data/'updates/transaction.json')
+            assert evidence['nativeConsentClicks']==['candidate307']
+            evidence['repeatLaunchNoOp']=True;evidence['successPathAccepted']=True
+            evidence['phase']='cold-candidate-success-path-passed-not-full-release-acceptance'
+        else:
+            assert not evidence['transactionAfterDirectReplacement'], 'Behavior changed: investigate rather than claim this old gap'
+            assert evidence['direct306']['runtimeActivity']['status'] == 404, 'Baseline is not the expected unprimed guest'
+            evidence['gapReproduced'] = True
+            evidence['phase'] = 'legacy-bootstrap-blocker-reproduced'
     except Exception as error:
         evidence['phase'] = 'failed'
         evidence['error'] = type(error).__name__ + ': ' + str(error)

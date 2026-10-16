@@ -1,85 +1,100 @@
-# Legacy 0.6.1 bootstrap: admission stop checkpoint
+# Legacy 0.6.1 cold-bootstrap candidate
 
-**Not implemented / not release acceptance.** This branch adds a bounded diagnostic
-and regression checks, not build307 and not a migration that bypasses admission.
-The frozen public306 production sources and payload are unchanged.
+**Production source implemented; native compilation and VM acceptance pending.**
+This replaces the earlier diagnostic-only checkpoint. It does not claim build307
+exists yet, change public306/factory0.4.0, or grant successor publication authority.
+Parent retains independent review, actual VM acceptance and final publication.
 
-## Exact obstruction in frozen source
+## Implemented path
 
-1. `App/WizardUpdater.swift:179–203` recovers only an existing DataHome-bound
-   `installing` transaction. Replacing the 0.6.1 DMG does not create one. An empty
-   transaction therefore returns before activating the bundled guest payload.
-2. `Shared/Shared.swift:19–30` enables the payload only for a validated,
-   DataHome-bound `guest-activating` transaction. Writing that transaction would
-   enable the private vsock transport, but would **not** establish idle admission.
-3. `Host/main.swift:481–501` reacquires the maintenance lease before running the
-   fixed migration. `Shared/UpdateContract.swift:125–147` requires a real HTTP201
-   and `ok=true` from `/wizard/v1/maintenance`. The original guest has no such
-   route. HTTP404, a health sample or user consent cannot substitute for it.
-4. `Host/main.swift:523–524` permits an already stopped VM to stop without a
-   lease, but the next ordinary maintenance boot starts the original services.
-   It subsequently hits the missing-lease problem in step3. A stopped-disk
-   snapshot alone does not fence agent launch during that boot.
-5. `next/guest/STACK-UPGRADE.md` is a manually supervised maintenance recipe, not
-   an atomic bootstrap-admission protocol. The previous manual migration primed
-   the guest before private305→306 acceptance. Repeating it from a native button
-   would automate the same unsafe missing prerequisite, not close the gap.
+- `WizardWindowController.begin()` gates every selected-local boot (including a
+  switch from remote) through native one-time upgrade consent. Remote selection
+  is untouched. Existing/foreign Host, native capture or unknown boot hashes defer.
+- The App takes a cooperating owner lock, validates the installed app/payload and
+  original kernel/initrd pins, clones the stopped disk, and writes a DataHome,
+  release and disk-inode-bound transaction. The Host takes the same disk-owner
+  lock for its lifetime. No HTTP404-to-idle fallback was introduced.
+- The Host boots `init=/bin/sh`, not the old systemd default target. Its private
+  serial input invokes the authenticated read-only payload as PID1. Until that
+  helper succeeds, no systemd, Docker, user manager or old agent is started.
+- PID1 accepts only the inspected legacy Docker metadata format/packages/images.
+  It refuses running/paused/restarting container metadata, unknown images,
+  alternate runtimes, Swarm and unexpected daemon configuration. It saves all
+  original restart policies and turns every one off **before Docker starts**.
+- A fail-closed Docker AuthZ service is installed with readiness notification and
+  a Docker dependency. Internal daemon restore is handled by the offline restart
+  policy change, not falsely attributed to AuthZ. API start/restart/unpause/exec,
+  stock-image recreation and restart-policy escalation are denied. Only pinned
+  Runtipi infrastructure, its main socat companion, and the two BOM-pinned new
+  images may be started; the managed state mount is required on engine creation.
+- The existing managed executable lease is installed before these new images can
+  run. Systemd enters a dedicated cold target, without old default user services.
+  A real forbidden-start/restart/unpause/exec witness is required before migration;
+  old-image recreation is tried again after image load and Runtipi refresh.
+- The existing sealed migration gains `--cold-bootstrap`. It inspects the stopped
+  legacy engine rather than pretending it was running. Its managed SSH key
+  transform changes one YAML scalar and proves all other bytes/data unchanged;
+  it never invokes old Hermes or edits stock implementation. Existing modern mode
+  retains its CLI and user-service behavior.
+- The existing activation/rollback code stops the maintenance guest before normal
+  boot or restore. Cold rollback leaves the original disk **stopped**, rather than
+  booting the old unmanaged services. Unconfirmed shutdown never restores over a
+  live disk. The complete disk snapshot preserves original restart policies on
+  every rollback. Normal-health failure retains that snapshot and reports failure.
+- Successful migration verifies the new runtime and held lease, restores original
+  restart policies for retained containers and the exact prior daemon config for
+  normal boot. The normal managed admission release/health path is reused.
+  Completion records make repeat local launch a no-op.
 
-The packaged newer managed-maintenance implementation additionally rejects a
-running unmanaged stock engine. Installing just its HTTP endpoint onto the old
-service would not safely admit that runtime. Launch admission must be established
-before *any* legacy engine can start, or the old live runtime must provide an
-independently verified all-runtime retirement protocol.
+## Pin inspection actually performed
 
-## Smallest route worth implementing next
+The original used baseline was inspected through a read-only bind of the disk
+into the existing `wizard-os-base:0.3.0` debugfs reader. No baseline VM was booted
+or changed by that inspection. Observed:
 
-A dedicated **cold bootstrap**, not an HTTP404 fallback:
+- Docker CE `5:29.9.0-1~debian.13~trixie`; containerd `2.4.1-2~debian.13~trixie`.
+- `overlay2`, containerd snapshotter false, no configured alternate Docker root,
+  runtime, authorization plugin or live-restore setting.
+- Original Runtipi image ID
+  `sha256:bd2554bc739578346d04698d768d6d50621372533d4971b0215020ccf6fa4e78`.
+- The original stopped container service/image identities are explicit in
+  `next/guest/cold-bootstrap.py`; all had `Running=false`, `Paused=false`,
+  `Restarting=false`, `Pid=0` and `unless-stopped` policies. Stock main/transcriber
+  share image `sha256:666d6c659574fa09c1ea47b7ec5f03e8d2c35a8aa8055fe60c1e2fe3d3e03e9b`.
+- Both existing managed/legacy SSH key copies were present and had equal digests;
+  no key bytes were retained in the evidence/report.
 
-- Before `controller.begin()` starts the selected local VM, detect an unprimed
-  disk and obtain explicit native consent. Refuse another Host, capture or active
-  work. Retain DataHome, backend selection and the files-folder record.
-- Hold a single-owner disk lock, take the existing stopped-disk APFS snapshot,
-  and durably record the authenticated app/payload, disk identity and phase.
-- Boot the same disk in a dedicated maintenance mode that cannot start the old
-  Docker/user engines. The existing private vsock transport can carry a fixed
-  helper. **Unresolved safety seam:** prove startup inhibition remains effective
-  while the migration loads Docker images/reconfigures Runtipi, until the new
-  managed admission fence is installed. Merely masking Docker at initial boot is
-  insufficient because starting it later restores old containers.
-- Once that fence exists, run the sealed migration, reuse normal activation,
-  stopped-disk rollback and post-release health verification. Never mutate the
-  existing factory archive or core Hermes.
-- Only then build307 and run the real original0.6.1/guest0.3.0→307 success,
-  post-apply rollback, active/capture refusal and repeat-launch no-op matrix.
-  Parent owns review and promotion; no successor feed is published here.
+The public Moby v29.9.0 source URLs returned404. Do not substitute the inspected
+v28 restore source for evidence of the installed version. The exact installed
+Docker behavior, PID1/initrd handoff, AuthZ route coverage and actual Runtipi
+refresh remain load-bearing checks in the queued VM run. Fail closed on any
+mismatch; do not weaken the policy to make the test pass.
 
-## Runnable focused checks
+## Checks / parent submission
 
-`Tests/LegacyAdmission/main.swift` links the unchanged production
-`Shared/UpdateContract.swift` and intercepts only URL transport. It checks legacy
-missing-route, busy/unknown/malformed responses and modern success, plus active,
-queued, unknown-liveness and known-idle health. These are transport-fixture
-regressions, not evidence that the original guest can migrate.
+`next/guest/tests/test_cold_bootstrap.py` runs fast no-daemon policy, metadata and
+byte-preservation tests. `Tests/GuestActivation/main.swift` now includes modern
+and cold post-apply rollback/normal reconnect fixture scenarios. These are not
+VM acceptance.
 
-`Tests/legacy061_probe.py` boots only an APFS clone of the original used baseline
-with the original0.6.1 app, gracefully stops it, and launches exact public306
-against that same unprimed clone. It does not enable dev-shell, seed a transaction,
-POST maintenance, invoke the migration or use private305. It records the missing
-runtime-activity route and absent transaction; this deliberately reproduces the
-blocker. It restores defaults, verifies original native bytes/baseline stat, and
-refuses foreign Hosts/occupied ports/locked console. It is **not** a full account
-or chat preservation test and cannot certify build307 acceptance.
+`Tests/run_cold_bootstrap_checks.py --spec <absolute-spec.json>` is the new durable
+worker entrypoint. It requires exact `source`, `evidenceRoot`, `python`, `uv`,
+`frozenPayload`, `publicApp`, `sparkle`, `candidateApp`, `baselineDisk`, `bootDir`,
+`oldApp`, `oldLaunchApp`, `quitHelper` fields. Every work/evidence path is external.
+It creates an isolated QA Python environment, runs focused checks, APFS-clones the
+frozen payload, replaces only three bounded migration source files and updates
+their BOM hashes. Both large image archives are verified unchanged. It builds the
+small native307 app without a DMG/factory rebuild and verifies codesigning.
 
-`Tests/run_legacy061_checks.py --spec <absolute-spec.json>` is the durable-worker
-entrypoint. Its spec requires `source`, `evidenceRoot`, `baselineDisk`, `bootDir`,
-`oldApp`, `oldLaunchApp`, `newApp`, and `quitHelper`. `oldLaunchApp` is a new owned
-Applications bundle, removed after graceful cleanup. All work/evidence is on ThalesMedia;
-submit through `wizard_heavy_submit`, never run sustained checks on the control
-host. It compiles/runs the production admission regression and existing isolated
-activation/rollback check before the VM diagnostic. It does not acquire a second
-worker lock: the durable worker owns the lease. A successful diagnostic still
-writes `upgradeAccepted:false`.
+The existing probe gains an explicit candidate mode. It boots only a clone with
+original0.6.1, stops it, launches the new app with **no primed transaction or
+manual migration**, clicks the native consent button, requires the cold witness,
+checks retained chat rows/app-data directories/accounts/config/file selection,
+and repeats launch without reapplying. It restores defaults and removes its
+owned old-app copy. The unique candidate app remains for parent inspection.
 
-Retain the already accepted exact-e4 modern updater/rollback/native-control and
-capture lifecycle evidence. Physical-microphone speech and end-to-end meeting
-upload remain untested; this diagnostic does not change those limits.
+The runner deliberately retains `upgradeAccepted:false` until the parent closes
+actual-VM rollback, active-capture/foreign-Host UI refusal, independent review and
+final user UI acceptance. A missing Accessibility/RemovableVolumes grant or
+locked console is a concrete human boundary, not permission to bypass TCC.
+No capture speech or meeting-upload acceptance is implied by this slice.

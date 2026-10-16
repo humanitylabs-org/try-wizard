@@ -240,7 +240,15 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 return
             }
             log("clean shutdown timed out; forcing stop")
-            machine.stop { _ in DispatchQueue.main.async(execute: done) }
+            machine.stop { result in
+                DispatchQueue.main.async {
+                    guard case .success = result else {
+                        try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "VM stop failed; disk retained"], WizardUpdate.response)
+                        onTimeout?(); return
+                    }
+                    done()
+                }
+            }
         }
     }
     private var stopCompletion: (() -> Void)?
@@ -537,7 +545,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stopWhenIdle: (String?) -> Void = { [weak self] reason in
             guard let self else { return }
             if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
-            self.vm.stop(forceOnTimeout: WizardShared.coldBootstrapToken != nil, onTimeout: { WizardUpdate.releaseMaintenance(nonce); self.preparingUpdate = false }) {
+            self.vm.stop(forceOnTimeout: WizardShared.coldBootstrapToken != nil, onTimeout: { if WizardShared.coldBootstrapToken == nil { WizardUpdate.releaseMaintenance(nonce) }; self.preparingUpdate = false }) {
                 try? WizardUpdate.write(["nonce": nonce, "state": "stopped", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path], WizardUpdate.response)
                 self.quitting = true
                 NSApp.terminate(nil)

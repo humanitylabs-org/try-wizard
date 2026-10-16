@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import socketserver
+import socket
 import subprocess
 import sys
 import time
@@ -115,6 +116,8 @@ def install():
               'references': {c['Config']['Image']: c['Image'] for _, c, _ in rows},
               'containers': saved, 'managed': managed['image'], 'service': bom['service_image_id'],
               'bootID': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+    for _, c, _ in rows:
+        if service(c) == 'wizard-shell': policy['references'][c['Config']['Image']] = policy['service']
     write(STATE/'policy.json', policy)
     shutil.copy2(__file__, STATE/'gate.py'); os.chmod(STATE/'gate.py', 0o700)
     # Managed fence exists BEFORE any managed image can be started by the AuthZ gate.
@@ -127,14 +130,14 @@ def install():
     write(Path('/etc/docker/plugins/wizard-cold.spec'), 'unix:///run/wizard-cold-authz.sock\n', 0o644)
     cfg['authorization-plugins'] = ['wizard-cold']; cfg['live-restore'] = False
     write(daemon, cfg, 0o644)
-    unit = '[Unit]\nDefaultDependencies=no\nAfter=systemd-tmpfiles-setup.service\nBefore=docker.service\n[Service]\nType=simple\nExecStart=/usr/bin/python3 /var/lib/wizard/cold-bootstrap/gate.py serve\nRestart=on-failure\n'
+    unit = '[Unit]\nDefaultDependencies=no\nAfter=systemd-tmpfiles-setup.service\nBefore=docker.service\n[Service]\nType=notify\nNotifyAccess=main\nExecStart=/usr/bin/python3 /var/lib/wizard/cold-bootstrap/gate.py serve\nRestart=on-failure\n'
     write(Path('/etc/systemd/system/wizard-cold-authz.service'), unit, 0o644)
     write(Path('/etc/systemd/system/docker.service.d/wizard-cold.conf'), '[Unit]\nRequires=wizard-cold-authz.service\nAfter=wizard-cold-authz.service\n', 0o644)
     # No default target, timers, user sessions or arbitrary user units in this boot.
     write(Path('/etc/systemd/system/wizard-cold.target'), '[Unit]\nDescription=Wizard cold upgrade\nDefaultDependencies=no\nRequires=sysinit.target docker.service systemd-networkd.service systemd-resolved.service wizard-dev.service wizard-ctl.service wizard-media.service\nAfter=sysinit.target\n', 0o644)
     os.sync()
     print('WIZARD_COLD_FENCED '+json.dumps({'bootID': policy['bootID'], 'containers': len(rows)}), flush=True)
-    os.execv('/sbin/init', ['/sbin/init', 'wizard-cold.target'])
+    os.execv('/sbin/init', ['/sbin/init', '--unit=wizard-cold.target'])
 
 
 def lookup(name):
@@ -152,7 +155,7 @@ def permitted_container(c, policy):
     # Baseline engine + transcriber are NEVER allowed before commit, including
     # newly created containers using that image under a different name.
     if c['Image'] == policy['managed']:
-        return s == 'hermes-agent-engine' and (c['Config'].get('Labels') or {}).get('ai.wizards.managed-launch') == '1'
+        return s == 'hermes-agent-engine'
     if c['Image'] == policy['service']: return s == 'wizard-shell'
     return (s.startswith('runtipi') or s in ('hermes-agent',)) and KNOWN.get(s) == c['Image']
 
@@ -167,12 +170,16 @@ def authorize(request, policy, find=lookup):
     body = json.loads(base64.b64decode(request.get('RequestBody') or 'e30='))
     if method == 'POST' and path == '/containers/create':
         image = policy.get('references', {}).get(body.get('Image'), body.get('Image'))
+        if image == policy['managed']:
+            hc = body.get('HostConfig') or {}
+            if hc.get('Privileged') or hc.get('CapAdd') or hc.get('PidMode') == 'host': return False
+            if '/var/lib/wizard/managed:/wizard-managed-state:rw' not in hc.get('Binds',[]) and '/var/lib/wizard/managed:/wizard-managed-state' not in hc.get('Binds',[]): return False
         return permitted_container({'Config': body, 'Image': image}, policy)
-    match = re.fullmatch('/containers/([^/]+)/(start|restart|unpause|exec|update|stop|kill|wait|attach|resize)', path)
+    match = re.fullmatch('/containers/([^/]+)/(start|restart|unpause|exec|update|stop|kill|wait|attach|resize|rename)', path)
     if match:
         name, action = match.groups(); c = find(name)
         if not c: return False
-        if action in ('stop', 'kill', 'wait'): return True
+        if action in ('stop', 'kill', 'wait', 'rename'): return True
         if action == 'exec': return False  # no stock CLI invocation during cold migration
         if action == 'update':
             return body.get('RestartPolicy', {}).get('Name') == 'no'
@@ -212,10 +219,13 @@ def admit(token):
     # This is a consequence check of the closed launch boundary, not idle polling.
     if run(['docker', 'ps', '-q']): raise RuntimeError('Unexpected cold-started container')
     old = next(k for k,v in p['containers'].items() if v['service']=='hermes-agent-engine')
-    denied = subprocess.run(['docker', 'start', old], capture_output=True, text=True, timeout=30)
-    if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Forbidden start not rejected by AuthZ')
+    denied_routes = []
+    for args in (['start',old], ['restart',old], ['unpause',old], ['exec',old,'python3','-c','raise SystemExit(99)']):
+        denied = subprocess.run(['docker',*args],capture_output=True,text=True,timeout=30)
+        if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Forbidden execution not rejected by AuthZ: '+args[0])
+        denied_routes.append(args[0])
     if run(['docker', 'ps', '-q']): raise RuntimeError('Forbidden engine started')
-    write(STATE/'witness.json', {'bootID': p['bootID'], 'noOldEngine': True, 'forbiddenStartDenied': True, 'restartPoliciesDisabled': len(p['containers'])})
+    write(STATE/'witness.json', {'bootID': p['bootID'], 'noOldEngine': True, 'forbiddenStartDenied': True, 'deniedRoutes': denied_routes, 'restartPoliciesDisabled': len(p['containers'])})
     for name in ('runtipi-db', 'runtipi-queue', 'runtipi', 'runtipi-reverse-proxy'):
         run(['docker', 'start', name])
     # Runtipi startup (DB migrations/queue connection) is bounded, not assumed.
@@ -236,6 +246,10 @@ def commit():
     if any(c['State']['Running'] and not permitted_container(c,p) for c in cs): raise RuntimeError('Unadmitted runtime')
     lease = read(Path('/var/lib/wizard/managed/lease.json'))
     if lease['token'] != p['token'] or lease['phase'] != 'held': raise RuntimeError('Managed admission lost')
+    denied = subprocess.run(['docker','create','--label','com.docker.compose.service=hermes-agent-engine',STOCK,'python3','-c','raise SystemExit(99)'],capture_output=True,text=True,timeout=30)
+    if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Old image recreation admitted after load/refresh')
+    witness = read(STATE/'witness.json'); witness['oldImageRecreationDeniedAfterMigration'] = True
+    write(STATE/'witness.json', witness)
     # Main unmanaged container has been removed; restore original non-main restart
     # policies for the subsequent normal boot. Full rollback uses untouched disk.
     p['phase'] = 'committed'; write(STATE/'policy.json',p)
@@ -256,7 +270,12 @@ if __name__ == '__main__':
         path = '/run/wizard-cold-authz.sock'
         if Path(path).exists(): Path(path).unlink()
         with socketserver.UnixStreamServer(path, Handler) as server:
-            os.chmod(path,0o600); server.serve_forever()
+            os.chmod(path,0o600)
+            notify = os.environ.get('NOTIFY_SOCKET')
+            if notify:
+                with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as sock:
+                    sock.connect('\0'+notify[1:] if notify.startswith('@') else notify); sock.sendall(b'READY=1')
+            server.serve_forever()
     elif sys.argv[1:] == ['init']:
         try: install()
         except BaseException as e:

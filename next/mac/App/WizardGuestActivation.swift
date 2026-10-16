@@ -9,7 +9,7 @@ import Darwin
     var onDone: (String?) -> Void = { _ in }
     static var backup: URL { WizardUpdate.dir.appendingPathComponent("previous-disk.img") }
     static func snapshotStoppedDisk() throws {
-        guard !HostControl.isRunning else { throw WizardUpdate.error("Refusing snapshot of a running VM") }
+        guard !HostControl.isRunning, !HostControl.hasForeignRunner else { throw WizardUpdate.error("Refusing snapshot while any Wizard Host is running") }
         let disk = WizardShared.osDir.appendingPathComponent("disk.img")
         guard FileManager.default.fileExists(atPath: disk.path) else { return }
         try? FileManager.default.removeItem(at: backup)
@@ -96,6 +96,7 @@ import Darwin
     }
     private func completeStopped(_ migrationError: String?) {
             do {
+                guard !HostControl.isRunning, !HostControl.hasForeignRunner else { throw WizardUpdate.error("Another Host appeared; no disk restored") }
                 if let migrationError {
                     let ownership = WizardDiskOwnership(); try ownership.acquire()
                     defer { ownership.release() }

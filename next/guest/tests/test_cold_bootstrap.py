@@ -35,6 +35,13 @@ class ColdTests(unittest.TestCase):
         for s,image in G.KNOWN.items():
             c={'Image':image,'Config':{'Labels':{'com.docker.compose.service':s}}}
             self.assertEqual(G.permitted_container(c,self.policy),s.startswith('runtipi') or s=='hermes-agent',s)
+    def test_managed_creation_requires_bom_and_shared_fence(self):
+        body={'Image':self.policy['managed'],'Labels':{'com.docker.compose.service':'hermes-agent-engine'},'HostConfig':{}}
+        self.assertFalse(G.authorize(self.request('/containers/create',body=body),self.policy))
+        body['HostConfig']['Binds']=['/var/lib/wizard/managed:/wizard-managed-state:rw']
+        self.assertTrue(G.authorize(self.request('/containers/create',body=body),self.policy))
+        body['HostConfig']['Privileged']=True
+        self.assertFalse(G.authorize(self.request('/containers/create',body=body),self.policy))
     def test_commit_required_for_other_apps(self):
         self.assertFalse(G.authorize(self.request('/containers/old/start'),self.policy,lambda _:self.old))
         self.policy['phase']='committed'
