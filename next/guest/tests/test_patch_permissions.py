@@ -9,10 +9,10 @@ import tempfile
 import unittest
 
 source = Path(__file__).resolve().parents[1] / 'upgrade-mvp-stack.py'
-node = next(n for n in ast.parse(source.read_text()).body if isinstance(n, ast.FunctionDef) and n.name == 'install_public_package')
+nodes: list[ast.stmt] = [n for n in ast.parse(source.read_text()).body if isinstance(n, ast.FunctionDef) and n.name in ('reject_symlink_components', 'install_public_package')]
 from typing import Any
 namespace: dict[str, Any] = {'os': os, 'shutil': shutil}
-exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), 'exec'), namespace)
+exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), namespace)
 install = namespace['install_public_package']
 
 class PackagePermissions(unittest.TestCase):
@@ -45,6 +45,21 @@ class PackagePermissions(unittest.TestCase):
         (self.src/'link').symlink_to(self.module)
         with self.assertRaisesRegex(RuntimeError, 'symlink'): install(self.src, self.dst)
         self.assertFalse((self.dst/'sub').exists())
+    def test_source_ancestor_symlink_refused_before_copy(self):
+        alias = self.root/'alias'; alias.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, 'symlink'): install(alias/'payload', self.dst)
+        self.assertEqual(list(self.dst.iterdir()), [])
+        self.assertEqual(stat.S_IMODE(self.module.stat().st_mode), 0o600)
+    def test_destination_ancestor_symlink_preserves_outside_bytes_and_modes(self):
+        outside = self.root/'outside'; outside.mkdir()
+        target = outside/'installed'; target.mkdir(mode=0o700)
+        private = target/'private'; private.write_text('fixture'); private.chmod(0o600)
+        alias = self.root/'alias'; alias.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, 'symlink'): install(self.src, alias/'installed')
+        self.assertEqual(private.read_text(), 'fixture')
+        self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o700)
+        self.assertFalse((target/'sub').exists())
     def test_destination_symlink_refused_before_copy(self):
         outside = self.root/'outside'; outside.mkdir()
         (self.dst/'sub').symlink_to(outside)

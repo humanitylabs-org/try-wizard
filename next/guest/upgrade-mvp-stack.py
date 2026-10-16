@@ -59,6 +59,12 @@ before[str(data/'auth.json')]=before_auth_hash
 before_engine_cid=subprocess.check_output(['docker','ps','-aq' if a.cold_bootstrap else '-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
 if not before_engine_cid or '\n' in before_engine_cid: raise SystemExit('Ambiguous Hermes engine before migration')
 before_engine_image=subprocess.check_output(['docker','inspect',before_engine_cid,'--format','{{.Image}}'],text=True).strip()
+def reject_symlink_components(path):
+    # Check lexical ancestors too: a redirected code root must not overwrite or
+    # change permissions on unrelated owner files.
+    for component in (path, *path.parents):
+        if component.is_symlink(): raise RuntimeError('Package symlink component refused')
+
 def install_public_package(source, destination):
     # Sealed host payload permissions are private transport metadata, not guest
     # code permissions. Touch only authenticated package members, never user data.
@@ -66,7 +72,7 @@ def install_public_package(source, destination):
     members = [s for s in members if '__pycache__' not in s.relative_to(source).parts]
     for src in members:
         dst = destination/src.relative_to(source)
-        if src.is_symlink() or dst.is_symlink(): raise RuntimeError('Package symlink refused')
+        reject_symlink_components(src); reject_symlink_components(dst)
         if not src.is_dir() and not src.is_file(): raise RuntimeError('Special package member refused')
     shutil.copytree(source,destination,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
     for src in members:
@@ -84,7 +90,7 @@ for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): install_public_package(src,dst)
  else:
-  if src.is_symlink() or dst.is_symlink(): raise RuntimeError('Overlay symlink refused')
+  reject_symlink_components(src); reject_symlink_components(dst)
   shutil.copy2(src,dst)
   os.chmod(dst,0o755 if src.stat().st_mode & 0o111 else 0o644)
 install_public_package(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'))
