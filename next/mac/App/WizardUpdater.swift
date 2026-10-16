@@ -67,6 +67,74 @@ import Darwin
             recoverActivation()
         } catch { show("failed", "Updates unavailable — \(error.localizedDescription)", retry: true) }
     }
+    /// Called before *every* local boot, including switching from a remote backend.
+    /// No missing HTTP route is interpreted as idle. A running legacy Host defers.
+    func admitLegacyBootstrap() -> Bool {
+        guard Store.active?.kind == .thisMac, WizardShared.legacyBootstrapNeeded else { return false }
+        guard !activatingGuest else { return true }
+        if HostControl.isRunning || HostControl.hasForeignRunner || isRecording() || qaBusy {
+            show("busy", "Quit the old Wizard Host and finish capture before upgrading this local disk.")
+            return true
+        }
+        let alert = NSAlert()
+        alert.messageText = "Upgrade this Mac’s existing Wizard?"
+        alert.informativeText = "Your accounts, chats, files and installed apps stay on the existing disk. Wizard will first make a stopped-disk rollback copy, then upgrade in a restricted maintenance boot. The old agents will not start during the upgrade."
+        alert.addButton(withTitle: "Upgrade existing Wizard")
+        alert.addButton(withTitle: "Not now")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            show("deferred", "Local Wizard remains stopped. Choose This Mac again when ready to upgrade.")
+            return true
+        }
+        let ownership = WizardDiskOwnership()
+        do {
+            guard !HostControl.isRunning, !HostControl.hasForeignRunner, !isRecording(), !qaBusy else {
+                throw WizardUpdate.error("Activity changed while confirming; upgrade deferred")
+            }
+            try ownership.acquire()
+            let pins = ["boot/vmlinux": "5028c424ee9fd0f4d18c38269122e30e3d084deb1b13404ab070a3f478ddd30a",
+                        "boot/initrd": "b32a28fd79ea7cedea49520befe694f513fb35af53203074006a016128c3c06b"]
+            for (path, digest) in pins {
+                guard try WizardUpdate.sha256(WizardShared.osDir.appendingPathComponent(path)) == digest else {
+                    throw WizardUpdate.error("Unknown legacy boot files; disk left untouched")
+                }
+            }
+            let release = try WizardRelease.read(Bundle.main.bundleURL)
+            try release.validate(Bundle.main.bundleURL)
+            guard release.guestPatch == "mac-stack-v1",
+                  FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/GuestUpdate/source/next/guest/cold-bootstrap.py").path) else {
+                throw WizardUpdate.error("This app does not contain the authenticated cold bootstrap")
+            }
+            try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
+            guard leaseFD >= 0, flock(leaseFD, LOCK_EX | LOCK_NB) == 0 else { throw WizardUpdate.error("Another upgrade owns this disk") }
+            preparing = true; activatingGuest = true; onFreeze(true)
+            try WizardGuestActivation.snapshotStoppedDisk()
+            let nonce = UUID().uuidString
+            try WizardUpdate.write(["kind": "legacy-cold", "phase": "installing", "nonce": nonce,
+                "diskIdentity": WizardShared.diskIdentity, "dataHome": WizardShared.supportDir.path,
+                "appPath": Bundle.main.bundleURL.path, "releaseID": release.releaseID,
+                "from": "0.6.1", "to": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "",
+                "guestPatch": true, "applyGuest": true], WizardUpdate.journal)
+            try WizardUpdate.write(["token": nonce, "admission": "cold-pid1"], WizardUpdate.maintenanceJournal)
+            ownership.release()
+            WizardGuestActivation.shared.onProgress = { [weak self] text in self?.show("guest-activating", text) }
+            WizardGuestActivation.shared.onDone = { [weak self] error in
+                guard let self else { return }
+                self.activatingGuest = false; self.releaseLease()
+                if error == nil {
+                    do { try WizardUpdate.write(["diskIdentity": WizardShared.diskIdentity, "releaseID": release.releaseID], WizardUpdate.dir.appendingPathComponent("legacy-complete.json")) }
+                    catch { self.show("failed", "Upgrade health passed but completion record could not be saved"); return }
+                    self.onGuestFinished()
+                }
+                self.show(error == nil ? "installed" : "failed", error ?? "Existing Wizard upgraded; your data is preserved.")
+            }
+            WizardGuestActivation.shared.activate()
+        } catch {
+            ownership.release(); activatingGuest = false; releaseLease()
+            show("failed", "Legacy upgrade deferred — \(error.localizedDescription)")
+        }
+        return true
+    }
     @objc func checkForUpdates(_ sender: Any? = nil) {
         guard let updater else { return }
         if ready != nil { show("ready", "Update \(version) available — ready to restart"); return }

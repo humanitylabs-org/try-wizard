@@ -28,11 +28,21 @@ import Darwin
             guard WizardShared.guestUpdatePayload != nil else { throw WizardUpdate.error("Guest payload validation failed") }
             onProgress("Starting local software activation; your disk, accounts and chats stay in place…")
             HostControl.ensureRunning()
+            if WizardShared.coldBootstrapToken != nil {
+                waitColdStarted(Date().addingTimeInterval(150)); return
+            }
             HostControl.waitForLocalWizard(timeout: 300, tick: { _ in }) { ready in
                 guard ready else { self.finish("Guest did not become ready for migration"); return }
                 self.migrate()
             }
         } catch { onDone(error.localizedDescription) }
+    }
+    private func waitColdStarted(_ deadline: Date) {
+        let log = (try? String(contentsOf: WizardShared.logsDir.appendingPathComponent("console.log"), encoding: .utf8)) ?? ""
+        if log.contains("WIZARD_COLD_FAILED") { finish("Cold admission refused the legacy layout; restoring stopped disk"); return }
+        if HostControl.isRunning && log.contains("WIZARD_COLD_FENCED") { migrate(); return }
+        guard Date() < deadline else { finish("Cold bootstrap did not establish its launch fence"); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitColdStarted(deadline) }
     }
     func recoverInterruptedActivation() {
         // Do not infer success from a partial journal or replay an interrupted migration.
@@ -87,6 +97,8 @@ import Darwin
     private func completeStopped(_ migrationError: String?) {
             do {
                 if let migrationError {
+                    let ownership = WizardDiskOwnership(); try ownership.acquire()
+                    defer { ownership.release() }
                     let disk = WizardShared.osDir.appendingPathComponent("disk.img")
                     let restored = WizardUpdate.dir.appendingPathComponent("restore-disk.img")
                     try? FileManager.default.removeItem(at: restored)
@@ -95,6 +107,11 @@ import Darwin
                     guard rename(restored.path, disk.path) == 0 else { throw WizardUpdate.error("Rollback disk activation failed") }
                     var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "guest-rolled-back"; journal["error"] = migrationError
                     try WizardUpdate.write(journal, WizardUpdate.journal)
+                    if journal["kind"] as? String == "legacy-cold" {
+                        try? FileManager.default.removeItem(at: WizardUpdate.maintenanceJournal)
+                        try? FileManager.default.removeItem(at: WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
+                        onDone("Prior guest restored and left stopped — \(migrationError)"); return
+                    }
                 } else {
                     var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "guest-activated"
                     try WizardUpdate.write(journal, WizardUpdate.journal)

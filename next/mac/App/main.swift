@@ -985,6 +985,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         case .thisMac:
             guard WizardShared.filesFolder != nil else { askFilesFolder(); return }
             guard WizardShared.osInstalled else { installOnThisMac(); return }
+            guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)

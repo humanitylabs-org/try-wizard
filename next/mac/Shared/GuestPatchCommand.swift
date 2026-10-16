@@ -3,7 +3,11 @@ import Foundation
 /// Fixed command for the one supported patch. No caller-supplied shell input.
 /// Host runs this directly over its owned VM's private vsock, not a Mac TCP shell.
 enum WizardGuestPatchCommand {
-    static let script = """
+    static var script: String {
+        let command = baseScript
+        return WizardShared.coldBootstrapToken == nil ? command : command.replacingOccurrences(of: "--apply >", with: "--apply --cold-bootstrap >")
+    }
+    static let baseScript = """
     set -e
     mkdir -p /run/wizard-update /var/lib/wizard/patches/mac-stack-v1
     mountpoint -q /run/wizard-update || mount -t virtiofs -o ro wizard-update /run/wizard-update
