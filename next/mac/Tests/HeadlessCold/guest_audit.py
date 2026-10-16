@@ -116,12 +116,12 @@ def same_boot_restart():
 
 
 def snapshot():
-    import headless_cold_config, headless_preservation
+    import headless_cold_config, headless_preservation, headless_config_expectation
     cold = POLICY.exists() and 'wizard.cold=' in Path('/proc/cmdline').read_text()
     health = None if cold else wait_health()
-    config_raw = (DATA/'config.yaml').read_text()
-    expected_config, _ = headless_cold_config.migrate(config_raw)
-    config = yaml.safe_load(config_raw)
+    config_raw = (DATA/'config.yaml').read_bytes()
+    expected_config, config_migration = headless_config_expectation.migrate(
+        config_raw, headless_cold_config.migrate)
     normalized = yaml.safe_load(expected_config)
     protected = {}
     # Entire owner content trees; exclude known runtime caches/logs and credential
@@ -159,9 +159,10 @@ def snapshot():
     cold = POLICY.exists() and 'wizard.cold=' in Path('/proc/cmdline').read_text()
     report = {'schema':1,'bootID':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
         'coldBoot':cold,'configNormalizedSHA256':hashed(normalized),
-        'configExpectedSHA256':digest(expected_config.encode()),
+        'configExpectedSHA256':digest(expected_config),
+        'configMigrationExpectation':config_migration,
         'authSnapshot':headless_preservation.auth_snapshot(json.loads((DATA/'auth.json').read_text()) if (DATA/'auth.json').exists() else None),
-        'configRawSHA256':digest((DATA/'config.yaml').read_bytes()),
+        'configRawSHA256':digest(config_raw),
         'protected':protected,'databases':databases,'installedApps':apps,'accountFiles':account_files,
         'engineImage':engines[0]['Image'], 'engineRunning':engines[0]['State']['Running'],
         'unprimed':not POLICY.exists() and not Path('/var/lib/wizard/patches/mac-stack-v1/applied.json').exists()

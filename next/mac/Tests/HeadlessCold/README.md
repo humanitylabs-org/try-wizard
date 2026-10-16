@@ -12,7 +12,7 @@ then verify preservation, repeat admission, and stopped rollback on a second
 clone. Parent owns execution admission, independent result review, integration,
 and any release. This folder changes no production implementation.
 
-Production pin: `15ddf5e315d637ab26b57de94f011b5cecd1d946` (build 307).
+Production pin: `c7952d68e6a61da74b1e26485293cb7b5d881c7b` (build 307).
 Harness commit is separate. `build_and_run.py` builds a uniquely named native
 307 candidate from a separate clean checkout at that exact production pin, using
 the unchanged factory and frozen runtime archives. Public 306 and earlier 307
@@ -106,7 +106,8 @@ phases and cleanup checks pass. Failure exits nonzero and retains diagnostics.
    retain the backup, refuse activation, never force, and ignore late stopped
    callbacks; concurrent stop is failure and clean stop still succeeds.
 3. Preservation: production auth/env/model/token guard; compare field-hashed auth,
-   exact config bytes after only the production scalar migration, existing session
+   exact config bytes after the proven product-plugin append/serialization followed
+   by the production SSH scalar migration (no ignored owner keys), existing session
    and message rows in every discovered SQLite DB, owner content trees (memories,
    skills, documents, sessions, Runtipi media, Files, managed SSH key), SOUL/USER/
    AGENTS files, account-app data and installed app-data directory identities.
@@ -136,6 +137,28 @@ phases and cleanup checks pass. Failure exits nonzero and retains diagnostics.
    installed apps byte-identical, disjoint foreign process identity/listeners
    unchanged, and console still locked. CLI health bridges are loopback only;
    root shell exists solely on this owned VM's private vsock, never TCP.
+
+## Config expectation evidence
+
+The failed predecessor harness predicted only `terminal.ssh_key`. A read-only
+`debugfs` examination of its cleanly stopped, task-owned upgraded ext4 disk found
+the updater's retained backup matched the original captured raw SHA-256 exactly.
+The product-plugin backup matched the same original. The stopped final config
+matched all post-apply snapshot hashes. Its only semantic changes were appending
+`wizard-product` to `plugins.enabled` and moving the managed SSH key path.
+
+Replaying the pinned `wizard-product-configure` conditional `safe_dump` followed
+by `cold-config.migrate` reproduced the final config bytes exactly. Frozen WAM's
+`maintenance_refresh` changes packaging only; no other config addition is waived.
+`config_expectation.py` models that exact order, including no serialization when
+the plugin is already enabled. Unknown/provider/model/owner keys remain protected;
+repeat requires exact bytes and rollback requires the captured original bytes.
+The guest hashes a single raw-byte read. Tests execute the actual product config
+block on synthetic fixtures, and adversarial mutations still fail `run.compare`.
+The wrapper pins the product writer and checks the frozen payload's writer bytes
+against production. Private values are not committed, printed, or copied out.
+This correction is QA-only; production remains the reviewed `c7952d6` ancestor
+symlink fix. The old failed receipt stays failed; a new full run is still required.
 
 ## Evidence boundaries
 

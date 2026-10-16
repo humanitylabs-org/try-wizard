@@ -95,6 +95,8 @@ def main():
         python = root/'venv/bin/python'
         check('qa-deps', [spec['uv'], 'pip', 'install', '--python', python, 'PyYAML==6.0.3', 'Pillow==12.0.0'])
         env['PATH'] = str(root/'venv/bin')+':'+env['PATH']
+        check('headless-contracts', [python, '-m', 'unittest', 'discover',
+              '-s', harness/'next/mac/Tests/HeadlessCold', '-p', 'test_*.py', '-v'])
         mac = source/'next/mac'
         check('cold-serial', [python, mac/'Tests/test_cold_serial.py', '--out', root/'serial'])
         check('update-shutdown', [python, harness/'next/mac/Tests/test_update_shutdown.py', '--out', root/'shutdown'])
@@ -122,6 +124,10 @@ def main():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source/'next/guest'/name, target)
             bom['files'][relative] = sha(target)
+        # The config expectation is tied to the actual sealed writer, not merely
+        # a same-named file in our checkout. Frozen WAM/archives stay unchanged.
+        product = 'overlay/opt/wizard/bin/wizard-product-configure'
+        assert (payload/product).read_bytes() == (source/'next/guest'/product).read_bytes()
         bom['sources']['COLD_BOOTSTRAP'] = PRODUCTION
         (payload/'runtime-bom.json').write_text(json.dumps(bom,sort_keys=True)+'\n')
         public = plistlib.loads((Path(spec['publicApp'])/'Contents/Info.plist').read_bytes())

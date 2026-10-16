@@ -7,13 +7,14 @@ from pathlib import Path
 import shutil
 import subprocess
 
-PRODUCTION = '15ddf5e315d637ab26b57de94f011b5cecd1d946'
+PRODUCTION = 'c7952d68e6a61da74b1e26485293cb7b5d881c7b'
 SOURCES = ['next/mac/Host/main.swift', 'next/mac/Shared/Shared.swift',
            'next/mac/Shared/UpdateContract.swift', 'next/mac/Shared/DiskIdentity.swift',
            'next/mac/Shared/GuestPatchCommand.swift', 'next/mac/App/WizardGuestActivation.swift',
            'next/mac/App/WizardUpdater.swift', 'next/guest/cold-bootstrap.py',
            'next/guest/upgrade-mvp-stack.py', 'next/guest/cold-config.py',
-           'next/guest/stack-preservation.py']
+           'next/guest/stack-preservation.py',
+           'next/guest/overlay/opt/wizard/bin/wizard-product-configure']
 
 
 def generate(source, out):

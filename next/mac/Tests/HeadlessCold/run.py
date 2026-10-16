@@ -147,7 +147,9 @@ def main():
     assert guard_spec is not None and guard_spec.loader is not None
     guard=importlib.util.module_from_spec(guard_spec);guard_spec.loader.exec_module(guard)
     audit_script='import base64,sys,types\n'
-    for name,relative in [('headless_cold_config','next/guest/cold-config.py'),('headless_preservation','next/guest/stack-preservation.py')]:
+    for name,relative in [('headless_cold_config','next/guest/cold-config.py'),
+                          ('headless_preservation','next/guest/stack-preservation.py'),
+                          ('headless_config_expectation','next/mac/Tests/HeadlessCold/config_expectation.py')]:
         encoded=base64.b64encode((source/relative).read_bytes()).decode()
         audit_script+=f'm=types.ModuleType({name!r});exec(base64.b64decode({encoded!r}),m.__dict__);sys.modules[{name!r}]=m\n'
     audit_script+='exec(compile(base64.b64decode('+repr(base64.b64encode((HERE/'guest_audit.py').read_bytes()).decode())+'),"headless_guest_audit","exec"))\n'
