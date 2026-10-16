@@ -16,6 +16,17 @@ import run as runner
 SOURCE=HERE.parents[3]
 
 class DriverContracts(unittest.TestCase):
+    def test_host_layout_precedes_vm_boot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data=Path(tmp)/'isolated/data'
+            runner.prepare_directories(data)
+            self.assertTrue((data/'os').is_dir())
+            self.assertTrue((data/'logs').is_dir())
+            (data/'logs/console.log').write_text('boot witness')
+            runner.prepare_directories(data)
+            self.assertEqual((data/'logs/console.log').read_text(),'boot witness')
+            self.assertFalse((data/'os/disk.img').exists())
+
     def test_exact_extraction_and_desktop_absence(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'generated'

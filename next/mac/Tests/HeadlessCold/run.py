@@ -104,6 +104,13 @@ def compare(before,after,guard,*,rollback=False):
             'installedApps':before['installedApps'],'configBytesOnlyProductionMigration':not rollback}
 
 
+def prepare_directories(data):
+    # Mirror HostDelegate's filesystem setup before invoking its extracted VM.
+    # This is host-side layout only; the legacy guest remains unmodified.
+    for name in ('os', 'logs'):
+        (data/name).mkdir(parents=True, exist_ok=True, mode=0o700)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--spec',type=Path,required=True)
     p.add_argument('--worker-lease',choices=['inherited'],required=True);a=p.parse_args()
@@ -148,7 +155,7 @@ def main():
     def gate(name,**data):
         report['gates'].append({'name':name,'passed':True,**data});save(root/'report.json',report)
     def prepare(name,source_disk):
-        data=root/name/'data';(data/'os').mkdir(parents=True,mode=0o700)
+        data=root/name/'data';prepare_directories(data)
         shutil.copytree(boot,data/'os/boot')
         shutil.copyfile(boot.parent/'manifest.json',data/'os/manifest.json')
         clone(source_disk,data/'os/disk.img');(data/'dev-shell').touch(mode=0o600)
