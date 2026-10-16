@@ -59,8 +59,22 @@ before[str(data/'auth.json')]=before_auth_hash
 before_engine_cid=subprocess.check_output(['docker','ps','-aq' if a.cold_bootstrap else '-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
 if not before_engine_cid or '\n' in before_engine_cid: raise SystemExit('Ambiguous Hermes engine before migration')
 before_engine_image=subprocess.check_output(['docker','inspect',before_engine_cid,'--format','{{.Image}}'],text=True).strip()
+def install_public_package(source, destination):
+    # Sealed host payload permissions are private transport metadata, not guest
+    # code permissions. Touch only authenticated package members, never user data.
+    members = [source, *source.rglob('*')]
+    members = [s for s in members if '__pycache__' not in s.relative_to(source).parts]
+    for src in members:
+        dst = destination/src.relative_to(source)
+        if src.is_symlink() or dst.is_symlink(): raise RuntimeError('Package symlink refused')
+        if not src.is_dir() and not src.is_file(): raise RuntimeError('Special package member refused')
+    shutil.copytree(source,destination,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
+    for src in members:
+        dst = destination/src.relative_to(source)
+        os.chmod(dst, 0o755 if src.is_dir() or src.stat().st_mode & 0o111 else 0o644)
+
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
-shutil.copytree(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
+install_public_package(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
             'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
@@ -68,9 +82,12 @@ for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.
             'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
- if src.is_dir(): shutil.copytree(src,dst,dirs_exist_ok=True)
- else: shutil.copy2(src,dst)
-shutil.copytree(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'),dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
+ if src.is_dir(): install_public_package(src,dst)
+ else:
+  if src.is_symlink() or dst.is_symlink(): raise RuntimeError('Overlay symlink refused')
+  shutil.copy2(src,dst)
+  os.chmod(dst,0o755 if src.stat().st_mode & 0o111 else 0o644)
+install_public_package(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'))
 for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure','wizard-media','wizard-ux-bridge','wizard-env','wizard-firstboot'):
  if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
