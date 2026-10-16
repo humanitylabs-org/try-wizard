@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -133,6 +134,9 @@ def main():
     modified_prefs = False
     launched = []
     keepawake = None
+    def interrupted(signum, _frame):
+        raise TimeoutError('Worker interrupted diagnostic with signal ' + str(signum))
+    signal.signal(signal.SIGTERM, interrupted)
 
     def stop(app):
         rows = app_processes(app)
@@ -170,7 +174,7 @@ def main():
         raise TimeoutError(label + ': local ready timeout')
 
     try:
-        keepawake = subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-u', '-t', '900'])
+        keepawake = subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-u', '-t', '1800'])
         (data / 'os/boot').mkdir(parents=True)
         files.mkdir()
         (files / 'preserve.txt').write_text('LEGACY061_DIRECT_REPLACEMENT_SENTINEL\n')
@@ -211,6 +215,9 @@ def main():
         evidence['error'] = type(error).__name__ + ': ' + str(error)
         raise
     finally:
+        # One termination request enters bounded cleanup; a repeated request must
+        # not interrupt graceful VZ stop halfway through preference restoration.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         cleanup_errors = []
         for app in reversed(launched):
             try:
