@@ -16,6 +16,15 @@ import run as runner
 SOURCE=HERE.parents[3]
 
 class DriverContracts(unittest.TestCase):
+    def test_application_readiness_waits_and_fails_closed(self):
+        import io
+        from unittest.mock import patch
+        import guest_audit
+        with patch.object(guest_audit.urllib.request,'urlopen',side_effect=[ConnectionRefusedError(),io.BytesIO(b'{"upstream_reachable":true}')]), patch.object(guest_audit.time,'sleep'):
+            self.assertTrue(guest_audit.wait_health()['upstream_reachable'])
+        with patch.object(guest_audit.urllib.request,'urlopen',side_effect=ConnectionRefusedError()), patch.object(guest_audit.time,'monotonic',side_effect=[0,1]):
+            with self.assertRaises(TimeoutError): guest_audit.wait_health(timeout=0)
+
     def test_host_layout_precedes_vm_boot(self):
         with tempfile.TemporaryDirectory() as tmp:
             data=Path(tmp)/'isolated/data'

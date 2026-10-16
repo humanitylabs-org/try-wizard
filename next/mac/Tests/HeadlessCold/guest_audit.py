@@ -46,8 +46,25 @@ def rows(path):
     return result
 
 
+def wait_health(timeout=240):
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:8923/wizard/health', timeout=5) as response:
+                health = json.load(response)
+            if isinstance(health, dict):
+                return health
+        except (OSError, ValueError):
+            pass
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Guest application health did not become ready')
+        time.sleep(1)
+
+
 def snapshot():
     import headless_cold_config, headless_preservation
+    cold = POLICY.exists() and 'wizard.cold=' in Path('/proc/cmdline').read_text()
+    health = None if cold else wait_health()
     config_raw = (DATA/'config.yaml').read_text()
     expected_config, _ = headless_cold_config.migrate(config_raw)
     config = yaml.safe_load(config_raw)
@@ -127,7 +144,7 @@ def snapshot():
             report['fence']['witness']=witness
         else: raise AssertionError('Unexpected audit phase')
     else:
-        health=json.load(urllib.request.urlopen('http://127.0.0.1:8923/wizard/health',timeout=20))
+        assert isinstance(health, dict), 'Missing ready application health'
         report['health']={k:health.get(k) for k in ('upstream_reachable','queue')}
         if not report['unprimed']:
             assert health.get('upstream_reachable') is True

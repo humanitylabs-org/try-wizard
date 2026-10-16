@@ -162,7 +162,7 @@ func diskHolders() -> [Int32]? {
 }
 @MainActor func audit(_ name:String,_ done:@escaping (Bool)->Void) {
     guard let script = try? String(contentsOf:URL(fileURLWithPath:env["WIZARD_HEADLESS_AUDIT"]!),encoding:.utf8) else { done(false); return }
-    shell(script) { text in
+    shell(script, timeout: 360) { text in
         guard let text, let line = text.split(separator:"\n").first(where:{$0.hasPrefix("HEADLESS_AUDIT ")}),
               let data = String(line.dropFirst("HEADLESS_AUDIT ".count)).data(using:.utf8),
               let document = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else {
