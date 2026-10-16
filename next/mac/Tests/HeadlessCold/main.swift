@@ -16,7 +16,7 @@ var finished = false
 var exitStatus: Int32 = 1
 var result: [String: Any] = ["mode":mode, "realVM":true, "physicalConsent":false,
     "consent":"test-authorized stopped admission adapter", "preferencesTouched":false,
-    "GUIStarted":false, "productionReleaseID":"50ef7b1964ae8fdc75de03235ae2e0aa993456bc"]
+    "GUIStarted":false, "productionReleaseID":"98049a6cdc7285e10cf8c66e41b769e40cffc508"]
 func record(_ key: String, _ value: Any) {
     result[key] = value
     try? JSONSerialization.data(withJSONObject: result, options:[.prettyPrinted,.sortedKeys]).write(to:output.appendingPathComponent("result.json"),options:.atomic)

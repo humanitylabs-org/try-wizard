@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-PRODUCTION = '50ef7b1964ae8fdc75de03235ae2e0aa993456bc'
+PRODUCTION = '98049a6cdc7285e10cf8c66e41b769e40cffc508'
 SOURCES = ['next/mac/Host/main.swift', 'next/mac/Shared/Shared.swift',
            'next/mac/Shared/UpdateContract.swift', 'next/mac/Shared/DiskIdentity.swift',
            'next/mac/Shared/GuestPatchCommand.swift', 'next/mac/App/WizardGuestActivation.swift',
@@ -46,7 +46,7 @@ def generate(source, out):
 
     # No NSApplication, menu, notification, NSWorkspace or remote-shell TCP listener.
     host = originals[SOURCES[0]]
-    listener = host[host.index('    // Guest -> Mac:'):host.index('    private var coldInput:')]
+    listener = host[host.index('    // Guest -> Mac:'):host.index('    private var coldSerial:')]
     extract(SOURCES[0], 'import AppKit', '// MARK: - Menu bar', 'VM.swift', [
         ('import AppKit', 'import Foundation', 'CLI VM slice uses Foundation types only; do not link AppKit'),
         (listener,

@@ -48,6 +48,10 @@ class DriverContracts(unittest.TestCase):
             self.assertIn('init=/bin/sh wizard.dev=1 wizard.cold=',vm)
             self.assertIn('VZSharedDirectory(url: payload, readOnly: true)',vm)
             self.assertIn('func runGuestPatch',vm)
+            self.assertIn('final class ColdBootstrapSerial',vm)
+            self.assertIn('self.coldSerial?.generation == generation',vm)
+            self.assertIn('try Data().write(to: consoleURL)',vm)
+            self.assertIn('private func waitForColdShell',vm)
             joined='\n'.join(p.read_text() for p in out.glob('*.swift'))
             for desktop in ('import AppKit','NSWorkspace.shared','NSApplication.shared','NSApp.','caffeinate','launchctl','osascript'):
                 self.assertNotIn(desktop,joined)
@@ -85,6 +89,17 @@ class DriverContracts(unittest.TestCase):
         bad=copy.deepcopy(after);bad['databases']['state.db']['messages']['rows']=[]
         with self.assertRaises(AssertionError):runner.compare(before,bad,guard)
         with self.assertRaises(AssertionError):runner.compare(before,after,guard,rollback=True)
+
+    def test_build_wrapper_keeps_exact_sources_and_no_gui_route(self):
+        import build_and_run
+        source=(HERE/'build_and_run.py').read_text()
+        self.assertEqual(build_and_run.PRODUCTION,build_driver.PRODUCTION)
+        self.assertIn('clean_pin(source, PRODUCTION)',source)
+        self.assertIn("RELEASE_ID=PRODUCTION, SIGN_IDENTITY='-', DMG='0'",source)
+        self.assertIn("assert real['success'] and real['cleanupVerified']",source)
+        self.assertIn("assert (source/name).read_bytes() == pinned == (harness/name).read_bytes()",source)
+        self.assertNotIn("mac/'Tests/legacy061_probe.py'",source)
+        self.assertIn("'--worker-lease','inherited'",source)
 
     def test_failure_cannot_be_reported_as_acceptance(self):
         source=(HERE/'run.py').read_text()

@@ -12,9 +12,11 @@ then verify preservation, repeat admission, and stopped rollback on a second
 clone. Parent owns execution admission, independent result review, integration,
 and any release. This folder changes no production implementation.
 
-Production pin: `50ef7b1964ae8fdc75de03235ae2e0aa993456bc` (build 307).
-Harness commit is separate. Installed build 307 / public 306 / factory are not
-rebuilt or published.
+Production pin: `98049a6cdc7285e10cf8c66e41b769e40cffc508` (build 307).
+Harness commit is separate. `build_and_run.py` builds a uniquely named native
+307 candidate from a separate clean checkout at that exact production pin, using
+the unchanged factory and frozen runtime archives. Public 306 and earlier 307
+candidates remain untouched; nothing is published.
 
 ## Run
 
@@ -36,6 +38,16 @@ private evidence and clones. Use a new evidenceRoot only after the parent has
 read the previous failure; never replay a partially migrated disk as an original.
 The parent-ready payload is prepared separately because child heavy admissions
 are unavailable. The Python runner is executable and controls its child directly.
+
+For a new native307 candidate plus this acceptance, submit `build_and_run.py`
+instead of `run.py`, with the same `--spec` / `--worker-lease inherited` arguments.
+Additional spec keys: `productionDir`, `productionSource` (exact pin above),
+`python`, `uv`, `frozenPayload`, `publicApp`, and `sparkle`. Both Git checkouts
+must be clean, the candidate path must not exist, and evidence is write-once.
+The wrapper preserves the existing build/signing/feed/payload recipe and runs
+no GUI legacy probe. It records phase logs, source hashes and frozen archive
+hashes, then creates a separate headless spec/report beneath its evidence root.
+Neither a build nor helper fixtures establish migration acceptance.
 
 Cheap local contracts (not VM evidence):
 
