@@ -169,6 +169,10 @@ def main():
     accepted = read(s['headlessReport'])
     assert sha(s['headlessReport']) == s['headlessReportSHA256']
     assert accepted['success'] and accepted['cleanupVerified'] and len(accepted['gates']) == 17 and all(g['passed'] for g in accepted['gates'])
+    assert shutil.disk_usage(root.parent).free > 12*1024**3, 'Need external-volume space for bounded packaging and rollback copies'
+    assert shutil.disk_usage('/Applications').free > 4*1024**3, 'Need space for one isolated installed app'
+    assert plist(Path(s['publicApp'])/'Contents/Info.plist')['CFBundleVersion'] == '306'
+    assert read(Path(s['publicApp'])/'Contents/Resources/wizard-release.json')['releaseID'] == 'e4c2316351baa9fb0aa8ebd7c2de7f022f136d92'
     inventory = public_inventory()
     if a.preflight_only:
         print(json.dumps({'preflightOnly':True,'candidate':str(candidate),'publicInventory':inventory,'nativeExecuted':False,'packaged':False})); return

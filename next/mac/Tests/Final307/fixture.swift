@@ -69,7 +69,7 @@ final class WizardGuestActivation {
     print("LEGACY_RUNNING_AND_FOREIGN_HOST_POLICY_REFUSED")
     func alertAction(_ title: String, before: @escaping ()->Void = {}) {
         var ticks = 0
-        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
+        let timer = Timer(timeInterval: 0.05, repeats: true) { timer in
             ticks += 1
             precondition(ticks < 100, "Bounded AppKit modal fixture")
             guard let window = NSApp.modalWindow, let root = window.contentView else { return }
@@ -78,6 +78,8 @@ final class WizardGuestActivation {
             precondition(found.count == 1, "Exact production alert button")
             before(); found[0].performClick(nil); timer.invalidate()
         }
+        // runModal uses a nested AppKit mode; a default-mode timer can starve.
+        RunLoop.main.add(timer, forMode: .modalPanel)
     }
     alertAction("Not now")
     precondition(u.admitLegacyBootstrap() && u.snapshot["phase"] as? String == "deferred")
