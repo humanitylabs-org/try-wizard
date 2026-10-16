@@ -105,7 +105,17 @@ func diskHolders() -> [Int32]? {
             audit("cold-before") { before in
                 guard before else { patchReply(nonce,nil,"Cold prestate audit failed"); return }
                 vm.runGuestPatch { receipt in
-                    guard let receipt else { patchReply(nonce,nil,"Production patch returned no receipt"); return }
+                    guard let receipt else {
+                        // Capture diagnostics before stopped rollback replaces the failed disk.
+                        let diagnostic = "python3 -c \"from pathlib import Path; p=Path('/var/lib/wizard/patches/mac-stack-v1/updater.log'); print(p.read_text(errors='replace')[-65536:] if p.exists() else 'updater log absent')\"\nexit\n"
+                        shell(diagnostic, timeout: 20) { text in
+                            let file = output.appendingPathComponent("production-patch-error.log")
+                            try? (text ?? "Private diagnostic transport failed").write(to:file,atomically:true,encoding:.utf8)
+                            try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+                            patchReply(nonce,nil,"Production patch returned no receipt")
+                        }
+                        return
+                    }
                     record("productionGuestReceipt",receipt)
                     let fence = receipt["cold_bootstrap"] as? [String:Any] ?? [:]
                     guard fence["executionFenceHeldAfterCommit"] as? Bool == true,
