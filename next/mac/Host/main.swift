@@ -240,9 +240,9 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 return
             }
             log("clean shutdown timed out; forcing stop")
-            machine.stop { result in
+            machine.stop { error in
                 DispatchQueue.main.async {
-                    guard case .success = result else {
+                    guard error == nil else {
                         try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "VM stop failed; disk retained"], WizardUpdate.response)
                         onTimeout?(); return
                     }
