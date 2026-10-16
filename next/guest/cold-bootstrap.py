@@ -8,6 +8,7 @@ Only a stopped-disk rollback restores a failed migration.
 """
 import base64
 import hashlib
+import http.client
 import http.server
 import json
 import os
@@ -152,7 +153,7 @@ def lookup(name):
 
 def permitted_container(c, policy):
     s = service(c)
-    # Baseline engine + transcriber are NEVER allowed before commit, including
+    # Baseline engine + transcriber are NEVER allowed in this daemon, including
     # newly created containers using that image under a different name.
     if c['Image'] == policy['managed']:
         return s == 'hermes-agent-engine'
@@ -165,9 +166,20 @@ def authorize(request, policy, find=lookup):
     path = re.sub(r'^/v[0-9]+\.[0-9]+', '', urlsplit(request['RequestURI']).path)
     if unquote(path) != path or '..' in path or '//' in path: return False
     method = request['RequestMethod']
-    if policy['phase'] == 'committed': return True
+    if policy['phase'] not in ('fenced', 'restoring', 'committed'): return False
     if method in ('GET', 'HEAD'): return True
     body = json.loads(base64.b64decode(request.get('RequestBody') or 'e30='))
+    if not isinstance(body, dict): return False
+    # A single exact restoration, never general execution authority. Use the
+    # full saved ID and image/service identity; names, prefixes and query flags
+    # cannot broaden this allowance. It is revoked even if the update fails.
+    restore = policy.get('restoration')
+    if policy['phase'] == 'restoring' and restore and method == 'POST':
+        if request['RequestURI'] == '/v1.54/containers/'+restore['id']+'/update':
+            c = find(restore['id'])
+            return (c is not None and c['Image'] == restore['image']
+                    and service(c) == restore['service']
+                    and body == {'RestartPolicy': restore['restart']})
     if method == 'POST' and path == '/containers/create':
         image = policy.get('references', {}).get(body.get('Image'), body.get('Image'))
         if image == policy['managed']:
@@ -182,7 +194,7 @@ def authorize(request, policy, find=lookup):
         if action in ('stop', 'kill', 'wait', 'rename'): return True
         if action == 'exec': return False  # no stock CLI invocation during cold migration
         if action == 'update':
-            return body.get('RestartPolicy', {}).get('Name') == 'no'
+            return method == 'POST' and body == {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}}
         return permitted_container(c, policy)
     # Minimal non-executing API used by sealed image load + Runtipi compose.
     if method == 'POST' and path in ('/images/load', '/images/prune', '/networks/create', '/volumes/create'): return True
@@ -237,8 +249,25 @@ def admit(token):
     return p
 
 
+def restore_restart(container_id, restart):
+    # Avoid Docker CLI's broad HostConfig default fields: this request can only
+    # change the one saved restart policy. Docker 29.9 uses API v1.54.
+    conn = http.client.HTTPConnection('localhost', timeout=30)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(30)
+    try:
+        sock.connect('/var/run/docker.sock'); conn.sock = sock
+        conn.request('POST', '/v1.54/containers/'+container_id+'/update',
+                     json.dumps({'RestartPolicy': restart}), {'Content-Type': 'application/json'})
+        response = conn.getresponse(); response.read()
+        if response.status != 200: raise RuntimeError('Restart policy restoration refused')
+    finally:
+        conn.close(); sock.close()
+
+
 def commit():
     p = read(STATE/'policy.json')
+    if p['phase'] != 'fenced': raise RuntimeError('Cold commit authority mismatch')
     ids = run(['docker','ps','-aq']).split()
     cs = json.loads(run(['docker','inspect',*ids]))
     main = [c for c in cs if service(c)=='hermes-agent-engine']
@@ -250,19 +279,40 @@ def commit():
     if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Old image recreation admitted after load/refresh')
     witness = read(STATE/'witness.json'); witness['oldImageRecreationDeniedAfterMigration'] = True
     write(STATE/'witness.json', witness)
-    # Main unmanaged container has been removed; restore original non-main restart
-    # policies for the subsequent normal boot. Full rollback uses untouched disk.
-    p['phase'] = 'committed'; write(STATE/'policy.json',p)
-    for c in cs:
-        old = p['containers'].get(c['Id'])
-        if old:
-            rp = old['restart']; name = rp['Name']
-            if name == 'on-failure' and rp['MaximumRetryCount']: name += ':'+str(rp['MaximumRetryCount'])
-            run(['docker','update','--restart='+name,c['Id']])
+    # Restore only one exact saved policy at a time. No phase ever makes the
+    # live plugin permissive; even a partial restoration failure stays fenced.
+    try:
+        for c in cs:
+            old = p['containers'].get(c['Id'])
+            if old:
+                if c['Image'] != old['image'] or service(c) != old['service']:
+                    raise RuntimeError('Restoration container identity changed')
+                p['phase'] = 'restoring'
+                p['restoration'] = {'id': c['Id'], **old}
+                write(STATE/'policy.json', p)
+                restore_restart(c['Id'], old['restart'])
+    finally:
+        p.pop('restoration', None); p['phase'] = 'fenced'
+        write(STATE/'policy.json', p)
     # Remove AuthZ only on the next Docker start; current daemon retains its
-    # configured plugin until shutdown. Preserve the exact original config bytes.
+    # configured plugin and execution denial until shutdown.
     shutil.copy2(STATE/'daemon.original.json', '/etc/docker/daemon.json')
-    return read(STATE/'witness.json')
+    p['phase'] = 'committed'; write(STATE/'policy.json', p)
+    # Exercise the still-live plugin after commit, not just before restoration.
+    # This receipt reaches the Host while the maintenance VM is still running.
+    probes = [('create', ['create', '--label', 'com.docker.compose.service=hermes-agent-engine', STOCK, 'python3', '-c', 'raise SystemExit(99)'])]
+    for c in cs:
+        if c['Image'] == STOCK:
+            probes.extend([(action, [action, c['Id']]) for action in ('start', 'restart', 'unpause')])
+            probes.append(('exec', ['exec', c['Id'], 'python3', '-c', 'raise SystemExit(99)']))
+    for action, args in probes:
+        denied = subprocess.run(['docker', *args], capture_output=True, text=True, timeout=30)
+        if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr:
+            raise RuntimeError('Post-commit stock execution not rejected: '+action)
+    witness['postCommitDeniedRoutes'] = sorted(set(action for action, _ in probes))
+    witness['executionFenceHeldAfterCommit'] = True
+    write(STATE/'witness.json', witness)
+    return witness
 
 
 if __name__ == '__main__':

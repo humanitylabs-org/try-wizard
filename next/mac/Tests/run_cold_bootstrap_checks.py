@@ -56,9 +56,10 @@ def main():
         env['PATH']=str(root/'venv/bin')+':'+env['PATH']
         check('guest-policy', [python,source/'next/guest/tests/test_cold_bootstrap.py'])
         mac=source/'next/mac'
+        check('process-identity', [python,mac/'Tests/test_legacy_process_identity.py'])
         check('compile-admission',['xcrun','swiftc','-swift-version','5','-target','arm64-apple-macos14.0',mac/'Shared/UpdateContract.swift',mac/'Tests/LegacyAdmission/main.swift','-o',root/'admission'])
         check('admission',[root/'admission',root/'admission-data'])
-        check('compile-activation',['xcrun','swiftc','-swift-version','5','-target','arm64-apple-macos14.0',mac/'App/WizardGuestActivation.swift',mac/'Tests/GuestActivation/main.swift','-framework','AppKit','-o',root/'activation'])
+        check('compile-activation',['xcrun','swiftc','-swift-version','5','-target','arm64-apple-macos14.0',mac/'Shared/DiskIdentity.swift',mac/'App/WizardGuestActivation.swift',mac/'Tests/GuestActivation/main.swift','-framework','AppKit','-o',root/'activation'])
         check('activation',[root/'activation',root/'activation-data'])
         payload=root/'payload'
         check('clone-sealed-payload',['cp','-cR',spec['frozenPayload'],payload])

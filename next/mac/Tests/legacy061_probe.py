@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import signal
 import socket
@@ -50,6 +51,50 @@ def process_rows():
         pid, command = line.strip().split(None, 1)
         rows.append((int(pid), command))
     return rows
+
+
+def wizard_process_identity(pid, command):
+    """Read the executable's own bundle, not a basename or the outer Host app.
+
+    Only the separately verified pre-MVP product is a known disjoint identity.
+    Unknown/unreadable identities fail closed rather than evade the MVP guard.
+    """
+    match = re.match(r'^(/.+)/Contents/MacOS/(Wizard Host|Wizard)(?:\s|$)', command)
+    if not match: raise RuntimeError('Unknown Wizard executable identity: '+str(pid))
+    bundle, executable = Path(match[1]), match[2]
+    info = plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
+    identity = info.get('CFBundleIdentifier')
+    if info.get('CFBundleExecutable') != executable:
+        raise RuntimeError('Wizard executable/plist identity mismatch: '+str(pid))
+    if identity in (DOMAIN, DOMAIN+'.host'):
+        raise RuntimeError('Competing MVP app/Host is running: '+str(pid))
+    if identity not in ('org.humanitylabs.wizard', 'org.humanitylabs.wizard.host'):
+        raise RuntimeError('Unknown Wizard bundle identity: '+str(pid))
+    outer = next((p for p in reversed(bundle.parents) if p.suffix == '.app'), bundle)
+    outer_info = plistlib.loads((outer/'Contents/Info.plist').read_bytes())
+    if outer_info.get('CFBundleIdentifier') != 'org.humanitylabs.wizard':
+        raise RuntimeError('Unknown outer Wizard bundle identity: '+str(pid))
+    return {'pid':pid, 'bundle':str(bundle), 'bundleID':identity,
+            'outerBundleID':outer_info['CFBundleIdentifier'], 'version':info.get('CFBundleShortVersionString'),
+            'preferencesDomain':'org.humanitylabs.wizard',
+            # Verified pre-MVP Shared.swift uses this fixed applicationSupport root,
+            # not the MVP DataHome preference (recorded in parent coordination).
+            'supportDir':str(Path.home()/'Library/Application Support/Wizard')}
+
+
+def assert_no_competing_wizard():
+    disjoint = []
+    for pid, command in process_rows():
+        if '/Contents/MacOS/Wizard' not in command: continue
+        record = wizard_process_identity(pid, command)
+        listeners = run(['lsof','-nP','-a','-p',str(pid),'-iTCP','-sTCP:LISTEN','-Fn'], check=False)
+        if listeners.returncode not in (0, 1): raise RuntimeError('Cannot inspect Wizard listeners')
+        names = [line[1:] for line in listeners.stdout.splitlines() if line.startswith('n')]
+        ports = sorted({int(name.rsplit(':',1)[1]) for name in names})
+        if not set(ports).issubset({47823,47830}): raise RuntimeError('Disjoint Wizard has unexpected listening ports')
+        record.update(listeningPorts=ports, untouched=True)
+        disjoint.append(record)
+    return disjoint
 
 
 def app_processes(app):
@@ -136,7 +181,7 @@ def main():
         assert info['CFBundleIdentifier'] == DOMAIN
     release = read_json(a.new_app / 'Contents/Resources/wizard-release.json')
     assert release['releaseID'] == (a.candidate_source or FROZEN) and release['build'] == ('307' if a.candidate_source else '306')
-    assert not any('/Contents/MacOS/Wizard' in command for _, command in process_rows()), 'A Wizard app or Host is already running; do not touch shared preferences'
+    disjoint_processes = assert_no_competing_wizard()
     assert not app_processes(a.new_app) and not app_processes(a.old_app), 'An app is already running'
     for port in [48000, 48023, 48030]:
         with socket.socket() as sock:
@@ -153,7 +198,9 @@ def main():
                 'purpose': 'native consented cold candidate' if a.candidate_source else 'unprimed direct replacement gap reproduction',
                 'upgradeAccepted': False, 'private305Used': False,
                 'manualMigrationUsed': False, 'transactionPrimed': False,
-                'maxQAVMs': 1, 'memoryMiB': 4096, 'leaseMode': 'durable-worker-inherited'}
+                'maxQAVMs': 1, 'memoryMiB': 4096, 'leaseMode': 'durable-worker-inherited',
+                'disjointProcesses': disjoint_processes, 'selectedPorts': [48000,48023,48030],
+                'selectedPreferencesDomain':DOMAIN, 'selectedDataHome':str(data)}
     def save():
         target = a.root / 'result.json'
         tmp = target.with_suffix('.tmp')
@@ -186,7 +233,7 @@ def main():
         assert not app_processes(app)
 
     def start(app, label):
-        assert not any('/Wizard Host.app/' in command for _, command in process_rows()), 'Unexpected Host appeared'
+        evidence.setdefault("prelaunchDisjointProcesses", []).append(assert_no_competing_wizard())
         launched.append(app)
         uid = str(os.getuid())
         run(['sudo', '-n', 'launchctl', 'asuser', uid, 'sudo', '-n', '-u', getpass.getuser(), 'open', '-n', '-g', '-j', app])
@@ -255,6 +302,8 @@ def main():
         if a.candidate_source:
             receipt=read_json(data/'updates/guest-receipt.json');witness=receipt.get('cold_bootstrap',{})
             assert witness.get('noOldEngine') and witness.get('forbiddenStartDenied') and witness.get('oldImageRecreationDeniedAfterMigration')
+            assert witness.get('executionFenceHeldAfterCommit')
+            assert {'create','start','exec'}.issubset(witness.get('postCommitDeniedRoutes', []))
             assert receipt['permanent_identity_credentials_preserved'] and receipt['configured_model_preserved']
             assert evidence['nativeConsentClicks']==['candidate307']
             evidence['coldWitness']=witness; evidence['candidateTested']=True

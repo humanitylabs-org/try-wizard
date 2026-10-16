@@ -1,23 +1,6 @@
 import Foundation
 import Darwin
 
-/// Cooperating native processes serialize disk ownership; old Hosts are separately
-/// refused by bundle/process discovery before the App snapshots anything.
-final class WizardDiskOwnership {
-    private var fd: Int32 = -1
-    func acquire() throws {
-        guard fd < 0 else { return }
-        let url = WizardShared.osDir.appendingPathComponent("disk-owner.lock")
-        fd = open(url.path, O_CREAT | O_RDWR, 0o600)
-        guard fd >= 0, flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-            if fd >= 0 { close(fd); fd = -1 }
-            throw WizardUpdate.error("Another process owns this Wizard disk")
-        }
-    }
-    func release() { if fd >= 0 { flock(fd, LOCK_UN); close(fd); fd = -1 } }
-    deinit { release() }
-}
-
 /// Contract shared by the Wizard app (front end) and Wizard Host (back-end runner).
 enum WizardShared {
     static let hostBundleID = "org.humanitylabs.wizard.mvp.host"
@@ -58,15 +41,12 @@ enum WizardShared {
         let manifest = WizardUpdate.json(osDir.appendingPathComponent("manifest.json"))
         if manifest["version"] as? String == "0.4.0" { return false }
         let receipt = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("legacy-complete.json"))
-        if receipt["diskIdentity"] as? String == diskIdentity { return false }
         let modern = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
-        if modern["managed_runtime_image"] as? String != nil,
-           WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-activated" { return false }
-        return true // unknown disks are refused by validation, never ordinarily booted
+        return !WizardDiskIdentity.completed(receipt, modern: modern, journal: WizardUpdate.json(WizardUpdate.journal),
+                                             disk: osDir.appendingPathComponent("disk.img"), home: supportDir)
     }
     static var diskIdentity: String {
-        let a = try? FileManager.default.attributesOfItem(atPath: osDir.appendingPathComponent("disk.img").path)
-        return "\(a?[.systemNumber] ?? "?"):\(a?[.systemFileNumber] ?? "?")"
+        WizardDiskIdentity.read(osDir.appendingPathComponent("disk.img")) ?? "unknown"
     }
     static var coldBootstrapToken: String? {
         let j = WizardUpdate.json(WizardUpdate.journal)

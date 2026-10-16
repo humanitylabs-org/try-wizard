@@ -46,7 +46,7 @@ def main():
     check('compile-admission', ['xcrun', 'swiftc', '-swift-version', '5', '-target', 'arm64-apple-macos14.0', source / 'Shared/UpdateContract.swift', source / 'Tests/LegacyAdmission/main.swift', '-o', root / 'admission'], 120)
     check('admission', [root / 'admission', root / 'admission-data'], 90)
     # Reuse the accepted modern rollback test; no native production source changes.
-    check('compile-activation', ['xcrun', 'swiftc', '-swift-version', '5', '-target', 'arm64-apple-macos14.0', source / 'App/WizardGuestActivation.swift', source / 'Tests/GuestActivation/main.swift', '-framework', 'AppKit', '-o', root / 'activation'], 120)
+    check('compile-activation', ['xcrun', 'swiftc', '-swift-version', '5', '-target', 'arm64-apple-macos14.0', source / 'Shared/DiskIdentity.swift', source / 'App/WizardGuestActivation.swift', source / 'Tests/GuestActivation/main.swift', '-framework', 'AppKit', '-o', root / 'activation'], 120)
     check('activation', [root / 'activation', root / 'activation-data'], 60)
     check('unprimed-direct-replacement', [sys.executable, source / 'Tests/legacy061_probe.py', '--root', root / 'vm', '--baseline-disk', spec['baselineDisk'], '--boot-dir', spec['bootDir'], '--old-app', spec['oldApp'], '--old-launch-app', spec['oldLaunchApp'], '--new-app', spec['newApp'], '--quit-helper', spec['quitHelper'], '--worker-lease', 'inherited'], 1200)
     results['phase'] = 'diagnostic-complete-not-upgrade-acceptance'

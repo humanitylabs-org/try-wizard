@@ -123,8 +123,8 @@ import Darwin
                 guard let self else { return }
                 self.activatingGuest = false; self.releaseLease()
                 if error == nil {
-                    do { try WizardUpdate.write(["diskIdentity": WizardShared.diskIdentity, "releaseID": release.releaseID], WizardUpdate.dir.appendingPathComponent("legacy-complete.json")) }
-                    catch { self.show("failed", "Upgrade health passed but completion record could not be saved"); return }
+                    // Disk-bound normal-boot receipt was persisted under ownership
+                    // before launching the Host; this callback confirms live health.
                     self.onGuestFinished()
                 }
                 self.show(error == nil ? "installed" : "failed", error ?? "Existing Wizard upgraded; your data is preserved.")

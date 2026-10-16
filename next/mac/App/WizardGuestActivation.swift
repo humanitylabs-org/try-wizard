@@ -96,17 +96,31 @@ import Darwin
     }
     private func completeStopped(_ migrationError: String?) {
             do {
+                let ownership = WizardDiskOwnership(); try ownership.acquire()
+                defer { ownership.release() }
                 guard !HostControl.isRunning, !HostControl.hasForeignRunner else { throw WizardUpdate.error("Another Host appeared; no disk restored") }
+                var journal = WizardUpdate.json(WizardUpdate.journal)
+                // Recovery and successful completion must refer to the same disk
+                // admitted before maintenance. Compare under the ownership lock,
+                // before touching the rollback staging file or either receipt.
+                try WizardDiskIdentity.requireColdOwner(journal)
                 if let migrationError {
-                    let ownership = WizardDiskOwnership(); try ownership.acquire()
-                    defer { ownership.release() }
                     let disk = WizardShared.osDir.appendingPathComponent("disk.img")
                     let restored = WizardUpdate.dir.appendingPathComponent("restore-disk.img")
                     try? FileManager.default.removeItem(at: restored)
                     guard clonefile(Self.backup.path, restored.path, 0) == 0 else { throw WizardUpdate.error("Rollback clone failed") }
-                    // Same stopped owner's disk, atomic replacement; hardware IDs/shares/prefs untouched.
+                    // Record the intentional inode transition BEFORE the atomic
+                    // replacement, so even a crash at rename leaves explicit evidence.
+                    if journal["kind"] as? String == "legacy-cold" {
+                        guard let target = WizardDiskIdentity.read(restored) else { throw WizardUpdate.error("Rollback identity unavailable") }
+                        journal["rollbackIdentityTransition"] = ["from": journal["diskIdentity"] as? String ?? "", "to": target]
+                        try WizardUpdate.write(journal, WizardUpdate.journal)
+                    }
                     guard rename(restored.path, disk.path) == 0 else { throw WizardUpdate.error("Rollback disk activation failed") }
-                    var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "guest-rolled-back"; journal["error"] = migrationError
+                    if let transition = journal["rollbackIdentityTransition"] as? [String: String] {
+                        journal["diskIdentity"] = transition["to"]
+                    }
+                    journal["phase"] = "guest-rolled-back"; journal["error"] = migrationError
                     try WizardUpdate.write(journal, WizardUpdate.journal)
                     if journal["kind"] as? String == "legacy-cold" {
                         try? FileManager.default.removeItem(at: WizardUpdate.maintenanceJournal)
@@ -114,10 +128,22 @@ import Darwin
                         onDone("Prior guest restored and left stopped — \(migrationError)"); return
                     }
                 } else {
-                    var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "guest-activated"
+                    guard let identity = WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img")),
+                          let nonce = journal["nonce"] as? String, !nonce.isEmpty else { throw WizardUpdate.error("Activation disk binding unavailable") }
+                    let receiptURL = WizardUpdate.dir.appendingPathComponent("guest-receipt.json")
+                    var receipt = WizardUpdate.json(receiptURL)
+                    receipt["diskIdentity"] = identity; receipt["transactionNonce"] = nonce
+                    try WizardUpdate.write(receipt, receiptURL)
+                    journal["diskIdentity"] = identity; journal["phase"] = "guest-activated"
                     try WizardUpdate.write(journal, WizardUpdate.journal)
+                    if journal["kind"] as? String == "legacy-cold" {
+                        // Admission for normal boot, not a live-runtime health claim.
+                        let completion = try WizardDiskIdentity.completionRecord(journal)
+                        try WizardUpdate.write(completion, WizardUpdate.dir.appendingPathComponent("legacy-complete.json"))
+                    }
                 }
                 try? FileManager.default.removeItem(at: WizardUpdate.request)
+                ownership.release()
                 HostControl.ensureRunning()
                 HostControl.waitForLocalWizard(timeout: 300, tick: { _ in }) { ready in
                     guard ready else { self.onDone("Normal boot did not pass health checks; prior disk and app remain available"); return }
