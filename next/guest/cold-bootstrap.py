@@ -25,6 +25,7 @@ from urllib.parse import urlsplit, unquote
 STATE = Path('/var/lib/wizard/cold-bootstrap')
 DOCKER = Path('/var/lib/docker/containers')
 PAYLOAD = Path('/run/wizard-update')
+DAEMON = Path('/etc/docker/daemon.json')
 # Exact images inspected from the original used 0.6.1 / guest0.3.0 disk.
 STOCK = 'sha256:666d6c659574fa09c1ea47b7ec5f03e8d2c35a8aa8055fe60c1e2fe3d3e03e9b'
 KNOWN = {
@@ -95,7 +96,7 @@ def install():
     versions = run(['dpkg-query', '-W', '-f=${Package}=${Version}\n', 'docker-ce', 'containerd.io'])
     if set(versions.splitlines()) != {'docker-ce=5:29.9.0-1~debian.13~trixie', 'containerd.io=2.4.1-2~debian.13~trixie'}:
         raise RuntimeError('Unsupported Docker/containerd version')
-    daemon = Path('/etc/docker/daemon.json')
+    daemon = DAEMON
     cfg = read(daemon)
     if set(cfg) - {'features', 'log-driver', 'log-opts'} or cfg.get('features') != {'containerd-snapshotter': False}:
         raise RuntimeError('Unknown Docker daemon configuration')
@@ -106,6 +107,12 @@ def install():
     if managed['image'] != bom['managed_runtime']['image']: raise RuntimeError('Managed BOM mismatch')
     STATE.mkdir(mode=0o700)
     shutil.copy2(daemon, STATE/'daemon.original.json')
+    shutil.copy2(__file__, STATE/'gate.py'); os.chmod(STATE/'gate.py', 0o700)
+    # Install the persistent pre-daemon barrier BEFORE changing any restart policy.
+    # Missing/partial policy after a crash refuses Docker on the next boot.
+    write(Path('/etc/systemd/system/docker.service.d/wizard-cold.conf'),
+          '[Unit]\nRequires=wizard-cold-authz.service\nAfter=wizard-cold-authz.service\n'
+          '[Service]\nExecStartPre=/usr/bin/python3 /var/lib/wizard/cold-bootstrap/gate.py daemon-start\n', 0o644)
     saved = {}
     for p, c, h in rows:
         saved[p.name] = {'service': service(c), 'image': c['Image'], 'restart': h['RestartPolicy'], 'started': c.get('HasBeenStartedBefore', False)}
@@ -133,7 +140,6 @@ def install():
     write(daemon, cfg, 0o644)
     unit = '[Unit]\nDefaultDependencies=no\nAfter=systemd-tmpfiles-setup.service\nBefore=docker.service\n[Service]\nType=notify\nNotifyAccess=main\nExecStart=/usr/bin/python3 /var/lib/wizard/cold-bootstrap/gate.py serve\nRestart=on-failure\n'
     write(Path('/etc/systemd/system/wizard-cold-authz.service'), unit, 0o644)
-    write(Path('/etc/systemd/system/docker.service.d/wizard-cold.conf'), '[Unit]\nRequires=wizard-cold-authz.service\nAfter=wizard-cold-authz.service\n', 0o644)
     # No default target, timers, user sessions or arbitrary user units in this boot.
     write(Path('/etc/systemd/system/wizard-cold.target'), '[Unit]\nDescription=Wizard cold upgrade\nDefaultDependencies=no\nRequires=sysinit.target docker.service systemd-networkd.service systemd-resolved.service wizard-dev.service wizard-ctl.service wizard-media.service\nAfter=sysinit.target\n', 0o644)
     os.sync()
@@ -168,20 +174,10 @@ def authorize(request, policy, find=lookup):
     path = re.sub(r'^/v[0-9]+\.[0-9]+', '', urlsplit(uri).path)
     if unquote(path) != path or '..' in path or '//' in path: return False
     method = request['RequestMethod']
-    if policy['phase'] not in ('fenced', 'restoring', 'committed'): return False
+    if policy['phase'] not in ('fenced', 'committed'): return False
     if method in ('GET', 'HEAD'): return True
     body = json.loads(base64.b64decode(request.get('RequestBody') or 'e30='))
     if not isinstance(body, dict): return False
-    # A single exact restoration, never general execution authority. Use the
-    # full saved ID and image/service identity; names, prefixes and query flags
-    # cannot broaden this allowance. It is revoked even if the update fails.
-    restore = policy.get('restoration')
-    if policy['phase'] == 'restoring' and restore and method == 'POST':
-        if request['RequestUri'] == '/v1.54/containers/'+restore['id']+'/update':
-            c = find(restore['id'])
-            return (c is not None and c['Image'] == restore['image']
-                    and service(c) == restore['service']
-                    and body == {'RestartPolicy': restore['restart']})
     if method == 'POST' and path == '/containers/create':
         image = policy.get('references', {}).get(body.get('Image'), body.get('Image'))
         if image == policy['managed']:
@@ -251,25 +247,68 @@ def admit(token):
     return p
 
 
-def restore_restart(container_id, restart):
-    # Avoid Docker CLI's broad HostConfig default fields: this request can only
-    # change the one saved restart policy. Docker 29.9 uses API v1.54.
-    conn = http.client.HTTPConnection('localhost', timeout=30)
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(30)
-    try:
-        sock.connect('/var/run/docker.sock'); conn.sock = sock
-        conn.request('POST', '/v1.54/containers/'+container_id+'/update',
-                     json.dumps({'RestartPolicy': restart}), {'Content-Type': 'application/json'})
-        response = conn.getresponse(); response.read()
-        if response.status != 200: raise RuntimeError('Restart policy restoration refused')
-    finally:
-        conn.close(); sock.close()
+def boot_context():
+    return (Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+            Path('/proc/cmdline').read_text().split())
+
+
+def retained_containers(p):
+    rows = []
+    for cid, old in p['containers'].items():
+        if not re.fullmatch('[a-f0-9]{64}', cid): raise RuntimeError('Invalid saved container ID')
+        directory = DOCKER/cid
+        if not directory.exists(): continue  # replaced main runtime, never recreated
+        if directory.is_symlink(): raise RuntimeError('Container metadata symlink')
+        c, h = read(directory/'config.v2.json'), read(directory/'hostconfig.json')
+        if c['Image'] != old['image'] or service(c) != old['service']:
+            raise RuntimeError('Restoration container identity changed')
+        rows.append((directory, old, h))
+    return rows
+
+
+def daemon_start():
+    """ExecStartPre: offline restore ONLY across a validated normal-boot boundary.
+
+    Same-boot daemon replacement must retain BOTH AuthZ and disabled restart
+    policies: Docker's internal restart manager bypasses AuthZ. Durable recovering
+    state replays safely after an interrupted offline restore; Docker cannot run
+    until every write succeeds. Original bytes/config remain available for audit.
+    """
+    p = read(STATE/'policy.json')
+    boot, cmdline = boot_context()
+    daemon = DAEMON
+    if boot == p['bootID']:
+        if 'wizard.cold='+p['token'] not in cmdline or p['phase'] not in ('fenced', 'committed'):
+            raise RuntimeError('Invalid maintenance boot')
+        cfg = read(daemon)
+        if cfg.get('authorization-plugins') != ['wizard-cold'] or cfg.get('live-restore') is not False:
+            raise RuntimeError('Maintenance daemon fence changed')
+        for _, _, h in retained_containers(p):
+            if h['RestartPolicy'] != {'Name':'no','MaximumRetryCount':0}:
+                raise RuntimeError('Maintenance restart policy changed')
+        return  # no writes, including after commit
+    if any(x.startswith(('wizard.cold=', 'init=', 'systemd.unit=', 'rd.systemd.unit=')) for x in cmdline):
+        raise RuntimeError('Not an ordinary normal boot')
+    if p['phase'] == 'activated': return  # never reapply over later owner changes
+    if p['phase'] not in ('committed', 'recovering'):
+        raise RuntimeError('Incomplete cold transaction; restore stopped snapshot')
+    witness = read(STATE/'witness.json')
+    if witness.get('executionFenceHeldAfterCommit') is not True:
+        raise RuntimeError('Missing committed fence witness')
+    rows = retained_containers(p)  # validate ALL identities before any write
+    p['phase'] = 'recovering'; write(STATE/'policy.json', p)
+    for directory, old, h in rows:
+        h['RestartPolicy'] = old['restart']
+        write(directory/'hostconfig.json', h)
+    # Atomic, fsynced restoration of the exact original configuration bytes.
+    write(daemon, (STATE/'daemon.original.json').read_text(), 0o644)
+    p['phase'] = 'activated'; p['normalBootID'] = boot
+    write(STATE/'policy.json', p)
 
 
 def commit():
     p = read(STATE/'policy.json')
-    if p['phase'] != 'fenced': raise RuntimeError('Cold commit authority mismatch')
+    if p['phase'] != 'fenced' or boot_context()[0] != p['bootID']: raise RuntimeError('Cold commit authority mismatch')
     ids = run(['docker','ps','-aq']).split()
     cs = json.loads(run(['docker','inspect',*ids]))
     main = [c for c in cs if service(c)=='hermes-agent-engine']
@@ -281,24 +320,9 @@ def commit():
     if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Old image recreation admitted after load/refresh')
     witness = read(STATE/'witness.json'); witness['oldImageRecreationDeniedAfterMigration'] = True
     write(STATE/'witness.json', witness)
-    # Restore only one exact saved policy at a time. No phase ever makes the
-    # live plugin permissive; even a partial restoration failure stays fenced.
-    try:
-        for c in cs:
-            old = p['containers'].get(c['Id'])
-            if old:
-                if c['Image'] != old['image'] or service(c) != old['service']:
-                    raise RuntimeError('Restoration container identity changed')
-                p['phase'] = 'restoring'
-                p['restoration'] = {'id': c['Id'], **old}
-                write(STATE/'policy.json', p)
-                restore_restart(c['Id'], old['restart'])
-    finally:
-        p.pop('restoration', None); p['phase'] = 'fenced'
-        write(STATE/'policy.json', p)
-    # Remove AuthZ only on the next Docker start; current daemon retains its
-    # configured plugin and execution denial until shutdown.
-    shutil.copy2(STATE/'daemon.original.json', '/etc/docker/daemon.json')
+    # Commit is NOT permission to restore policies or remove the daemon plugin.
+    # Both stay durable for this entire boot, even if dockerd crashes/restarts.
+    daemon_start()  # same-boot offline metadata/config consequence check
     p['phase'] = 'committed'; write(STATE/'policy.json', p)
     # Exercise the still-live plugin after commit, not just before restoration.
     # This receipt reaches the Host while the maintenance VM is still running.
@@ -328,6 +352,8 @@ if __name__ == '__main__':
                 with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as sock:
                     sock.connect('\0'+notify[1:] if notify.startswith('@') else notify); sock.sendall(b'READY=1')
             server.serve_forever()
+    elif sys.argv[1:] == ['daemon-start']:
+        daemon_start()
     elif sys.argv[1:] == ['init']:
         try: install()
         except BaseException as e:
@@ -335,4 +361,4 @@ if __name__ == '__main__':
             os.sync()
             # PID1 must not exit/fall through to an ordinary boot after refusal.
             while True: time.sleep(3600)
-    else: raise SystemExit('Expected init or serve')
+    else: raise SystemExit('Expected init, serve or daemon-start')

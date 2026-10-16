@@ -80,76 +80,100 @@ class ColdTests(unittest.TestCase):
             self.policy['phase'] = phase
             self.assert_stock_denied(self.policy)
 
-    def test_restoration_is_exact_and_only_while_pending(self):
-        cid = 'a'*64
-        rp = {'Name': 'on-failure', 'MaximumRetryCount': 3}
-        self.policy.update(phase='restoring', restoration={'id':cid, 'image':G.STOCK, 'service':'hermes-agent-engine', 'restart':rp})
-        path = '/containers/'+cid+'/update'
-        body = {'RestartPolicy':rp}
-        self.assertTrue(G.authorize(self.request(path, body=body), self.policy, lambda _:self.old))
-        for route, payload in ((path+'?force=1',body), ('/containers/old/update',body),
-                               (path,{'RestartPolicy':{'Name':'always','MaximumRetryCount':0}}),
-                               (path,{**body,'Memory':4096}), (path,{**body,'Privileged':True})):
-            self.assertFalse(G.authorize(self.request(route, body=payload), self.policy, lambda _:self.old))
-        self.assertFalse(G.authorize(self.request(path, body=body), self.policy, lambda _:None))
-        changed = {**self.old, 'Image':'sha256:other'}
-        self.assertFalse(G.authorize(self.request(path, body=body), self.policy, lambda _:changed))
-        for phase in ('fenced','committed'):
-            self.policy['phase']=phase
-            self.assertFalse(G.authorize(self.request(path, body=body), self.policy, lambda _:self.old))
+    def lifecycle_fixture(self):
+        import contextlib
+        @contextlib.contextmanager
+        def fixture():
+            with tempfile.TemporaryDirectory() as tmp:
+                state = Path(tmp)/'state'; docker = Path(tmp)/'containers'
+                daemon = Path(tmp)/'daemon.json'; cid = 'a'*64
+                rp = {'Name':'unless-stopped','MaximumRetryCount':0}
+                old = {'image':G.STOCK,'service':'transcriber-engine','restart':rp}
+                p = {**self.policy, 'bootID':'cold-boot','token':'test','containers':{cid:old}}
+                c = {'Id':cid, 'Image':G.STOCK,'State':{'Running':False},
+                     'Config':{'Labels':{'com.docker.compose.service':'transcriber-engine'}}}
+                G.write(docker/cid/'config.v2.json', c)
+                G.write(docker/cid/'hostconfig.json', {'RestartPolicy':{'Name':'no','MaximumRetryCount':0},'Other':'retain'})
+                G.write(state/'policy.json',p); G.write(state/'witness.json',{})
+                original = '{ "log-driver": "json-file", "features": {"containerd-snapshotter": false} }\n'
+                G.write(state/'daemon.original.json',original)
+                G.write(daemon,{'authorization-plugins':['wizard-cold'],'live-restore':False})
+                with patch.object(G,'STATE',state), patch.object(G,'DOCKER',docker), patch.object(G,'DAEMON',daemon), \
+                     patch.object(G,'boot_context',return_value=('cold-boot',['wizard.cold=test'])) as boot:
+                    yield state,docker,daemon,cid,p,c,boot,original
+        return fixture()
 
-    def exercise_commit(self, fail):
-        with tempfile.TemporaryDirectory() as tmp:
-            state = Path(tmp)
-            cid = 'a'*64
-            rp = {'Name':'unless-stopped','MaximumRetryCount':0}
-            p = {**self.policy, 'token':'test', 'containers':{cid:{'image':G.STOCK,'service':'hermes-agent-engine','restart':rp}}}
-            cs = [{**self.old,'Id':cid,'State':{'Running':False}, 'Config':{'Labels':{'com.docker.compose.service':'transcriber-engine'}}},
-                  {'Id':'b'*64,'Image':p['managed'],'Config':self.old['Config'],'State':{'Running':False}}]
-            p['containers'][cid]['service']='transcriber-engine'
-            G.write(state/'policy.json',p); G.write(state/'witness.json',{})
-            G.write(state/'daemon.original.json',{'original':True})
-            real_read=G.read
-            def read(path):
-                if str(path)=='/var/lib/wizard/managed/lease.json': return {'token':'test','phase':'held'}
-                return real_read(path)
-            def restore(container_id, restart):
-                active=real_read(state/'policy.json')
-                self.assert_stock_denied(active)
-                self.assertTrue(G.authorize(self.request('/containers/'+cid+'/update',body={'RestartPolicy':rp}), active, lambda _:cs[0]))
-                if fail: raise RuntimeError('injected restoration failure')
-            with patch.object(G,'STATE',state), patch.object(G,'read',side_effect=read), \
-                 patch.object(G,'run',side_effect=[' '.join(c['Id'] for c in cs),json.dumps(cs)]), \
-                 patch.object(G.subprocess,'run',return_value=Mock(returncode=1,stderr='WIZARD_COLD_DENIED')), \
-                 patch.object(G,'restore_restart',side_effect=restore), patch.object(G.shutil,'copy2') as copy:
-                if fail:
-                    with self.assertRaisesRegex(RuntimeError,'injected'): G.commit()
-                    copy.assert_not_called()
-                else:
-                    G.commit()
-                    copy.assert_called_once_with(state/'daemon.original.json','/etc/docker/daemon.json')
-            final=real_read(state/'policy.json')
-            self.assertEqual(final['phase'], 'fenced' if fail else 'committed')
-            self.assertNotIn('restoration',final)
-            self.assert_stock_denied(final)
-            self.assertFalse(G.authorize(self.request('/containers/'+cid+'/update',body={'RestartPolicy':rp}), final, lambda _:cs[0]))
+    def commit_fixture(self, p, c):
+        cs = [c, {'Id':'b'*64,'Image':p['managed'],'Config':self.old['Config'],'State':{'Running':False}}]
+        real_read=G.read
+        def read(path):
+            if str(path)=='/var/lib/wizard/managed/lease.json': return {'token':'test','phase':'held'}
+            return real_read(path)
+        with patch.object(G,'read',side_effect=read), \
+             patch.object(G,'run',side_effect=[' '.join(c['Id'] for c in cs),json.dumps(cs)]), \
+             patch.object(G.subprocess,'run',return_value=Mock(returncode=1,stderr='WIZARD_COLD_DENIED')):
+            return G.commit()
 
-    def test_restoration_http_request_is_bounded_and_restart_only(self):
-        cid='a'*64; rp={'Name':'always','MaximumRetryCount':0}
-        for status in (200,500):
-            with patch.object(G.http.client,'HTTPConnection') as connection, patch.object(G.socket,'socket') as socket:
-                client=connection.return_value
-                client.getresponse.return_value.status=status
-                if status==200: G.restore_restart(cid,rp)
-                else:
-                    with self.assertRaisesRegex(RuntimeError,'restoration refused'): G.restore_restart(cid,rp)
-                connection.assert_called_once_with('localhost',timeout=30)
-                socket.return_value.settimeout.assert_called_once_with(30)
-                client.request.assert_called_once_with('POST','/v1.54/containers/'+cid+'/update',json.dumps({'RestartPolicy':rp}),{'Content-Type':'application/json'})
-                client.close.assert_called_once(); socket.return_value.close.assert_called_once()
+    def test_commit_and_same_boot_daemon_replacement_keep_both_fences(self):
+        with self.lifecycle_fixture() as (state,docker,daemon,cid,p,c,boot,original):
+            before = [daemon.read_bytes(), (docker/cid/'hostconfig.json').read_bytes()]
+            self.commit_fixture(p,c)
+            for _ in range(3): G.daemon_start()
+            self.assertEqual(before,[daemon.read_bytes(),(docker/cid/'hostconfig.json').read_bytes()])
+            self.assertEqual(G.read(state/'policy.json')['phase'],'committed')
+            self.assert_stock_denied(G.read(state/'policy.json'))
 
-    def test_real_commit_never_opens_stock_execution(self): self.exercise_commit(False)
-    def test_restoration_failure_revokes_allowance_keeps_fence(self): self.exercise_commit(True)
+    def test_normal_boot_restores_exact_config_and_original_policies_once(self):
+        with self.lifecycle_fixture() as (state,docker,daemon,cid,p,c,boot,original):
+            self.commit_fixture(p,c)
+            boot.return_value=('normal-boot',['console=hvc0','root=/dev/vda','rw'])
+            G.daemon_start()
+            self.assertEqual(daemon.read_text(),original)
+            h=G.read(docker/cid/'hostconfig.json')
+            self.assertEqual(h,{'RestartPolicy':p['containers'][cid]['restart'],'Other':'retain'})
+            self.assertEqual(G.read(state/'policy.json')['phase'],'activated')
+            G.write(daemon, {'later-owner-config':True}); G.daemon_start()
+            self.assertEqual(G.read(daemon),{'later-owner-config':True})
+
+    def test_partial_commit_or_cold_reboot_cannot_restore(self):
+        with self.lifecycle_fixture() as (state,docker,daemon,cid,p,c,boot,original):
+            for phase,cmdline in [('fenced',[]),('committed',[]),('committed',['wizard.cold=test']),('committed',['init=/bin/sh'])]:
+                p['phase']=phase; G.write(state/'policy.json',p)
+                boot.return_value=('next-boot',cmdline)
+                with self.assertRaises(RuntimeError): G.daemon_start()
+                self.assertEqual(G.read(daemon)['authorization-plugins'],['wizard-cold'])
+                self.assertEqual(G.read(docker/cid/'hostconfig.json')['RestartPolicy']['Name'],'no')
+
+    def test_offline_restore_crash_is_retryable_and_cold_reentry_refused(self):
+        # Crash at every durable write boundary, including after daemon restoration.
+        for fail_at in range(1,5):
+            with self.subTest(fail_at=fail_at), self.lifecycle_fixture() as (state,docker,daemon,cid,p,c,boot,original):
+                self.commit_fixture(p,c); boot.return_value=('normal-boot',[])
+                real_write=G.write; calls=0
+                def crash(path,value,*args):
+                    nonlocal calls
+                    calls+=1
+                    if calls==fail_at: raise OSError('injected power loss')
+                    real_write(path,value,*args)
+                with patch.object(G,'write',side_effect=crash):
+                    with self.assertRaises(OSError): G.daemon_start()
+                boot.return_value=('cold-boot',['wizard.cold=test'])
+                if fail_at > 1:
+                    with self.assertRaises(RuntimeError): G.daemon_start()
+                boot.return_value=('rebooted-normal',[]); G.daemon_start()
+                self.assertEqual(daemon.read_text(),original)
+                self.assertEqual(G.read(docker/cid/'hostconfig.json')['RestartPolicy'],p['containers'][cid]['restart'])
+
+    def test_daemon_fence_tamper_and_identity_mismatch_fail_closed(self):
+        with self.lifecycle_fixture() as (state,docker,daemon,cid,p,c,boot,original):
+            G.write(daemon, {})
+            with self.assertRaisesRegex(RuntimeError,'daemon fence'): G.daemon_start()
+            G.write(daemon,{'authorization-plugins':['wizard-cold'],'live-restore':False})
+            G.write(docker/cid/'hostconfig.json',{'RestartPolicy':{'Name':'always'}})
+            with self.assertRaisesRegex(RuntimeError,'restart policy'): G.daemon_start()
+            c['Image']='unknown'; G.write(docker/cid/'config.v2.json',c)
+            with self.assertRaisesRegex(RuntimeError,'identity'): G.daemon_start()
+
     def test_scalar_only_byte_preservation_and_idempotence(self):
         for quote in ('', "'", '"'):
             text='# untouched\nmodel: preserve-this\nterminal:\n  backend: ssh\n  ssh_host: wizard-vm\n  ssh_user: wizard\n  ssh_key: '+quote+C.OLD+quote+' # retain comment\ncustom: [a, b]\n'
