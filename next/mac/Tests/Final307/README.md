@@ -17,6 +17,35 @@ Run `run.py --spec /absolute/private/spec.json --preflight-only` for read-only c
 
 The job deliberately leaves `readyForPublication=false` and computes `readyForParentReview` from executed gates and cleanup. Parent must reconcile the distinct production NSWorkspace result with the already accepted real headless migration. The user prohibited unlock/screensharing requests and security workarounds. Direct inherited-worker Host success provides new diagnostic evidence, not a renamed pass for the production path; the conditional production launch is separately reported.
 
+## Installed307 recovery mode
+
+`continueInstalled: true` preserves the already Sparkle-replaced307 app and its
+failed transaction. The private spec pins the prior report, transaction and
+accepted AppKit fixture hashes. Reuse those and the accepted package; do not
+recompile, remigrate, or rebuild. Capture/AX consent and direct Host IPC run
+**before** any retry of the blocked relaunch, so one blocker does not erase the
+remaining evidence. No-VM Host homes need empty `os`, `logs`, and `Files` folders:
+`open(os/disk-owner.lock, O_CREAT)` failing ENOENT is not proof of a foreign owner.
+Boot material (including dangling symlinks) is forbidden before Host launch.
+
+After direct native entry, one bounded LaunchServices launch tests app-attributed
+external IO with a new, scoped intervention: a bounded AX helper can press the
+single `Allow` button **only within a window naming the exact owned QA app and
+asking for removable-volume access**, after verifying the requesting PID and
+executable hash. It requires a private-spec prior-authorization reference and
+`allowOwnedRemovable: true`; it does not authorize anything else. Default helper
+mode is read-only. No prompt or an inaccessible console is a failed gate, never
+permission to change macOS settings. AX action success alone is not an IO pass.
+
+Only fresh app-attributed QA IO permits one real Sparkle retry, in a **new**
+owned306 app/data home. Require an actual Sparkle-launched307 live PID, matching
+App/Host bytes, and a real `native-activated` transaction. Direct307 and manual
+LaunchServices success are explicitly not Sparkle success. The old installed307,
+prior report and original failed journal remain hash-pinned before/after. Neither
+production NSWorkspace Host transport nor packaged relaunch inherits a pass from
+the direct entry. A SIGTERM/SIGINT cleanup hook restores preferences and stops
+only owned no-VM processes; hard SIGKILL still requires parent cleanup inspection.
+
 ## Fast checks
 
 `PYTHONDONTWRITEBYTECODE=1 python3 next/mac/Tests/Final307/test_contract.py -v`

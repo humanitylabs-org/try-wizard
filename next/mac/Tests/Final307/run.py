@@ -121,7 +121,7 @@ def wait(predicate, seconds, label):
 
 class Fixture(http.server.BaseHTTPRequestHandler):
     """Explicit loopback backend fixture; never proxy to real accounts/services."""
-    commands = []; results = {}; root = Path('.')
+    commands = []; results = {}; root = Path('.'); page_loads = 0
     def log_message(self, format, *args): pass
     def do_GET(self):
         path = self.path.split('?', 1)[0]
@@ -134,6 +134,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError): pass
             return
         else:
+            if path == '/': type(self).page_loads += 1
             data = HTML.encode(); ct = 'text/html'
         self.send_response(200); self.send_header('Content-Type', ct); self.send_header('Cache-Control','no-store'); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
@@ -159,6 +160,22 @@ async function poll(){if(running)return;running=true;try{
  }}finally{running=false}}
 setInterval(()=>poll().catch(()=>{}),250);
 </script>'''
+
+
+def prepare_no_vm(data):
+    """Mirror Host initialization without installing any disk/firmware."""
+    data = Path(data)
+    for rel in ('os', 'logs', 'Files'):
+        assert not (data/rel).is_symlink()
+        (data/rel).mkdir(parents=True, exist_ok=True)
+    assert_no_vm(data)
+    (data/'files-folder.json').write_text(json.dumps({'path':str(data/'Files')}))
+
+
+def assert_no_vm(data):
+    for rel in ('disk.img','boot','firmware','efi-variable-store','manifest.json'):
+        path=Path(data)/'os'/rel
+        assert not path.exists() and not path.is_symlink(), 'Boot material forbidden in no-VM Host fixture: '+rel
 
 
 def main():
@@ -187,6 +204,21 @@ def main():
     assert shutil.disk_usage('/Applications').free > 4*1024**3, 'Need space for one isolated installed app'
     assert plist(Path(s['publicApp'])/'Contents/Info.plist')['CFBundleVersion'] == '306'
     assert read(Path(s['publicApp'])/'Contents/Resources/wizard-release.json')['releaseID'] == 'e4c2316351baa9fb0aa8ebd7c2de7f022f136d92'
+    continuing = s.get('continueInstalled', False)
+    if continuing:
+        installed = Path(s['testApp'])
+        assert installed.parent == Path('/Applications') and installed != candidate
+        assert plist(installed/'Contents/Info.plist')['CFBundleVersion'] == '307'
+        assert sha(installed/'Contents/MacOS/Wizard') == s['candidateAppSHA256']
+        assert sha(installed/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host') == s['candidateHostSHA256']
+        assert sha(s['priorReport']) == s['priorReportSHA256']
+        assert sha(s['priorTransaction']) == s['priorTransactionSHA256']
+        assert read(s['priorTransaction'])['phase'] == 'installing'
+        assert read(s['priorReport'])['cleanupVerified']
+        assert Path(s['priorTransaction']).is_relative_to('/Volumes/ThalesMedia/')
+        assert Path(s['repeatApp']).parent == Path('/Applications') and not Path(s['repeatApp']).exists()
+        assert s['repeatApp'] != s['testApp']
+        assert s.get('permissionAuthorization') and s.get('allowOwnedRemovable') is True, 'Explicit prior owned-prompt authority required'
     inventory = public_inventory()
     if a.preflight_only:
         print(json.dumps({'preflightOnly':True,'candidate':str(candidate),'publicInventory':inventory,'nativeExecuted':False,'packaged':False})); return
@@ -200,14 +232,14 @@ def main():
          'headlessReportReused':s['headlessReport'],'headlessReportSHA256':s['headlessReportSHA256'],
          'realMigrationRepeated':False,'nativeProductRecompiled':False,'factoryRebuilt':False,'published':False,
          'consoleBefore':console(),'gates':{},'publicInventory':inventory,'readyForPublication':False,
-         'physicalSpeechQuality':'not claimed','launchServicesHostAcceptance':'not retried: known locked-console external-file stall'}
+         'physicalSpeechQuality':'not claimed','launchServicesHostAcceptance':'pending bounded isolated transport gates'}
     def save(): (root/'result.json').write_text(json.dumps(r, indent=2)+'\n')
     def gate(name, f):
         try: r['gates'][name] = {'passed':True,'evidence':f()}
         except Exception as ex:
             r['gates'][name] = {'passed':False,'error':repr(ex)}
             if name.startswith('exact307-'):
-                for pid,cmd in owned_processes(Path(s['testApp'])):
+                for pid,cmd in owned_processes(app):
                     try: run(['sample',str(pid),'2','-file',root/(name+'-'+str(pid)+'.sample.txt')],timeout=10,check=False)
                     except Exception as sample_error: r['gates'][name]['sampleError']=repr(sample_error)
                 (root/(name+'-processes.txt')).write_text(run(['ps','-axo','pid=,command='],text=True).stdout)
@@ -221,6 +253,12 @@ def main():
     gate('candidate-signature', lambda: logged('candidate-signature',['codesign','--verify','--deep','--strict',candidate]))
     mac = source/'next/mac'; fixture = root/'policy'
     def appkit_policy():
+        if continuing:
+            previous = read(s['priorReport'])['gates']['production-AppKit-policy']
+            assert previous['passed']
+            assert previous['evidence']['productionUpdaterSHA256'] == sha(mac/'App/WizardUpdater.swift')
+            assert sha(s['policyFixture']) == s['policyFixtureSHA256']
+            return dict(previous['evidence'], reusedFrom=s['priorReport'], rerun=False)
         text = (mac/'App/main.swift').read_text()
         ipc = function(text, 'static func send(_ command: String)')
         (root/'main.swift').write_text('import Foundation\nimport AppKit\nenum ProductionHostIPC {\n'+ipc+'\n}\nif CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "host-command" { ProductionHostIPC.send(CommandLine.arguments[3]); RunLoop.current.run(until: Date().addingTimeInterval(0.25)) } else { MainActor.assumeIsolated { exercise() } }\n')
@@ -232,6 +270,7 @@ def main():
                      layer='Entire unchanged production updater + real NSAlert/NSButton; explicit state adapters; NOT physical capture or installed App')
         return proof
     gate('production-AppKit-policy',appkit_policy)
+    if continuing: fixture = Path(s['policyFixture'])
     stage = root/'public-mac307'; package_app = root/'package/Wizard MVP.app'
     def package():
         nonlocal stage
@@ -277,7 +316,8 @@ def main():
                 'publisherContract':'flat directory: ZIP + DMG + appcast only; publisher adds mac/307/'}
     gate('release-packaging',package)
     app = Path(s['testApp']); data = root/'native-data'; server = None; before = None; restored = False
-    assert app.parent == Path('/Applications') and not app.exists() and app != candidate
+    assert app.parent == Path('/Applications') and (continuing or not app.exists()) and app != candidate
+    if continuing:gate('installed307-signature',lambda:logged('installed307-signature',['codesign','--verify','--deep','--strict',app]))
     def props():
         p = run(['defaults','export',DOMAIN,'-'],check=False)
         return plistlib.loads(p.stdout) if p.returncode == 0 else None
@@ -291,6 +331,28 @@ def main():
             assert '/Contents/MacOS/' in cmd
             os.kill(pid,signal.SIGTERM)
         wait(lambda:not owned_processes(app),15,'owned no-VM process termination')
+    # Termination must not leave shared QA defaults behind. No real VM exists here.
+    import atexit
+    finished=False
+    def emergency_cleanup():
+        if finished:return
+        try:
+            stop_owned()
+            if (root/'prefs-before.plist').exists():
+                if before is None:
+                    run(['defaults','delete',DOMAIN],check=False)
+                else:
+                    actual=props() or {}
+                    for key in set(actual)-set(before):run(['defaults','delete',DOMAIN,key],check=False)
+                    run(['defaults','import',DOMAIN,root/'prefs-before.plist'])
+                assert props()==before
+            r['interruptedCleanupVerified']=not owned_processes(app)
+        except Exception as ex:r['interruptedCleanupError']=repr(ex)
+        r['interrupted']=True;r['readyForParentReview']=False;r['readyForPublication']=False
+        save()
+    atexit.register(emergency_cleanup)
+    def interrupted(signum, frame):raise SystemExit(128+signum)
+    signal.signal(signal.SIGTERM,interrupted);signal.signal(signal.SIGINT,interrupted)
     def launch():
         assert not owned_processes(app)
         with (root/'native-app.log').open('ab') as f:
@@ -301,6 +363,7 @@ def main():
     def native():
         nonlocal server,before
         assert r['gates']['release-packaging']['passed']
+        if continuing: assert r['gates']['installed307-signature']['passed']
         assert not mvp_processes(), 'Another MVP owns the common preferences/QA domain; do not alter it'
         before = props(); (root/'prefs-before.plist').write_bytes(plistlib.dumps(before or {})); (root/'prefs-before.plist').chmod(0o600)
         assert not owned_processes(app)
@@ -328,20 +391,26 @@ def main():
                                            {'kind':'thisMac','name':'Consent-only no-VM fixture','url':''}]).encode(),
                       activeBackend=0,SUFeedURL=origin+'appcast.xml',SUEnableAutomaticChecks=False,SUSkippedVersion='')
         apply(config)
-        run(['cp','-cR',s['publicApp'],app],timeout=90)
-        old_pid = launch(); wait(lambda:state().get('pid') == old_pid,30,'direct App306 entry')
-        notify('update-check')
-        ready = wait(lambda:(q if (q:=state()).get('phase') == 'ready' else False),180,'signed exact307 archive ready')
-        assert ready['build']=='306'
-        notify('update-busy on'); notify('update-restart')
-        wait(lambda:state().get('phase')=='busy',10,'306 old ready synthetic busy check')
-        notify('update-busy off'); notify('update-restart')
-        new = wait(lambda:(q if (q:=state()).get('build')=='307' and q.get('pid') != old_pid and q.get('installedBundleBuild')=='307' else False),180,'actual packaged307 replacement AND Sparkle relaunch')
-        assert read(app/'Contents/Resources/wizard-release.json')['releaseID']==PRODUCTION
-        assert sha(app/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
-        assert read(data/'updates/transaction.json').get('phase')=='native-activated'
-        r['gates']['packaged-self-update']={'passed':True,'evidence':{'state':new,'archiveSHA256':sha(private/'Wizard-307.zip'),
-            'scope':'real Sparkle306→307 replacement/relaunch; no-VM remote loopback backend; initial306 direct worker launch; not LaunchServices Host'}}; save()
+        if continuing:
+            pid=launch()
+            direct=wait(lambda:(q if (q:=state()).get('pid')==pid and q.get('build')=='307' else False),30,'direct preserved installed307 entry')
+            r['gates']['exact307-direct-entry']={'passed':True,'evidence':direct,
+                'scope':'preserved installed307, fresh external no-VM data; NOT Sparkle relaunch'};save()
+        else:
+            run(['cp','-cR',s['publicApp'],app],timeout=90)
+            old_pid = launch(); wait(lambda:state().get('pid') == old_pid,30,'direct App306 entry')
+            notify('update-check')
+            ready = wait(lambda:(q if (q:=state()).get('phase') == 'ready' else False),180,'signed exact307 archive ready')
+            assert ready['build']=='306'
+            notify('update-busy on'); notify('update-restart')
+            wait(lambda:state().get('phase')=='busy',10,'306 old ready synthetic busy check')
+            notify('update-busy off'); notify('update-restart')
+            new = wait(lambda:(q if (q:=state()).get('build')=='307' and q.get('pid') != old_pid and q.get('installedBundleBuild')=='307' else False),180,'actual packaged307 replacement AND Sparkle relaunch')
+            assert read(app/'Contents/Resources/wizard-release.json')['releaseID']==PRODUCTION
+            assert sha(app/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
+            assert read(data/'updates/transaction.json').get('phase')=='native-activated'
+            r['gates']['packaged-self-update']={'passed':True,'evidence':{'state':new,'archiveSHA256':sha(private/'Wizard-307.zip'),
+                'scope':'real Sparkle306→307 replacement/relaunch; no-VM remote loopback backend; initial306 direct worker launch; not LaunchServices Host'}}; save()
         def command(op):
             key=op+'-'+str(time.time_ns()); Fixture.commands.append({'id':key,'op':op})
             return wait(lambda:Fixture.results.get(key),40,'real native recorder '+op)['result']
@@ -353,11 +422,15 @@ def main():
             (data/'os/boot').mkdir(parents=True)
             for path in ['disk.img','boot/vmlinux','boot/initrd']: (data/'os'/path).write_bytes(b'NOT_A_VM_FINAL307_CONSENT_ONLY\n')
             (data/'os/manifest.json').write_text('{"version":"0.3.0"}')
+            capture['pause']=command('pause'); capture['resume']=command('resume')
+            assert capture['pause']['paused'] is True and capture['resume']['paused'] is False
             notify('switch 1')
             capture['legacyRefusal']=wait(lambda:(q if (q:=state()).get('phase')=='busy' and q.get('recording') else False),10,'exact307 real recording legacy admission refusal')
             assert not (data/'updates/previous-disk.img').exists() and not (data/'updates/maintenance-lease.json').exists()
-            capture['pause']=command('pause'); capture['resume']=command('resume')
-            assert capture['pause']['paused'] is True and capture['resume']['paused'] is False
+            # begin() clears trusted origins when switching; restore the real remote
+            # document before invoking another native bridge command.
+            prior_loads=Fixture.page_loads; notify('switch 0')
+            wait(lambda:Fixture.page_loads>prior_loads,15,'remote fixture document reloaded')
             capture['stop']=command('stop'); wait(lambda:state().get('recording') is False,15,'capture stop')
             r['gates']['exact307-native-capture']={'passed':True,'evidence':capture,'scope':'real native capture lifecycle to local discard fixture, no speech-quality claim'};save()
         except Exception as ex:
@@ -374,11 +447,11 @@ def main():
         # Exactly one bounded AX traversal per observed phase, never loginwindow.
         time.sleep(2)
         logged('exact307-not-now',[s['python'],harness/'next/mac/Tests/ax_press_button.py',str(pid),'Not now'],15)
-        deferred=wait(lambda:(q if (q:=state()).get('phase')=='deferred' else False),10,'exact307 native consent deferred')
+        deferred=wait(lambda:(q if (q:=state()).get('pid')==pid and q.get('phase')=='deferred' else False),10,'exact307 native consent deferred')
         assert sha(data/'os/disk.img')==disk_before
         notify('switch 1'); time.sleep(1)
         logged('exact307-confirm',[s['python'],harness/'next/mac/Tests/ax_press_button.py',str(pid),'Upgrade existing Wizard'],15)
-        denied=wait(lambda:(q if (q:=state()).get('phase')=='failed' else False),10,'exact307 authenticated unknown boot rejection')
+        denied=wait(lambda:(q if (q:=state()).get('pid')==pid and q.get('phase')=='failed' else False),10,'exact307 authenticated unknown boot rejection')
         assert 'Unknown legacy boot files' in denied['message'] and sha(data/'os/disk.img')==disk_before
         assert not owned_processes(app/'Contents/Library/LoginItems/Wizard Host.app')
         stop_owned()
@@ -387,10 +460,12 @@ def main():
     gate('exact307-native-entry',native)
     # Separate direct Host + production DNC message. No repeated NSWorkspace transport.
     def host_ipc():
+        assert r['gates']['production-AppKit-policy']['passed']
+        if continuing: assert r['gates']['installed307-signature']['passed']
         assert fixture.exists() and app.exists() and not owned_processes(app)
         assert plist(app/'Contents/Info.plist')['CFBundleVersion']=='307'
         assert not mvp_processes()
-        d=root/'host-data'; d.mkdir(); (d/'Files').mkdir(); (d/'files-folder.json').write_text(json.dumps({'path':str(d/'Files')}))
+        d=root/'host-data'; prepare_no_vm(d)
         binary=app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'
         with (root/'host.log').open('ab') as log: child=sp.Popen([str(binary),'--wizard-data-home',str(d)],stdout=log,stderr=sp.STDOUT)
         try:
@@ -405,16 +480,71 @@ def main():
     try: stop_owned()
     except Exception as ex: r['cleanupError']=repr(ex)
     gate('exact307-direct-Host-IPC',host_ipc)
+    def permission_wait(predicate, seconds, label):
+        """New intervention: bounded observed exact-window AX, not a global grant.
+        Failure/no matching prompt cannot authorize a full Sparkle rerun.
+        """
+        end=time.monotonic()+seconds; next_probe=time.monotonic()+2; probes=0; acted=False
+        while time.monotonic()<end:
+            value=predicate()
+            if value:return value
+            if not acted and probes<4 and time.monotonic()>=next_probe:
+                pids=[pid for pid,cmd in owned_processes(app) if cmd==str(app/'Contents/MacOS/Wizard')]
+                try: exact307=sha(app/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
+                except OSError: exact307=False
+                if len(pids)==1 and exact307:
+                    probes+=1; next_probe=time.monotonic()+4
+                    target=root/(label+'-prompt-'+str(probes)+'.json')
+                    try:
+                        out=run([s['python'],Path(__file__).with_name('owned_removable_prompt.py'),
+                                 '--allow-owned-removable','--requester-pid',str(pids[0]),'--app',app,
+                                 '--sha256',s['candidateAppSHA256']],timeout=8)
+                        target.write_bytes(out.stdout);target.chmod(0o600)
+                        acted=json.loads(out.stdout).get('pressed',False)
+                    except Exception as ex:
+                        # The action may have happened before a timeout: never press again.
+                        acted=True;target.write_text(json.dumps({'error':repr(ex),'noRetry':True}));target.chmod(0o600)
+            time.sleep(.4)
+        raise TimeoutError(label+'; no acknowledged external IO after bounded exact-prompt route')
+
+    def launchservices_probe():
+        assert continuing and r['gates'].get('exact307-direct-entry',{}).get('passed')
+        assert server is not None
+        stop_owned()
+        if (data/'os/disk.img').exists(): (data/'os').rename(root/'consent-only-os')
+        prepare_no_vm(data)
+        values=props() or {};values['activeBackend']=0;apply(values)
+        old=read(data/'updates/qa.json').get('pid')
+        run(['/usr/bin/open','-n',app],timeout=10)
+        def fresh():
+            q=state()
+            matches=[pid for pid,cmd in owned_processes(app) if cmd==str(app/'Contents/MacOS/Wizard')]
+            return q if len(matches)==1 and q.get('pid')==matches[0] and q.get('pid')!=old and q.get('build')=='307' else False
+        try:
+            q=permission_wait(fresh,45,'exact307-launchservices-file-access')
+            assert sha(app/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
+            return {'state':q,'scope':'actual LaunchServices owned307 launch + acknowledged fresh external QA write; NOT Sparkle relaunch',
+                    'authorization':s['permissionAuthorization'],'newIntervention':'exact-window removable-volume AX handler; no general privacy changes'}
+        except Exception:
+            for pid,cmd in owned_processes(app):
+                run(['sample',str(pid),'2','-file',root/('launchservices-'+str(pid)+'.sample.txt')],timeout=10,check=False)
+            raise
+        finally:stop_owned()
+    if continuing:gate('exact307-launchservices-file-access',launchservices_probe)
+
     def production_host_launch():
         # A new diagnostic witness is REQUIRED before the one production retry:
         # exact Host has just read/written this external volume and exited by IPC.
         assert r['gates']['exact307-direct-Host-IPC']['passed'], 'No new direct-Host witness; do not retry known stalled transport'
+        if continuing: assert r['gates']['exact307-launchservices-file-access']['passed'], 'App-attributed access still blocked; do not retry production Host launch'
         assert server is not None and (root/'prefs-before.plist').exists() and not mvp_processes()
-        if (data/'os').exists(): (data/'os').rename(root/'consent-only-os')
-        assert not (data/'os').exists(), 'No VM ever starts in this transport acceptance'
+        if (data/'os/disk.img').exists(): (data/'os').rename(root/'consent-only-os')
+        prepare_no_vm(data)
+        assert_no_vm(data)
         values=props() or {}; values['activeBackend']=0; apply(values)
         pid=launch()
         wait(lambda:state().get('pid')==pid and state().get('build')=='307',30,'exact307 App before production Host transport')
+        assert_no_vm(data)
         notify('update-host-start') # Calls unchanged production HostControl.ensureRunning/NSWorkspace.
         status=wait(lambda:(v if (v:=read(data/'host-status.json')).get('state')=='notInstalled' and v.get('build')=='307' and v.get('dataHome')==str(data) else False),25,'one production NSWorkspace no-VM external-data Host launch')
         assert state().get('hostRunning') is True
@@ -425,6 +555,42 @@ def main():
         return {'status':status,'newWitness':'prior exact307 direct inherited Host external-data status + clean IPC exit',
                 'scope':'Actual installed307 App QA invokes production NSWorkspace launch; Host external-data read/write and IPC; no VM boot, physical mouse or permission-dialog claim'}
     gate('exact307-production-NSWorkspace-Host',production_host_launch)
+    def conditional_sparkle():
+        nonlocal app,data
+        assert continuing
+        assert r['gates']['exact307-launchservices-file-access']['passed'], 'No new app-attributed external IO witness; no blind Sparkle retry'
+        assert r['gates']['release-packaging']['passed'] and server is not None
+        stop_owned(); assert not mvp_processes()
+        # Keep the failed installed307 and its old transaction byte-for-byte.
+        # One new owned306 bundle is eligible only after the witnessed access route.
+        app=Path(s['repeatApp']); data=root/'relaunch-data'
+        assert not app.exists() and app.parent==Path('/Applications')
+        prepare_no_vm(data)
+        values=props() or {}; values.update(DataHome=str(data),activeBackend=0,SUSkippedVersion='')
+        apply(values)
+        run(['cp','-cR',s['publicApp'],app],timeout=90)
+        old_pid=launch()
+        old=wait(lambda:(q if (q:=state()).get('pid')==old_pid and q.get('build')=='306' else False),30,'new bounded306 update entry')
+        notify('update-check')
+        ready=wait(lambda:(q if (q:=state()).get('pid')==old_pid and q.get('phase')=='ready' else False),180,'reused signed307 archive ready')
+        notify('update-restart')
+        def fresh():
+            q=state()
+            pids=[pid for pid,cmd in owned_processes(app) if cmd==str(app/'Contents/MacOS/Wizard')]
+            return q if len(pids)==1 and q.get('pid')==pids[0] and q.get('pid')!=old_pid and q.get('build')=='307' and q.get('installedBundleBuild')=='307' else False
+        new=permission_wait(fresh,90,'exact307-sparkle-relaunch')
+        journal=read(data/'updates/transaction.json')
+        assert journal.get('phase')=='native-activated' and journal.get('installedBuild')=='307'
+        assert journal.get('appPath')==str(app) and journal.get('dataHome')==str(data)
+        assert journal.get('from')=='306' and journal.get('to')=='307' and journal.get('releaseID')==PRODUCTION
+        assert sha(app/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
+        assert sha(app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host')==s['candidateHostSHA256']
+        logged('relaunch-installed-signature',['codesign','--verify','--deep','--strict',app])
+        stop_owned()
+        return {'state':new,'priorPID':old['pid'],'ready':ready,'transaction':journal,
+                'archiveSHA256':sha(root/'private-feed/Wizard-307.zip'),
+                'scope':'new real signed306→307 Sparkle replacement AND actual Sparkle-launched307 acknowledgment, only after app-attributed IO witness; no VM boot'}
+    if continuing:gate('exact307-packaged-self-update',conditional_sparkle)
     try:
         stop_owned()
         if before is not None:
@@ -436,6 +602,14 @@ def main():
             run(['defaults','delete',DOMAIN],check=False); restored=props() is None
         else: restored=True # Native work refused before touching defaults.
         assert restored and not owned_processes(app)
+        if continuing:
+            original=Path(s['testApp'])
+            assert sha(original/'Contents/MacOS/Wizard')==s['candidateAppSHA256']
+            assert sha(original/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host')==s['candidateHostSHA256']
+            assert sha(s['priorTransaction'])==s['priorTransactionSHA256']
+            assert sha(s['priorReport'])==s['priorReportSHA256']
+            assert not owned_processes(original)
+            r['priorFailedEvidencePreserved']=True
         r['cleanupVerified']=True
     except Exception as ex: r['cleanupVerified']=False;r['cleanupError']=repr(ex)
     finally:
@@ -447,10 +621,11 @@ def main():
         # Gate remains explicit even if this entire bounded continuation passes.
         transport=r['gates'].get('exact307-production-NSWorkspace-Host',{}).get('passed',False)
         r['launchServicesHostAcceptance']='actual production NSWorkspace no-VM external-data transport passed' if transport else 'not certified; see bounded transport gate and new-witness condition'
-        r['remainingAcceptance']=[] if transport else ['Production NSWorkspace App→Host external-volume transport still unproved. Direct IPC is not a substitute; inspect owned samples, no blind retry or unlock request.']
+        r['remainingAcceptance']=[name+': '+g.get('error','not passed') for name,g in r['gates'].items() if not g['passed']]
         r['readyForParentReview']=bool(r.get('cleanupVerified') and all(g['passed'] for g in r['gates'].values()))
         r['readyForPublication']=False
         save()
+    finished=True
     print(json.dumps({'result':str(root/'result.json'),'gates':{k:v['passed'] for k,v in r['gates'].items()},'published':False,'readyForPublication':False}))
     if not r.get('cleanupVerified') or not all(x['passed'] for x in r['gates'].values()): raise SystemExit(1)
 

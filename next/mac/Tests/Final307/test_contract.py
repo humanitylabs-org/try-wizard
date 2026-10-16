@@ -74,6 +74,49 @@ class Contracts(unittest.TestCase):
         self.assertIn("s.get('workerLease') == 'inherited'",text)
         self.assertIn("assert not m.mvp_processes()",text)
         self.assertIn("r['cleanupVerified']=props()==before",text)
+    def test_no_vm_initialization_preserves_existing_logs(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); (root/'logs').mkdir(); (root/'logs/host.log').write_bytes(b'prior log')
+            m.prepare_no_vm(root);m.prepare_no_vm(root)
+            self.assertTrue((root/'os').is_dir())
+            self.assertTrue((root/'Files').is_dir())
+            self.assertEqual((root/'logs/host.log').read_bytes(),b'prior log')
+            self.assertFalse((root/'os/disk.img').exists())
+    def test_no_vm_rejects_disk_firmware_and_symlinks(self):
+        for name in ('disk.img','boot','firmware','efi-variable-store','manifest.json'):
+            with tempfile.TemporaryDirectory() as d:
+                root=Path(d);(root/'os').mkdir();(root/'os'/name).write_bytes(b'forbidden')
+                with self.assertRaises(AssertionError):m.prepare_no_vm(root)
+                self.assertEqual((root/'os'/name).read_bytes(),b'forbidden')
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'os').mkdir();(root/'os/disk.img').symlink_to(root/'absent')
+            with self.assertRaises(AssertionError):m.prepare_no_vm(root)
+    def test_continuation_preserves_prior_failure_and_is_separate(self):
+        text=P.read_text()
+        self.assertIn("assert sha(s['priorTransaction'])==s['priorTransactionSHA256']",text)
+        self.assertIn("app=Path(s['repeatApp']); data=root/'relaunch-data'",text)
+        self.assertLess(text.index("gate('exact307-native-entry',native)"),text.index("gate('exact307-packaged-self-update',conditional_sparkle)"))
+        self.assertIn("assert r['gates']['exact307-launchservices-file-access']['passed'], 'No new app-attributed external IO witness",text)
+    def test_prompt_match_exact_owned_app_only(self):
+        spec=importlib.util.spec_from_file_location('ownedprompt',P.with_name('owned_removable_prompt.py'))
+        assert spec is not None and spec.loader is not None
+        pm=importlib.util.module_from_spec(spec);spec.loader.exec_module(pm)
+        rows=[{'AXRole':'AXStaticText','AXValue':'“Wizard Native307 Sender.app” would like to access files on a removable volume.'},
+              {'AXRole':'AXButton','AXTitle':'Allow'}]
+        self.assertTrue(pm.eligible(rows,'Wizard Native307 Sender.app'))
+        self.assertFalse(pm.eligible(rows,'Wizard Native307 Other.app'))
+        self.assertFalse(pm.eligible(rows+rows,'Wizard Native307 Sender.app'))
+        for phrase in ('would like full disk access','would like to access the microphone','would like to control System Events'):
+            self.assertFalse(pm.eligible([dict(rows[0],AXValue='“Wizard Native307 Sender.app” '+phrase),rows[1]],'Wizard Native307 Sender.app'))
+    def test_prompt_route_is_fail_closed_and_bounded(self):
+        text=P.read_text(); helper=P.with_name('owned_removable_prompt.py').read_text()
+        self.assertIn('probes<4',text)
+        self.assertIn('if len(pids)==1 and exact307:',text)
+        self.assertIn("acted=True;target.write_text",text)
+        self.assertIn("command(requester)==str(exe)",helper)
+        self.assertIn("if allow and len(candidates)==1:",helper)
+        self.assertIn("text(window,'AXRole') not in ('AXWindow','AXSheet','AXDialog')",helper)
+        self.assertNotIn('System Events',helper)
     def test_source_unchanged_contract(self):
         root=P.parents[4]
         source=(root/'next/mac/App/WizardUpdater.swift').read_text()
