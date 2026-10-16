@@ -20,8 +20,11 @@ class DriverContracts(unittest.TestCase):
         import io
         from unittest.mock import patch
         import guest_audit
-        with patch.object(guest_audit.urllib.request,'urlopen',side_effect=[ConnectionRefusedError(),io.BytesIO(b'{"upstream_reachable":true}')]), patch.object(guest_audit.time,'sleep'):
+        with patch.object(guest_audit.urllib.request,'urlopen',side_effect=[ConnectionRefusedError(),io.BytesIO(b'{"upstream_reachable":true}')]) as opener, patch.object(guest_audit.time,'sleep'):
             self.assertTrue(guest_audit.wait_health()['upstream_reachable'])
+            request = opener.call_args.args[0]
+            self.assertEqual(request.full_url, 'http://127.0.0.1:8924/wizard/health')
+            self.assertEqual(request.get_header('Host'), '127.0.0.1:48023')
         with patch.object(guest_audit.urllib.request,'urlopen',side_effect=ConnectionRefusedError()), patch.object(guest_audit.time,'monotonic',side_effect=[0,1]):
             with self.assertRaises(TimeoutError): guest_audit.wait_health(timeout=0)
 

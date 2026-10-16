@@ -50,7 +50,10 @@ def wait_health(timeout=240):
     deadline = time.monotonic() + timeout
     while True:
         try:
-            with urllib.request.urlopen('http://127.0.0.1:8923/wizard/health', timeout=5) as response:
+            # 8923 is AF_VSOCK, bridged by wizard-ux-bridge to TCP 8924.
+            request = urllib.request.Request('http://127.0.0.1:8924/wizard/health',
+                                             headers={'Host': '127.0.0.1:48023'})
+            with urllib.request.urlopen(request, timeout=5) as response:
                 health = json.load(response)
             if isinstance(health, dict):
                 return health
