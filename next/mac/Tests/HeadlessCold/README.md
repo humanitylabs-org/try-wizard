@@ -12,7 +12,7 @@ then verify preservation, repeat admission, and stopped rollback on a second
 clone. Parent owns execution admission, independent result review, integration,
 and any release. This folder changes no production implementation.
 
-Production pin: `93b0b3b1c2666d5810405aa303c7780849f5880b` (build 307).
+Production pin: `15ddf5e315d637ab26b57de94f011b5cecd1d946` (build 307).
 Harness commit is separate. `build_and_run.py` builds a uniquely named native
 307 candidate from a separate clean checkout at that exact production pin, using
 the unchanged factory and frozen runtime archives. Public 306 and earlier 307

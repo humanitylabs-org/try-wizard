@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-PRODUCTION = '93b0b3b1c2666d5810405aa303c7780849f5880b'
+PRODUCTION = '15ddf5e315d637ab26b57de94f011b5cecd1d946'
 SOURCES = ['next/mac/Host/main.swift', 'next/mac/Shared/Shared.swift',
            'next/mac/Shared/UpdateContract.swift', 'next/mac/Shared/DiskIdentity.swift',
            'next/mac/Shared/GuestPatchCommand.swift', 'next/mac/App/WizardGuestActivation.swift',
