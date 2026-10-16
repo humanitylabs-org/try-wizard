@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import socket
 import subprocess
 import time
@@ -82,6 +83,7 @@ def main():
     p.add_argument('--baseline-disk', type=Path, required=True)
     p.add_argument('--boot-dir', type=Path, required=True)
     p.add_argument('--old-app', type=Path, required=True)
+    p.add_argument('--old-launch-app', type=Path, required=True)
     p.add_argument('--new-app', type=Path, required=True)
     p.add_argument('--quit-helper', type=Path, required=True)
     p.add_argument('--worker-lease', choices=['inherited'], required=True)
@@ -92,6 +94,8 @@ def main():
     assert a.new_app.resolve().is_relative_to('/Applications') or a.new_app.resolve().is_relative_to('/Volumes/ThalesMedia')
     assert not a.root.exists(), 'Use a new evidence directory; never overwrite a run'
     assert a.baseline_disk.is_file() and a.quit_helper.is_file()
+    assert a.old_launch_app.parent == Path('/Applications') and a.old_launch_app.suffix == '.app'
+    assert not a.old_launch_app.exists(), 'Do not replace any installed app'
     for app, version in [(a.old_app, '0.6.1'), (a.new_app, '0.7.0')]:
         info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
         assert info['CFBundleShortVersionString'] == version
@@ -110,7 +114,7 @@ def main():
     os.chmod(a.root, 0o700)
     data = a.root / 'data'
     files = a.root / 'Files'
-    old_copy = a.root / 'Wizard061.app'
+    old_copy = a.old_launch_app
     evidence = {'schema': 1, 'source': FROZEN, 'phase': 'preflight',
                 'purpose': 'unprimed direct replacement gap reproduction',
                 'upgradeAccepted': False, 'private305Used': False,
@@ -223,6 +227,10 @@ def main():
             evidence['prefsRestored'] = prefs() == before
         evidence['originalBaselineUnchanged'] = baseline_stat == (a.baseline_disk.stat().st_ino, a.baseline_disk.stat().st_size, a.baseline_disk.stat().st_mtime_ns)
         evidence['originalNativeBytesUnchanged'] = all(sha(Path(app) / 'Contents/MacOS/Wizard') == digest for app, digest in native_hashes.items())
+        if not live and old_copy.exists():
+            assert sha(old_copy / 'Contents/MacOS/Wizard') == native_hashes[str(a.old_app)]
+            shutil.rmtree(old_copy)
+        evidence['owned061BundleRemoved'] = not old_copy.exists()
         if keepawake:
             keepawake.terminate()
             keepawake.wait(timeout=10)

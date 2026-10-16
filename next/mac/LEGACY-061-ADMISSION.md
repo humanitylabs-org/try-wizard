@@ -72,7 +72,8 @@ or chat preservation test and cannot certify build307 acceptance.
 
 `Tests/run_legacy061_checks.py --spec <absolute-spec.json>` is the durable-worker
 entrypoint. Its spec requires `source`, `evidenceRoot`, `baselineDisk`, `bootDir`,
-`oldApp`, `newApp`, and `quitHelper`. All work/evidence must be on ThalesMedia;
+`oldApp`, `oldLaunchApp`, `newApp`, and `quitHelper`. `oldLaunchApp` is a new owned
+Applications bundle, removed after graceful cleanup. All work/evidence is on ThalesMedia;
 submit through `wizard_heavy_submit`, never run sustained checks on the control
 host. It compiles/runs the production admission regression and existing isolated
 activation/rollback check before the VM diagnostic. It does not acquire a second

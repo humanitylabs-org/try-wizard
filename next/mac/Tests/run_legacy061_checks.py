@@ -42,7 +42,7 @@ def main():
     # Reuse the accepted modern rollback test; no native production source changes.
     check('compile-activation', ['xcrun', 'swiftc', '-swift-version', '5', '-target', 'arm64-apple-macos14.0', source / 'App/WizardGuestActivation.swift', source / 'Tests/GuestActivation/main.swift', '-framework', 'AppKit', '-o', root / 'activation'], 120)
     check('activation', [root / 'activation', root / 'activation-data'], 60)
-    check('unprimed-direct-replacement', [sys.executable, source / 'Tests/legacy061_probe.py', '--root', root / 'vm', '--baseline-disk', spec['baselineDisk'], '--boot-dir', spec['bootDir'], '--old-app', spec['oldApp'], '--new-app', spec['newApp'], '--quit-helper', spec['quitHelper'], '--worker-lease', 'inherited'], 900)
+    check('unprimed-direct-replacement', [sys.executable, source / 'Tests/legacy061_probe.py', '--root', root / 'vm', '--baseline-disk', spec['baselineDisk'], '--boot-dir', spec['bootDir'], '--old-app', spec['oldApp'], '--old-launch-app', spec['oldLaunchApp'], '--new-app', spec['newApp'], '--quit-helper', spec['quitHelper'], '--worker-lease', 'inherited'], 900)
     results['phase'] = 'diagnostic-complete-not-upgrade-acceptance'
     save()
     print(json.dumps(results, indent=2))
