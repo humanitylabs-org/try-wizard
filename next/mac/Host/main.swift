@@ -105,6 +105,68 @@ final class LoopbackBridge {
     }
 }
 
+// MARK: - Cold PID1 serial readiness
+
+// The kernel may discard input queued before hvc0 is initialized. Observe this
+// boot's actual shell prompt before sending anything; never retry PID1 exec.
+// All calls are serialized on the VM's main queue. The generation also rejects
+// callbacks queued before cancellation/restart. Console bytes are never logged.
+final class ColdBootstrapSerial {
+    enum Outcome: Equatable { case waiting, delivered, inactive, failed(String) }
+    static let command = "mount -t proc proc /proc 2>/dev/null; mount -t sysfs sysfs /sys 2>/dev/null; mount -o remount,rw /; mkdir -p /run/wizard-update; mount -t virtiofs -o ro wizard-update /run/wizard-update && exec /usr/bin/python3 /run/wizard-update/source/next/guest/cold-bootstrap.py init\n"
+    let generation = UUID()
+    let input = Pipe()
+    private let reader: FileHandle
+    private let deadline: TimeInterval
+    private var tail = Data()
+    private var active = true
+    private(set) var delivered = false
+
+    init(console: URL, now: TimeInterval, timeout: TimeInterval = 60) throws {
+        reader = try FileHandle(forReadingFrom: console)
+        deadline = now + timeout
+    }
+
+    func poll(generation: UUID, now: TimeInterval) -> Outcome {
+        guard generation == self.generation, active else { return .inactive }
+        guard now < deadline else {
+            cancelWaiting()
+            return .failed("Cold bootstrap shell readiness timed out; no command sent")
+        }
+        do {
+            // Incremental and bounded, including unusually noisy kernel boots.
+            tail.append(try reader.read(upToCount: 65536) ?? Data())
+            let text = String(decoding: tail, as: UTF8.self).replacingOccurrences(of: "\r", with: "")
+            let prompt = "/bin/sh: 0: can't access tty; job control turned off\n# "
+            guard text.hasSuffix(prompt) else {
+                tail = Data(tail.suffix(1024))
+                return .waiting
+            }
+            // Latch BEFORE writing: even a partial/failed write cannot retry init.
+            delivered = true
+            cancelWaiting()
+            try input.fileHandleForWriting.write(contentsOf: Data(Self.command.utf8))
+            return .delivered
+        } catch {
+            cancelWaiting()
+            return .failed("Cold bootstrap serial I/O failed; command will not be retried")
+        }
+    }
+
+    func cancelWaiting() {
+        active = false
+        tail.removeAll()
+        try? reader.close()
+        // Keep the input writer open while PID1 is alive: EOF can panic Linux.
+    }
+
+    func closeAfterStop() {
+        cancelWaiting()
+        try? input.fileHandleForWriting.close()
+        try? input.fileHandleForReading.close()
+    }
+}
+
 // MARK: - Wizard OS virtual machine
 
 final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListenerDelegate {
@@ -132,7 +194,8 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     func start() {
-        guard vm == nil || state == .stopped || state == .error || state == .notInstalled else { return }
+        guard vm == nil || vm?.state == .stopped else { return }
+        cleanupColdSerial()
         guard WizardShared.osInstalled else { state = .notInstalled; return }
         if let free = Self.freeBytes(), free < Self.minFreeToStart {
             fail(String(format: "Not enough free space on this Mac to run Wizard OS safely (%.1f GB free, needs %.0f GB).",
@@ -150,11 +213,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             state = .starting
             log("starting Wizard OS (cpus=\(config.cpuCount) mem=\(config.memorySize >> 20)MiB)")
             machine.start { [weak self] result in
-                guard let self else { return }
+                guard let self, self.vm === machine, self.state == .starting else { return }
                 if case .failure(let error) = result {
                     self.fail("VM failed to start: \(error.localizedDescription)")
                 } else {
-                    if WizardShared.coldBootstrapToken != nil { self.state = .running }
+                    if self.coldSerial != nil { self.waitForColdShell(machine) }
                     else { self.waitUntilReady() }
                     self.watchDiskSpace()
                 }
@@ -185,6 +248,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     private func fail(_ message: String) {
+        cleanupColdSerial()
         log(message); lastError = message; vm = nil; socketDevice = nil; state = .error
     }
 
@@ -210,13 +274,16 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
     func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
     func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
-        guard let machine = vm, state == .running || state == .starting else { completion?(); return }
+        guard let machine = vm, state == .running || state == .starting || state == .error else { completion?(); return }
+        cancelColdSerialWait()
         state = .stopping
         log("stopping Wizard OS")
         var finished = false
         let done = { [weak self] in
-            guard !finished else { return }
+            guard !finished, self?.vm === machine else { return }
             finished = true
+            self?.stopCompletion = nil
+            self?.cleanupColdSerial()
             self?.vm = nil; self?.socketDevice = nil
             self?.state = .stopped
             completion?()
@@ -292,13 +359,18 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     // VZVirtualMachineDelegate
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
         DispatchQueue.main.async {
+            guard self.vm === virtualMachine else { return }
+            self.cleanupColdSerial()
             log("Wizard OS powered off")
             if let c = self.stopCompletion { self.stopCompletion = nil; c() }
             else { self.vm = nil; self.socketDevice = nil; self.state = .stopped }
         }
     }
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
-        DispatchQueue.main.async { self.fail("Wizard OS stopped: \(error.localizedDescription)") }
+        DispatchQueue.main.async {
+            guard self.vm === virtualMachine else { return }
+            self.fail("Wizard OS stopped: \(error.localizedDescription)")
+        }
     }
 
     // Guest -> Mac: open https links in the default browser.
@@ -326,7 +398,43 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         return true
     }
 
-    private var coldInput: Pipe?
+    private var coldSerial: ColdBootstrapSerial?
+    private var coldSerialTimer: Timer?
+
+    private func cancelColdSerialWait() {
+        coldSerialTimer?.invalidate(); coldSerialTimer = nil
+        coldSerial?.cancelWaiting()
+    }
+
+    private func cleanupColdSerial() {
+        cancelColdSerialWait()
+        coldSerial?.closeAfterStop(); coldSerial = nil
+    }
+
+    private func waitForColdShell(_ machine: VZVirtualMachine) {
+        guard let serial = coldSerial, state == .starting else { return }
+        let generation = serial.generation
+        coldSerialTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak machine] timer in
+            guard let self, let machine, self.vm === machine,
+                  self.coldSerial?.generation == generation, self.state == .starting else {
+                timer.invalidate(); return
+            }
+            switch serial.poll(generation: generation, now: ProcessInfo.processInfo.systemUptime) {
+            case .waiting: break
+            case .delivered:
+                timer.invalidate(); self.coldSerialTimer = nil
+                log("Cold bootstrap command delivered after PID1 shell readiness")
+                self.state = .running
+            case .failed(let message):
+                timer.invalidate(); self.coldSerialTimer = nil
+                // Keep the live VM and writer owned. Never fall back to normal
+                // boot or drop its disk ownership; activation must stop/rollback.
+                log(message); self.lastError = message; self.state = .error
+            case .inactive:
+                timer.invalidate(); self.coldSerialTimer = nil
+            }
+        }
+    }
     private func makeConfiguration() throws -> VZVirtualMachineConfiguration {
         let dir = WizardShared.osDir
         let manifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("manifest.json")))) as? [String: Any] ?? [:]
@@ -383,15 +491,13 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
 
         let consoleURL = WizardShared.logsDir.appendingPathComponent("console.log")
-        FileManager.default.createFile(atPath: consoleURL.path, contents: nil)
+        // A failed truncation must not admit a prompt from a previous boot.
+        try Data().write(to: consoleURL)
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
         if WizardShared.coldBootstrapToken != nil {
-            let pipe = Pipe(); coldInput = pipe
-            let command = "mount -t proc proc /proc 2>/dev/null; mount -t sysfs sysfs /sys 2>/dev/null; mount -o remount,rw /; mkdir -p /run/wizard-update; mount -t virtiofs -o ro wizard-update /run/wizard-update && exec /usr/bin/python3 /run/wizard-update/source/next/guest/cold-bootstrap.py init\n"
-            pipe.fileHandleForWriting.write(Data(command.utf8))
-            // Keep writer open: a failed PID1 command must not EOF into a panic.
+            coldSerial = try ColdBootstrapSerial(console: consoleURL, now: ProcessInfo.processInfo.systemUptime)
         }
-        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: coldInput?.fileHandleForReading,
+        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: coldSerial?.input.fileHandleForReading,
                                                              fileHandleForWriting: try FileHandle(forWritingTo: consoleURL))
         c.serialPorts = [serial]
         try c.validate()
