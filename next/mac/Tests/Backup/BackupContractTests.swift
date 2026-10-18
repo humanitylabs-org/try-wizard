@@ -43,7 +43,7 @@ final class BackupContractTests: XCTestCase {
     func testPlanSummaryNamesCountsSizeAndPausedState() {
         let summary = WizardBackupContract.summary(["agents": ["one", "two"], "apps": ["files"],
             "files": ["count": 3, "bytes": 1200], "plan": ["install": ["files"], "replace": ["notes"], "leave": ["music"]]])
-        for text in ["2 agents", "1 apps", "3 files", "one, two", "Install: files", "Replace app data: notes", "Leave unchanged: music", "paused", "undo"] {
+        for text in ["2 agents", "1 apps", "3 files", "one, two", "Restore apps (install if needed): files", "Replace app data: notes", "Leave unchanged: music", "paused", "undo"] {
             XCTAssertTrue(summary.contains(text), text)
         }
     }

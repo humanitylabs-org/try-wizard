@@ -39,7 +39,7 @@ enum WizardBackupContract {
         let plan = result["plan"] as? [String: Any] ?? [:]
         var lines = ["Verified: \(agents.count) agents, \(apps.count) apps, \(count) files (\(size))."]
         if !agents.isEmpty { lines.append("Agents: " + agents.joined(separator: ", ")) }
-        for (key, label) in [("install", "Install"), ("replace", "Replace app data"), ("leave", "Leave unchanged")] {
+        for (key, label) in [("install", "Restore apps (install if needed)"), ("replace", "Replace app data"), ("leave", "Leave unchanged")] {
             if let values = plan[key] as? [String], !values.isEmpty { lines.append(label + ": " + values.joined(separator: ", ")) }
         }
         if let warnings = result["warnings_count"] as? Int, warnings > 0 {
