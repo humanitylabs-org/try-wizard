@@ -3,6 +3,7 @@
 Run as the guest's Wizard user from the WAM checkout. Optional argv[1] is a fixture
 marker manifest. Never point this at an owner's live installation.
 """
+import contextlib
 import hashlib
 import json
 from pathlib import Path
@@ -60,8 +61,11 @@ def last_json(text):
 
 box = Box()
 result: dict = {"agents": {}, "files": {}, "settings": {}, "app_versions": {}, "fixture_checks": {}}
-for agent in box.agents():
-    result["agents"][agent.id] = last_json(box.runner.python(agent, STOCK, ""))
+# Managed Macs (0.4.0+) only launch the agent image inside one admission reservation;
+# engines without box.operation() (plain Linux installs) need none.
+with getattr(box, "operation", contextlib.nullcontext)():
+    for agent in box.agents():
+        result["agents"][agent.id] = last_json(box.runner.python(agent, STOCK, ""))
 root = box.files_root()
 for path in sorted(root.rglob("*")):
     if path.is_file() and not path.is_symlink() and ".wizard-restore" not in path.relative_to(root).parts:
