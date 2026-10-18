@@ -198,6 +198,33 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.door.root / done["id"] / "bundle.wizardbackup").exists())
         self.assertEqual((await self.client.get("/api/backup/" + route, headers=HEADERS)).status, 409)
 
+    async def test_export_is_complete_only_with_its_checksum(self):
+        # A client downloads the moment it sees "complete"; hashing a large file takes seconds.
+        real = door_module.digest
+        def slow(path):
+            import time
+            time.sleep(.5)
+            return real(path)
+        with patch.object(door_module, "digest", slow):
+            started = await self.post("export", {"secret": SECRET})
+            self.assertEqual(started.status, 202)
+            j = await started.json()
+            seen = []
+            for _ in range(200):
+                j = await (await self.client.get("/api/backup/jobs/" + j["id"], headers=HEADERS)).json()
+                seen.append(j["state"])
+                if j["state"] == "complete":
+                    self.assertIn("sha256", j)
+                    self.assertIn("total_bytes", j)
+                if j["state"] != "running":
+                    break
+                await asyncio.sleep(.02)
+        self.assertEqual(j["state"], "complete")
+        self.assertIn("running", seen)
+        res = await self.client.get("/api/backup/jobs/" + j["id"] + "/download", headers=HEADERS)
+        self.assertEqual(res.status, 200)
+        self.assertEqual(hashlib.sha256(await res.read()).hexdigest(), j["sha256"])
+
     async def test_activation_and_undo_require_literal_owner_confirmation(self):
         for field, op in [("old_is_off", "activate"), ("confirm", "undo")]:
             for value in (None, False, 1, "true"):
