@@ -39,6 +39,10 @@ if secret == 'fail-secret':
 if secret == 'slow-secret':
     time.sleep(60)
 if args[:2] == ['key', 'new']:
+    state = pathlib.Path(__file__).with_suffix('.key-created')
+    if state.exists():
+        print(json.dumps({'ok':False, 'error':'already exists'})); sys.exit(1)
+    state.touch()
     r = {'ok': True, 'recovery_key': 'shown-only-once-fixture', 'key_id': '1234'}
 elif args[:2] == ['key', 'show-id']:
     r = {'ok': True, 'stored': True, 'key_id': '1234'}
@@ -75,7 +79,7 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.post("/api/backup/" + path, json=data or {}, headers=HEADERS)
 
     async def upload(self, content=b"encrypted fixture"):
-        res = await self.client.post("/api/backup/upload", data=content, headers=HEADERS)
+        res = await self.client.post("/api/backup/upload", data=io.BytesIO(content), headers=HEADERS)
         self.assertEqual(res.status, 201, await res.text())
         return await res.json()
 
@@ -130,6 +134,9 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(key, await status.text())
             self.assertNotIn(key, logs.getvalue())
             self.assertEqual(self.door.jobs, {})
+            second = await self.post("key/new")
+            self.assertEqual(second.status, 409)
+            self.assertNotIn(key, await second.text())
         finally:
             logging.getLogger().removeHandler(handler)
 
@@ -245,6 +252,56 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
         value = await res.json()
         self.assertEqual(value["last_restore"]["status"], "paused")
         self.assertNotIn("private", value)
+
+    async def test_passphrase_matching_json_syntax_does_not_corrupt_receipt(self):
+        done = await self.finish(await self.post("export", {"secret": "true"}))
+        self.assertEqual(done["state"], "complete")
+        self.assertIs(done["result"]["ok"], True)
+        self.assertEqual(door_module.redact_strings({"ok": True, "names": ["true"]}, "true"),
+                         {"ok": True, "names": ["[redacted]"]})
+
+    async def test_entrypoint_registers_native_boundary(self):
+        spec = importlib.util.spec_from_file_location("setup_entrypoint", SETUP / "server.py")
+        assert spec and spec.loader
+        server = importlib.util.module_from_spec(spec); spec.loader.exec_module(server)
+        client = TestClient(TestServer(server.build_app()))
+        await client.start_server()
+        try:
+            for route in ("export", "undo", "activate", "key/new"):
+                res = await client.post("/api/backup/" + route, json={}, headers={**HEADERS, "Origin": "null"})
+                self.assertEqual(res.status, 403)
+        finally:
+            await client.close()
+
+    async def test_disk_space_refusal_stages_nothing(self):
+        from collections import namedtuple
+        usage = namedtuple("usage", "total used free")(100, 99, 1)
+        with patch.object(door_module.shutil, "disk_usage", return_value=usage):
+            res = await self.client.post("/api/backup/upload", data=b"123", headers=HEADERS)
+        self.assertEqual(res.status, 507)
+        self.assertEqual(self.door.jobs, {})
+
+    async def test_timeout_reaps_child_and_removes_private_key(self):
+        j = self.door.new_job("verify")
+        with self.assertRaises(asyncio.TimeoutError):
+            await self.door.run(["verify", "fixture"], secret="slow-secret", job=j, timeout=.05)
+        self.assertFalse(self.door.processes)
+        self.assertFalse(list(self.door.root.rglob("key-*")))
+
+    async def test_undo_digest_mismatch_is_not_success(self):
+        from unittest.mock import AsyncMock
+        with patch.object(self.door, "run", new=AsyncMock(return_value={"ok": True, "digest_match": False})):
+            done = await self.finish(await self.post("undo", {"confirm": True}))
+        self.assertEqual(done["state"], "failed")
+        self.assertIn("differences", done["error"])
+
+    async def test_staging_symlink_is_refused(self):
+        outside = self.root / "outside"; outside.mkdir()
+        (outside / "keep").write_text("not staging")
+        self.door.root.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            await self.door.startup(None)
+        self.assertEqual((outside / "keep").read_text(), "not staging")
 
     async def test_restart_drops_incoming_bundle_and_key_keeps_interrupted_note(self):
         j = await self.upload()

@@ -19,7 +19,10 @@ its own recovery key; a later export can use it without exposing it again. If th
 use a passphrase rather than silently rotating the key and making earlier files inaccessible.
 
 Restore streams the encrypted file, verifies it, shows agents/apps/file totals and the engine's plan,
-then requires a separate confirmation before import. Messaging and cron remain paused. Activation
+then requires a separate confirmation before import. WAM's offline verify plan lists the backup's apps
+without probing the running app manager; the dialog therefore says “restore apps (install if needed)”
+rather than claiming they are all new installs. The engine rechecks the target immediately before import.
+Messaging and cron remain paused. Activation
 requires an explicit confirmation that the original Wizard is off. Undo also warns that the previous
 Wizard's active state will return. Long operations use a job ID, phase text and an indeterminate spinner;
 there is no invented percentage or unsafe cancellation during a restore.

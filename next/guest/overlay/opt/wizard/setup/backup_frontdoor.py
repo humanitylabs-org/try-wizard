@@ -56,6 +56,16 @@ def digest(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
+def redact_strings(value, secret):
+    if isinstance(value, str):
+        return value.replace(secret, "[redacted]")
+    if isinstance(value, list):
+        return [redact_strings(item, secret) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_strings(item, secret) for key, item in value.items()}
+    return value
+
+
 def public_result(op, raw):
     """Project only the contract's owner-safe fields; never return raw error/manifest/config."""
     result: dict = {"ok": True}
@@ -311,7 +321,7 @@ class BackupDoor:
             result = public_result(op, raw)
             if secret:
                 # Defensive: even a malicious fixture/engine must not echo the submitted secret in a receipt.
-                result = json.loads(json.dumps(result).replace(json.dumps(secret)[1:-1], "[redacted]"))
+                result = redact_strings(result, secret)
             j.update(result=result, state="verified" if op == "verify" else "complete", phase="Verified" if op == "verify" else "Finished")
             if op == "undo" and raw.get("digest_match") is not True:
                 j.update(state="failed", error="Undo finished with differences. Keep both copies until these are checked.")

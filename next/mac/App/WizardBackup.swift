@@ -67,7 +67,8 @@ final class WizardBackupClient: NSObject, URLSessionTaskDelegate {
 /// Keychain storage is optional and local to this Mac. Secrets are never preferences, logs, or command arguments.
 enum WizardBackupKeychain {
     static func save(_ secret: String) throws {
-        let account = SHA256.hash(data: Data(secret.utf8)).map { String(format: "%02x", $0) }.joined()
+        // A random account ID avoids exposing a fast, unsalted hash of a human passphrase.
+        let account = UUID().uuidString
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Wizard Backup", kSecAttrAccount as String: account]
         var item = query
