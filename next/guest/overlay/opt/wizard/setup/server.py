@@ -746,6 +746,14 @@ def build_app() -> web.Application:
         web.get("/api/agent-import", get_agent_import),
         web.static("/static", STATIC),
     ])
+    # Import by file so source-loaded contract tests and the systemd entrypoint use
+    # the same adjacent module, without depending on the caller's working directory.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wizard_backup_frontdoor", Path(__file__).with_name("backup_frontdoor.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.install(app, module.BackupDoor(name_provider=lambda: load_state().get("name") or "Wizard"))
     return app
 
 

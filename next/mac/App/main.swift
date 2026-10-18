@@ -1411,6 +1411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let wizardsMenu = NSMenu(title: "Wizard")
     let statusMenu = WizardStatusMenu()
     let statusActions = WizardStatusActions()
+    var backup: WizardBackupController?
     var bindingsTimer: Timer?
     var quitDeadline: TimeInterval = 0
     var quitTimer: Timer?
@@ -1643,6 +1644,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Wizard", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "Check for Updates…", action: #selector(WizardUpdater.checkForUpdates(_:)), keyEquivalent: "").target = WizardUpdater.shared
+        MainActor.assumeIsolated {
+            let backup = WizardBackupController()
+            backup.isLocal = { Store.active?.kind == .thisMac }
+            backup.wizardName = { Store.active?.name ?? "Wizard" }
+            backup.didRestore = { [weak self] in self?.controller.begin() }
+            backup.install(in: appMenu)
+            self.backup = backup
+        }
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
