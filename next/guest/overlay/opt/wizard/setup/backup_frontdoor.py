@@ -322,12 +322,16 @@ class BackupDoor:
             if secret:
                 # Defensive: even a malicious fixture/engine must not echo the submitted secret in a receipt.
                 result = redact_strings(result, secret)
-            j.update(result=result, state="verified" if op == "verify" else "complete", phase="Verified" if op == "verify" else "Finished")
+            done = {}
+            if op == "export":
+                # The receipt must carry the checksum and size before it says "complete": a client polling the job
+                # downloads as soon as it sees that state (a large file takes seconds to hash).
+                path.chmod(0o600)
+                done = {"sha256": await asyncio.to_thread(digest, path), "total_bytes": path.stat().st_size}
+            j.update(result=result, state="verified" if op == "verify" else "complete",
+                     phase="Verified" if op == "verify" else "Finished", **done)
             if op == "undo" and raw.get("digest_match") is not True:
                 j.update(state="failed", error="Undo finished with differences. Keep both copies until these are checked.")
-            if op == "export":
-                path.chmod(0o600)
-                j.update(sha256=await asyncio.to_thread(digest, path), total_bytes=path.stat().st_size)
         except (Exception, asyncio.CancelledError):
             j.update(state="failed", phase="Needs attention", error=ERRORS[op])
         finally:
@@ -339,7 +343,7 @@ class BackupDoor:
 
     async def download(self, request):
         j = self.jobs.get(request.match_info["job"])
-        if not j or j["operation"] != "export" or j["state"] != "complete":
+        if not j or j["operation"] != "export" or j["state"] != "complete" or "sha256" not in j:
             return refuse("Finished backup is not available", 409)
         path = self.root / j["id"] / "bundle.wizardbackup"
         j.update(state="downloading", phase="Sending backup to your Mac")
