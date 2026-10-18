@@ -328,7 +328,7 @@ final class VMApplicationController: NSObject, NSApplicationDelegate {
                     return try self.networkIdentityOperation(arguments)
                 }),
             immersiveMode: { [weak self] in
-                self?.fullscreenPreferenceStore.load().isImmersive ?? true
+                self?.fullscreenPreferenceStore.load().isImmersive ?? false
             },
             setImmersiveMode: { [weak self] isImmersive in
                 self?.fullscreenPreferenceStore.save(

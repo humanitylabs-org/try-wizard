@@ -1611,7 +1611,7 @@ case " $launch_kernel_command_line " in
   *) locale_kernel_argument="" ;;
 esac
 
-case ${OMARCHY_QEMU_GPU_IMMERSIVE:-1} in
+case ${OMARCHY_QEMU_GPU_IMMERSIVE:-0} in
   1)
     cocoa_full_screen=on
     cocoa_immersive=on

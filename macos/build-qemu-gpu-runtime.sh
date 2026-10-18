@@ -250,7 +250,7 @@ work_dir=
 remove_work_dir() {
   local path=$1
   [[ -n $path && ( -e $path || -L $path ) ]] || return 0
-  [[ $path == /private/tmp/omarchy-qemu-source-build.* ]] || \
+  [[ $path == */omarchy-qemu-source-build.* ]] || \
     die "refusing to remove unexpected scratch path: $path"
   rm -rf -- "$path"
 }
@@ -267,7 +267,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-work_dir=$(mktemp -d /private/tmp/omarchy-qemu-source-build.XXXXXX)
+work_dir=$(mktemp -d "${TMPDIR:-/private/tmp}/omarchy-qemu-source-build.XXXXXX")
 archive_dir="$work_dir/archives"
 listing_dir="$work_dir/listings"
 source_parent="$work_dir/source"
@@ -487,6 +487,7 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+/usr/bin/python3 "$native_dir/patches/wizard-cocoa-edit.py" "$source_dir/ui/cocoa.m"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
