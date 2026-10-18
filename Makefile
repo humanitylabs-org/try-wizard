@@ -69,7 +69,13 @@ test:
 
 # Start Swift early; shell integration suites consume its helper binary. Each
 # suite owns its temporary state, but SwiftPM has a single build directory.
-test-all: test-swift test-contracts test-guest test-shell test-resize
+test-all: test-swift test-contracts test-guest test-shell test-resize test-backup
+
+.PHONY: test-backup
+test-backup:
+	@mkdir -p $(ROOT)/next/mac/.build/module-cache/swift $(ROOT)/next/mac/.build/module-cache/clang
+	@SWIFT_MODULECACHE_PATH=$(ROOT)/next/mac/.build/module-cache/swift CLANG_MODULE_CACHE_PATH=$(ROOT)/next/mac/.build/module-cache/clang swift test --package-path $(ROOT)/next/mac --disable-sandbox
+	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s $(ROOT)/next/guest/tests -p test_backup_frontdoor.py -v
 
 test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-hda-recovery.py"

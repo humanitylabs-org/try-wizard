@@ -17,7 +17,7 @@ HOST=$APP/Contents/Library/LoginItems/"Wizard Host.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" "$HOST/Contents/Resources"
 
 "${SWIFTC[@]}" Shared/Shared.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
-"${SWIFTC[@]}" Shared/Shared.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/main.swift -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/BackupContract.swift App/WizardBackup.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/main.swift -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra
 cat > "$1" <<EOF
