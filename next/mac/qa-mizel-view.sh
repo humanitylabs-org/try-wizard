@@ -1,9 +1,11 @@
 #!/bin/bash
 # Drive the real Mizel view inside Wizard.app: New meeting → native capture via window.wizardNative.meetings → Stop.
 set -uo pipefail
+: "${WIZARD_QA_BASE_URL:?Set WIZARD_QA_BASE_URL to the Wizard origin under test}"
+BASE=${WIZARD_QA_BASE_URL%/}
 cd "$(dirname "$0")"
 ev() { rm -f /tmp/wizard-mvp-qa-eval.txt; ./qa.sh "eval $1"; for i in $(seq 1 30); do sleep 0.2; [[ -s /tmp/wizard-mvp-qa-eval.txt ]] && break; done; cat /tmp/wizard-mvp-qa-eval.txt; echo; }
-./qa.sh "connect https://private.wizard001.com/meetings/"
+./qa.sh "connect $BASE/meetings/"
 sleep 5
 echo "native: $(ev "JSON.stringify({native: window.wizardNative && window.wizardNative.meetings && window.wizardNative.meetings.native, title: document.title})")"
 ev "document.querySelector('#btnNew, [data-new], button.new') ? 'has-btn' : [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(Boolean).slice(0,12).join('|')"
