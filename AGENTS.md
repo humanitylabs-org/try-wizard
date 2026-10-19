@@ -1,40 +1,149 @@
-# Working on Try Omarchy
+# Agents working on try-wizard
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. It covers the
-contributor workflow; the instructions below add verification guidance for
-coding agents.
+Try Wizard is Wizard for the Mac: a native Mac app that runs Wizard OS in its own small Linux VM and shows Wizard UX in a window. It is a fork of Try Omarchy. The current app lives in `next/`; the older QEMU-based app is kept for reference. Read the team rules below before you start.
 
-## Project orientation
+## This repo
 
-- The product is a native Apple Silicon macOS app running pinned upstream
-  Omarchy in a project-built ARM64 guest with QEMU/HVF.
-- Read [docs/architecture.md](docs/architecture.md) for component boundaries
-  and the relevant component README before changing its behavior.
-- `macos/` owns the native app, runtime patches, and host integration; `guest/`
-  owns the image, package lock, and guest contracts. Use the root `Makefile`
-  for builds and tests.
+- **`main` is the Mac MVP line.** Until 19 Oct 2026 it was named `mac-mvp`. The old, stale `main` is kept as `archive/main-20261014`. Older notes that say `mac-mvp` mean `main`, except image tags such as `wizard-shell:mac-mvp-20261013`, which are separate names.
+- **Native builds and tests need macOS on Apple Silicon.** If you can't run them, say so under "Not checked" rather than reporting them as passing.
+- **Guest image rebuilds are for significant releases only.** A full guest rebuild (assemble, compress, install and onboarding QA) takes about three hours.
+  - Branding, CSS, copy and small UX fixes ship through wizard-ux, without a new guest image.
+  - Native Mac app changes rebuild and test only the native app and DMG.
+  - The guest is rebuilt from current sources when a significant release is cut: a tester or customer build, a scheduled MVP release, a security fix, or a change that only the guest can carry.
+- **Tester builds:** every DMG or VM image handed to a tester is built from commits already on GitHub. Its release notes name the branch and commit, plus the pinned revision of every companion repo.
+- **Keeping secrets and private data out of the app:** host names, accounts and private download URLs live in config, never in the app or the guest image.
 
-## Preparing contributions
+## Native app and guest verification (inherited from Try Omarchy)
 
-- Keep changes focused. Small fixes do not need an issue first; discuss large
-  behavioral or architecture changes before implementation.
-- Use the short [PR template](.github/pull_request_template.md), including when
-  supplying a body through a CLI or API. Omit details that do not apply.
-- For code changes, run focused tests while working and `make test` before
-  finishing. For documentation-only changes, check links, template metadata,
-  and `git diff --check`; an app build or full test run is unnecessary.
-- If build inputs change, run the relevant component build and review pins,
-  checksums, and their associated validation together.
-- Report exact verification commands and results, including failures and
-  checks not run. Full native verification requires macOS; explain platform
-  limitations rather than reporting skipped checks as passing.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the original contributor workflow for the QEMU app. These notes still apply to `macos/` and `guest/`.
 
-## Visual verification
+### Project orientation
 
-- Verify visual changes in the running app or guest, and inspect captures for
-  regressions. Compare before/after states for layout or appearance changes;
-  review a short recording when motion or interaction is what changed.
-- Attach captures to the PR when they help explain the change. Use the actual
-  app or guest, not generated mockups, and upload PR-only media to GitHub rather
-  than committing it. Remove secrets and unrelated personal information.
-- If runtime verification is unavailable, say what remains unchecked.
+- The original product is a native Apple Silicon macOS app running pinned upstream Omarchy in a project-built ARM64 guest with QEMU/HVF.
+- Read [docs/architecture.md](docs/architecture.md) for component boundaries, and the relevant component README before changing its behaviour.
+- `macos/` owns the native app, runtime patches and host integration. `guest/` owns the image, package lock and guest contracts. Use the root `Makefile` for builds and tests.
+
+### Preparing contributions
+
+- Use the [PR template](.github/pull_request_template.md), including when you supply a PR body through a CLI or the API.
+- **Code changes:** run focused tests while you work, and `make test` before you finish.
+- **Documentation-only changes:** check links, template metadata and `git diff --check`. They need no app build or full test run.
+- **Build inputs:** if they change, run the relevant component build and review pins, checksums and their validation together.
+
+### Visual verification
+
+- Verify visual changes in the running app or guest, and inspect the captures for regressions.
+- For layout or appearance changes, compare before and after states. When motion or interaction is what changed, review a short recording.
+- Attach captures to the PR when they help explain the change:
+  - use the real app or guest, never generated mockups;
+  - upload PR-only media to GitHub rather than committing it;
+  - remove secrets and unrelated personal information first.
+
+<!-- wizard-os-team-rules v1 (19 Oct 2026). Same text in every Wizard OS repo; the canonical copy is humanitylabs-org/wizard-os AGENTS.md. Change it there first, then copy the block to every repo in one round of PRs. -->
+## Wizard OS team rules (identical in every repo)
+
+Wizard OS is built by James, Jan and Miguel together with their agents. Archimedes commits as `defleur-agents` and Oscar as `oscarhenrycollins`. Every repo belongs to Wizard OS as a whole, and no repo belongs to one person. Make the change that is best for the whole system, and build on each other's work.
+
+### Branches
+
+- **`main` is the trunk in every repo.** It is what runs live and what releases are built from. `main` changes only through a merged pull request. Nobody pushes, force-pushes or rewrites `main` directly.
+- **Start every change from a fresh `main`:**
+  ```sh
+  git fetch origin
+  git switch -c fix/short-purpose origin/main
+  ```
+- **Name branches by purpose.** Use one of these prefixes:
+  - `feature/`: new behaviour.
+  - `fix/`: a bug fix.
+  - `docs/`: documentation only.
+  - `spec/`: a contract or decision change, in wizard-os.
+  - `release/`: a version bump or release snapshot.
+  - `integration/`: combines several branches for testing together.
+  - `evidence/`: test evidence only.
+
+  Write the rest in lowercase words joined by hyphens. A date suffix like `-20261019` is fine. People's names stay out of branch names.
+- **Push after every commit:** `git push -u origin <branch>`. Work that exists only on your machine is invisible to the rest of the team.
+- **One branch per change.** Leave other people's branches as they are. To build on someone's branch, branch from it and open your own PR.
+- **Old branches are history.** Only `main` and the open PRs are current.
+
+### Pull requests
+
+- **Say what kind of change it is.** Every PR gets exactly one tier, shown both as a label and as the start of its title. This lets anyone triage a list of PRs at a glance.
+
+  | Tier | Label | Title starts with | Means |
+  |---|---|---|---|
+  | Bug fix | `tier: recommended fix` | `Recommended fix:` | Something is broken and this makes it work. It must land. |
+  | Improvement | `tier: strong suggestion` | `Strong suggestion:` | A clearly better behaviour or a new capability. Feel free to drop it. |
+  | Personal preference | `tier: opinionated` | `Opinionated — feel free to drop:` | Taste: look, layout, wording, or how you like to work. |
+  | Maintenance | `tier: maintenance` | `Maintenance:` | Docs, releases, CI, tests or refactors with no change in behaviour. |
+
+  Optional labels:
+  - `priority: 1` (review first), `priority: 2` (review next) and `priority: 3` (when there is time).
+  - `needs: james review`: the PR waits for James to accept it or drop it.
+  - `preview only`: an experiment that must not be merged.
+  - `from: <where it already runs>`, for example `from: miguel test port`: the change is already in daily use there.
+
+  Use the same tiers for issues.
+- **Open the PR once your first commit is pushed.** Use a draft until it is ready: `gh pr create --base main --draft`.
+- **Keep each PR to one change** that a reader can follow in a few minutes. Split unrelated fixes into separate PRs.
+- **Title:** after the tier prefix, state the outcome in plain words ("Recommended fix: threads open instantly from the on-device cache"), rather than the mechanism.
+- **Body:** fill in the PR template. Write it for someone opening it cold:
+  1. **What and why:** what changes for the user or the system, and the problem it solves.
+  2. **Verified:** the exact commands you ran and their results. Add runtime evidence (a live box, screenshots or a short recording) wherever behaviour changed. For a bug fix, show the new test failing before the fix and passing after it.
+  3. **Not checked:** what you could not verify, and why.
+  4. **Links:** related issues, the matching PRs in other repos, and the decision or spec this change follows.
+- **If `main` moves while you work,** merge `origin/main` into your branch and re-run the checks.
+
+### Merging
+
+- **The author merges their own PR** once three things hold:
+  - the required checks are green;
+  - the Verified section reflects real results;
+  - nothing in the PR needs a decision (see the next section).
+
+  There is no wait for a human approval.
+- **What each tier means for merging:**
+  - **Recommended fixes and maintenance** merge on those conditions.
+  - **Strong suggestions** merge on them too, unless they change something James sees or uses every day. In that case add `needs: james review` and wait.
+  - **Opinionated changes** always carry `needs: james review` and wait for James.
+  - **`preview only`** PRs never merge.
+- **Use "Create a merge commit"**, then delete the branch.
+- **After merging anything that publishes or deploys,** confirm that the workflow run on `main` succeeded.
+
+### When a change needs a decision
+
+Decide and merge yourself, except when the change:
+
+- reverses a locked decision in wizard-os `docs/DECISIONS.md`;
+- changes a contract in wizard-os `spec/` that other repos depend on;
+- changes James's skins (Nebula, Grove, Tide, Ember, Signal) or the base shell look;
+- deletes user data, rewrites history, or is otherwise hard to undo.
+
+For those, open the PR or an issue and explain the choice in one paragraph. Then:
+
+- **If James decides:** add `needs: james review`.
+- **If another agent's side has to act:** assign that agent's account. GitHub's Assignee field is used only for this.
+
+Carry on with other work while you wait.
+
+### Changes that span repos
+
+1. Change the contract first, with a `spec/` PR in wizard-os.
+2. Land the code PRs in dependency order: the service before the UI that calls it.
+3. Keep each step backward compatible, so `main` works in every repo at every point.
+4. Link the PRs to each other.
+
+### Releases
+
+Anything shipped, tagged or handed to a tester is built only from commits already on GitHub. Release notes name the repo, branch and commit.
+
+### Safety
+
+- **Keep secrets and private data out of commits.** That covers keys, tokens, passwords, `.env` files, personal data, real conversation content, owner hostnames and home-directory paths. Put these in config or environment variables. Private repos are still visible to every org member.
+- **Hermes, the agent harness, stays stock.** Wizard behaviour goes in the Agent Service, the App Manager, Wizard UX or an app.
+- **Run this repo's checks before opening a PR.** They are listed under "This repo" in this file.
+
+### Where work comes from
+
+Pick up work from the open issues in this repo and from wizard-os `docs/WORK_OUTSTANDING.md`. For how the pieces fit together and what is already decided, read wizard-os `docs/ARCHITECTURE.md` and `docs/DECISIONS.md`.
+<!-- /wizard-os-team-rules -->
