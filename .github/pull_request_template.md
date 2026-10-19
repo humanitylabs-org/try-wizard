@@ -1,3 +1,6 @@
+<!-- Tier (one label + title prefix): Recommended fix (broken → working) · Strong suggestion (clearly better, feel free to drop)
+     · Opinionated — feel free to drop (taste) · Maintenance (docs/release/CI, no behaviour change). See AGENTS.md. -->
+
 ## What changed and why
 
 <!-- Describe the problem, what changes for the user, and why.
