@@ -3,7 +3,8 @@ Description=Wizard vsock bridge for port %i
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/socat VSOCK-LISTEN:%i,fork,reuseaddr TCP:127.0.0.1:%i
+# backlog: socat defaults to 5; extra simultaneous vsock connects are refused (see wizard-ux-bridge).
+ExecStart=/usr/bin/socat VSOCK-LISTEN:%i,fork,reuseaddr,backlog=128 TCP:127.0.0.1:%i
 Restart=always
 RestartSec=1
 
