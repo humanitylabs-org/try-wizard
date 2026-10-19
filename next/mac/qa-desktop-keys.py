@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Thales native Wizard menu/event-loop acceptance. No real sends; defaults restored."""
 import fcntl,json,pathlib,plistlib,subprocess as sp,time,os
+# Supply the full desktop URL for the Wizard under test; no owner-specific default.
+URL=os.environ['QA_NATIVE_URL']
+if not URL:raise SystemExit('Set QA_NATIVE_URL to the desktop URL under test')
 BASE=pathlib.Path('/Volumes/ThalesMedia/Projects/wizard-desktop/dynamic-keys')
 APP=BASE/'native/dist/Wizard.app';OUT=BASE/'evidence/native';OUT.mkdir(parents=True,exist_ok=True)
-DOMAIN='org.humanitylabs.wizard';URL=os.environ.get('QA_NATIVE_URL','https://desktop-keys.staging.wizard001.com/wizard-os-home/desktop.html');passed=[]
+DOMAIN='org.humanitylabs.wizard';passed=[]
 def run(*args,check=True):return sp.run(args,check=check,text=True,stdout=sp.PIPE,stderr=sp.PIPE)
 def qa(cmd):return run('/tmp/wizard-qa-post',cmd)
 def ev(js):

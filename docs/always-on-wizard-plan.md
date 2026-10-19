@@ -35,7 +35,7 @@
 2. **Growable disk on a chosen volume.** ([#2](https://github.com/humanitylabs-org/try-wizard/issues/2)) The rootfs is a fixed ~2 GB image in `~/Library/Application Support/Wizard/os`. Grow on demand and allow placement on an external volume.
 3. **Encrypted export/import bundle.** ([#3](https://github.com/humanitylabs-org/try-wizard/issues/3)) One bundle carries the Wizard core (memory, skills, sessions, config, credentials, app data) between VPS, Mac VM and Wizard One. The same code powers migration, backup and restore. **Build this first.**
 4. **Headless always-on mode.** ([#4](https://github.com/humanitylabs-org/try-wizard/issues/4)) Start at boot without a GUI login, restart on crash, keep the host awake.
-5. **Tailscale inside Wizard OS.** ([#5](https://github.com/humanitylabs-org/try-wizard/issues/5)) The guest is behind host NAT today; it needs its own tailnet identity so phones and `private.wizard001.com` reach it directly.
+5. **Tailscale inside Wizard OS.** ([#5](https://github.com/humanitylabs-org/try-wizard/issues/5)) The guest is behind host NAT today; it needs its own tailnet identity so phones and other tailnet devices reach it directly.
 6. **In-place Wizard OS updates.** ([#6](https://github.com/humanitylabs-org/try-wizard/issues/6)) Existing installs need guest updates without a reinstall.
 7. **Scheduled off-machine backups.** ([#7](https://github.com/humanitylabs-org/try-wizard/issues/7)) The export bundle on a schedule to object storage, with a tested restore.
 
@@ -48,7 +48,7 @@
 ## Phase 3 — rehearsal and cutover
 
 11. **One-week shadow run.** ([#11](https://github.com/humanitylabs-org/try-wizard/issues/11)) Fresh install on Thales, import a copy of Archimedes' bundle, run on the tailnet alongside Telos. Check cron jobs, the Wizard app connection, private sites, and memory/search parity.
-12. **Cutover runbook.** ([#12](https://github.com/humanitylabs-org/try-wizard/issues/12)) Repoint `private.wizard001.com` and tailnet routes, move cron, and guarantee a single active scheduler (no double-firing jobs).
+12. **Cutover runbook.** ([#12](https://github.com/humanitylabs-org/try-wizard/issues/12)) Replace the retired custom domain with the configured tailnet origin, move cron, and guarantee a single active scheduler (no double-firing jobs).
 13. **Rollback window.** ([#13](https://github.com/humanitylabs-org/try-wizard/issues/13)) Keep the Hostinger VPS for 30 days after cutover.
 
 ## Done when
