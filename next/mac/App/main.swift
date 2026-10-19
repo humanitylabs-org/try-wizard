@@ -31,9 +31,12 @@ enum Store {
         return b.indices.contains(activeIndex) ? b[activeIndex] : b.first
     }
     static var osFeedURL: URL {
-        // GitHub release feed. QA and testers can point a build elsewhere with
-        // `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? "https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-20261013/latest.json")!
+        // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
+        // QA and testers can point a build elsewhere with `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
+        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/latest.json")!
+    }
+    static let downloadsBase = "https://downloads.aiwizards.com/"
+    static var downloadsPage: URL { URL(string: downloadsBase + "index.html")!
     }
 }
 
@@ -56,8 +59,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var lastProgress = Date.distantPast
     private var failure: Error?
 
-    /// A feed names one archive, or the same archive split into ordered parts (each under GitHub's 2 GiB asset
-    /// limit). `sha256` is always the hash of the whole archive; each part also carries its own hash.
+    /// A feed names one archive, or the same archive split into ordered parts (each small enough for Cloudflare to
+    /// cache at its edge). `sha256` is always the hash of the whole archive; each part also carries its own hash.
     struct Part: Decodable { let url: String; let bytes: Int64?; let sha256: String }
     /// Apps Wizard OS fetches by itself right after first launch (voice), so the space they take is never a surprise.
     struct Background: Decodable { let label: String; let bytes: Int64?; let installBytes: Int64? }
@@ -379,7 +382,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let bad = error("This file isn't a valid Wizard OS image. Download it again from the release page.")
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              m["version"] as? String == "0.3.0",
+              let imageVersion = m["version"] as? String,
+              ["0.3.0", "0.4.0"].contains(imageVersion),
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }
@@ -440,13 +444,22 @@ enum HostControl {
     }
 
     static var isRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).isEmpty
+        NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).contains {
+            $0.bundleURL?.resolvingSymlinksInPath() == embeddedHostURL.resolvingSymlinksInPath()
+        }
+    }
+    static var hasForeignRunner: Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).contains {
+            $0.bundleURL?.resolvingSymlinksInPath() != embeddedHostURL.resolvingSymlinksInPath()
+        }
     }
 
     /// Internal MVP: start on demand, never register or change daily login services.
     static func ensureRunning() {
+        guard !hasForeignRunner else { NSLog("Wizard: another candidate's Host is running; not launching or controlling it"); return }
         if !isRunning {
             let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
+            cfg.arguments = ["--wizard-data-home", WizardShared.supportDir.path]
             NSWorkspace.shared.openApplication(at: embeddedHostURL, configuration: cfg) { _, err in
                 if let err { NSLog("Wizard: couldn't launch Wizard Host: \(err)") }
             }
@@ -475,6 +488,30 @@ enum HostControl {
     }
 }
 
+// MARK: - Native authority
+
+/// Origins are protocol + host + effective port, never a hostname allowlist.
+/// Authority comes from the selected backend, not navigation/redirect destinations.
+struct NativeOrigin: Hashable {
+    let scheme: String
+    let host: String
+    let port: Int
+    init?(scheme: String, host: String, port: Int?) {
+        let scheme = scheme.lowercased()
+        guard ["http", "https"].contains(scheme), !host.isEmpty else { return nil }
+        self.scheme = scheme; self.host = host.lowercased()
+        self.port = port == nil || port == 0 ? (scheme == "https" ? 443 : 80) : port!
+    }
+    init?(_ url: URL) {
+        guard let scheme = url.scheme, let host = url.host else { return nil }
+        self.init(scheme: scheme, host: host, port: url.port)
+    }
+    init?(_ origin: WKSecurityOrigin) {
+        self.init(scheme: origin.protocol, host: origin.host, port: origin.port)
+    }
+    var isInstalledApp: Bool { scheme == "http" && host == "localhost" && port == 48023 }
+}
+
 // MARK: - Native bridge (window.webkit.messageHandlers.wizardNative)
 
 /// One namespaced page→native channel. Capabilities register a handler under a prefix
@@ -499,21 +536,43 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
 
     func register(_ prefix: String, _ handler: @escaping Handler) { handlers[prefix] = handler }
 
+    /// Installed by the owning window; no authority before its selection is known.
+    weak var owner: WizardWindowController?
+    private(set) var qaMessages: [[String: Any]] = []
+
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let web = message.webView, let body = message.body as? [String: Any],
-              let method = body["method"] as? String,
-              let origin = URL(string: "\(message.frameInfo.securityOrigin.protocol)://\(message.frameInfo.securityOrigin.host)"),
-              ["127.0.0.1", "localhost", Store.active.flatMap { URL(string: $0.url)?.host }].contains(origin.host)
-        else { return }
+              let method = body["method"] as? String else { return }
+        let admitted = owner?.web === web && owner?.allowsNative(message.frameInfo) == true
+        if UserDefaults.standard.bool(forKey: "QAHooks") {
+            qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame,
+                               "origin": "\(message.frameInfo.securityOrigin.protocol)://\(message.frameInfo.securityOrigin.host):\(message.frameInfo.securityOrigin.port)",
+                               "admitted": admitted])
+            if qaMessages.count > 200 { qaMessages.removeFirst() }
+        }
+        if UserDefaults.standard.bool(forKey: "QAHooks"), method == "qa.media-policy" {
+            // Diagnostic only: real WK frame/origin, same production delegate.
+            // Does not acquire a device or bypass native macOS consent.
+            owner?.webView(web, requestMediaCapturePermissionFor: message.frameInfo.securityOrigin,
+                           initiatedByFrame: message.frameInfo, type: .microphone) { _ in }
+        }
+        guard admitted else { return }
+        if method == "chrome.regions" {
+            owner?.updateDragRegions(body["params"] as? [String: Any] ?? [:]); return
+        }
         let id = body["id"] ?? NSNull()
         var params = body["params"] as? [String: Any] ?? [:]
         let so = message.frameInfo.securityOrigin
+        let caller = NativeOrigin(so)
         params["_origin"] = "\(so.protocol)://\(so.host)\(so.port != 0 ? ":\(so.port)" : "")"
         guard let handler = handlers.first(where: { method.hasPrefix($0.key) })?.value else { return }
-        handler(method, params) { result in
+        handler(method, params) { [weak self] result in
             let payload = (try? JSONSerialization.data(withJSONObject: ["id": id, "result": result ?? NSNull()], options: [.fragmentsAllowed]))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "null"
             DispatchQueue.main.async {
+                // A navigation while work is in flight must not leak its result.
+                guard self?.owner?.web === web, self?.owner?.isTrustedDocument == true,
+                      web.url.flatMap(NativeOrigin.init) == caller else { return }
                 web.evaluateJavaScript("window.wizardNativeReply && window.wizardNativeReply(\(payload))")
             }
         }
@@ -551,10 +610,77 @@ struct LocalVoiceStatus: Decodable {
     }
 }
 
+// MARK: - Native title-bar dragging
+
+/// A hit-test-only overlay. Controls and everything below the header fall through
+/// to WebKit; blank header space never receives a web text-selection mouseDown.
+final class WizardDragView: NSView {
+    weak var owner: WizardWindowController?
+    var header = NSRect.zero
+    var controls: [NSRect] = []
+    private(set) var dragCount = 0
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let owner, owner.window?.styleMask.contains(.fullScreen) == false else { return nil }
+        let p = convert(point, from: superview)
+        // Keep the native traffic lights and their hover target untouched.
+        if p.x < 96 && p.y < 32 { return nil }
+        if !owner.overlay.isHidden { return p.y < 28 ? self : nil }
+        guard owner.isTrustedDocument, header.contains(p), !controls.contains(where: { $0.contains(p) }) else { return nil }
+        return self
+    }
+    override func mouseDown(with event: NSEvent) {
+        guard event.type == .leftMouseDown else { return }
+        guard let window else { return }
+        dragCount += 1
+        window.makeKeyAndOrderFront(nil)
+        let start = window.convertPoint(toScreen: event.locationInWindow)
+        let frame = window.frame
+        // AppKit tracking consumes real mouse events, including off-window up.
+        // Unlike a web gesture this never begins a selection or DOM click.
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { break }
+            let screen = window.convertPoint(toScreen: next.locationInWindow)
+            window.setFrameOrigin(NSPoint(x: frame.minX + screen.x - start.x,
+                                          y: frame.minY + screen.y - start.y))
+        }
+    }
+    static let script = """
+    (() => {
+      let pending = false;
+      const rect = e => { const r=e.getBoundingClientRect(); return [r.x,r.y,r.width,r.height]; };
+      const update = () => {
+        pending=false;
+        const bar=document.querySelector('header#bar.bar');
+        const header=bar ? rect(bar) : [0,0,innerWidth,28];
+        const elements=(bar || document).querySelectorAll('button,a,input,select,textarea,summary,[role="button"],[tabindex],[contenteditable],[data-ws],#voicePill');
+        const params={header,controls:[...elements].filter(e=>e.getClientRects().length && e.getBoundingClientRect().top < header[3]).map(rect)};
+        window.webkit.messageHandlers.wizardNative.postMessage({method:'chrome.regions',params});
+      };
+      // RAF can be suspended while the native window is occluded/headless.
+      // Geometry is an input contract and must not depend on compositor frames.
+      const schedule = () => { if (!pending) { pending=true; setTimeout(update,0); } };
+      addEventListener('DOMContentLoaded', () => {
+        const bar=document.querySelector('header#bar.bar');
+        if (bar) new MutationObserver(schedule).observe(bar,{subtree:true,childList:true,attributes:true});
+        new ResizeObserver(schedule).observe(document.documentElement);
+        document.fonts.ready.then(schedule);
+        schedule();
+      }, {once:true});
+      addEventListener('resize',schedule); addEventListener('scroll',schedule,true);
+    })();
+    """
+}
+
 // MARK: - Window
 
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
+    let dragView = WizardDragView()
+    private var dragMonitor: Any?
+    private(set) var qaMedia: [[String: Any]] = []
     let overlay = NSView()
     let title = NSTextField(wrappingLabelWithString: "")
     let subtitle = NSTextField(wrappingLabelWithString: "")
@@ -570,20 +696,26 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     private var voiceTimer: Timer?
     private var voiceTask: URLSessionDataTask?
     private var voiceGeneration = UUID()
+    // Backend-session lifetime is independent of a status request/retry.
+    private var voiceConnectionGeneration = UUID()
     private var voiceRetryPending = false
+    private var qaVoiceOrigin: URL?
     var localVoiceQAState: [String: Any] {
         ["visible": !voiceBar.isHidden, "summary": voiceLabel.stringValue,
          "retryEnabled": voiceRetry.isEnabled, "retryPending": voiceRetryPending,
-         "polling": voiceTimer != nil]
+         "polling": voiceTimer != nil, "height": voiceHeight?.constant ?? 0,
+         "connectionGeneration": voiceConnectionGeneration.uuidString,
+         "webHeight": web.bounds.height, "contentHeight": window?.contentView?.bounds.height ?? 0]
     }
 
     init() {
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = .default()
+        cfg.websiteDataStore = UserDefaults.standard.bool(forKey: "QAHooks") && UserDefaults.standard.bool(forKey: "QAWebStorage") ? .nonPersistent() : .default()
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
         cfg.userContentController.add(NativeBridge.shared, name: NativeBridge.name)
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
         cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -596,6 +728,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         window.setFrameAutosaveName("WizardMainWindow")
         if !window.setFrameUsingName("WizardMainWindow") { window.center() }
         super.init(window: window)
+        NativeBridge.shared.owner = self
+        dragView.owner = self
+        window.isMovableByWindowBackground = false
 
         web.navigationDelegate = self
         web.uiDelegate = self
@@ -607,6 +742,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         root.wantsLayer = true
         root.layer?.backgroundColor = window.backgroundColor.cgColor
         window.contentView = root
+        let updateNotice = WizardUpdater.shared.attach(to: root)
         voiceBar.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(voiceBar)
         voiceHeight = voiceBar.heightAnchor.constraint(equalToConstant: 0)
@@ -630,19 +766,39 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             root.addSubview(v)
             NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                                          v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                                         v.topAnchor.constraint(equalTo: root.topAnchor),
+                                         v.topAnchor.constraint(equalTo: updateNotice.bottomAnchor),
                                          v.bottomAnchor.constraint(equalTo: voiceBar.topAnchor)])
         }
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = window.backgroundColor.cgColor
         buildOverlay()
+        dragView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(dragView)
+        NSLayoutConstraint.activate([dragView.leadingAnchor.constraint(equalTo: web.leadingAnchor),
+                                     dragView.trailingAnchor.constraint(equalTo: web.trailingAnchor),
+                                     dragView.topAnchor.constraint(equalTo: web.topAnchor),
+                                     dragView.bottomAnchor.constraint(equalTo: web.bottomAnchor)])
+        // WKWebView / transparent native chrome can win ordinary view routing.
+        // Intercept only this window's authenticated blank header mouseDown;
+        // controls, desktop content and other windows retain normal AppKit input.
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            let point = self.dragView.convert(event.locationInWindow, from: nil)
+            let parentPoint = self.dragView.convert(point, to: self.dragView.superview)
+            guard self.dragView.hitTest(parentPoint) != nil else { return event }
+            self.dragView.mouseDown(with: event)
+            return nil
+        }
     }
+    deinit { if let dragMonitor { NSEvent.removeMonitor(dragMonitor) } }
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildOverlay() {
-        let mark = NSTextField(labelWithString: "✦")
-        mark.font = .systemFont(ofSize: 44, weight: .light)
-        mark.textColor = NSColor(calibratedRed: 0.72, green: 0.62, blue: 1, alpha: 1)
+        let mark = NSImageView(image: WizardBrand.image())
+        mark.identifier = NSUserInterfaceItemIdentifier("wizard-brand-hat")
+        mark.imageScaling = .scaleProportionallyUpOrDown
+        mark.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 62).isActive = true
         title.font = .systemFont(ofSize: 24, weight: .semibold)
         title.textColor = .white
         title.alignment = .center
@@ -715,10 +871,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         }
     }
 
-    // The bar belongs to the native window, not onboarding's WK page. It stays
-    // visible after /api/finish redirects into Wizard UX, including ready state.
+    // The bar belongs to the native window, not onboarding's WK page. It
+    // remains monitored after /api/finish redirects into Wizard UX; only
+    // preparing/error/recovery states occupy visible layout space.
     private func clearLocalVoice() {
         voiceGeneration = UUID()
+        voiceConnectionGeneration = UUID()
         voiceTimer?.invalidate(); voiceTimer = nil
         voiceTask?.cancel(); voiceTask = nil
         voiceRetryPending = false
@@ -737,11 +895,31 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     private func voiceURL(_ path: String) -> URL {
-        URL(string: path, relativeTo: WizardShared.localSetupURL)!.absoluteURL
+        URL(string: path, relativeTo: qaVoiceOrigin ?? WizardShared.localSetupURL)!.absoluteURL
+    }
+
+    /// Isolated loopback protocol fixture; never boots, opens or alters a VM.
+    func qaConnectLocalVoice(_ url: URL) {
+        guard UserDefaults.standard.bool(forKey: "QAHooks"), url.host == "127.0.0.1" else { return }
+        qaVoiceOrigin = url
+        Store.backends = [Backend(kind: .thisMac, name: "QA local voice", url: url.absoluteString)]
+        Store.activeIndex = 0; homeURL = url; load(url)
+        startLocalVoice()
+    }
+
+    func qaSnapshotVoiceFooter(to path: String) {
+        guard UserDefaults.standard.bool(forKey: "QAHooks"), !voiceBar.isHidden else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        if let rep = voiceBar.bitmapImageRepForCachingDisplay(in: voiceBar.bounds) {
+            voiceBar.cacheDisplay(in: voiceBar.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     private func pollLocalVoice() {
-        guard Store.active?.kind == .thisMac, !voiceBar.isHidden, voiceTask == nil, !voiceRetryPending else { return }
+        // Keep monitoring after readiness collapses the footer: a later failure
+        // must expose recovery again without a reload.
+        guard Store.active?.kind == .thisMac, voiceTask == nil, !voiceRetryPending else { return }
         let generation = voiceGeneration
         var request = URLRequest(url: voiceURL("/api/voice/status"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -751,7 +929,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             DispatchQueue.main.async {
                 guard let self, self.voiceGeneration == generation, Store.active?.kind == .thisMac else { return }
                 self.voiceTask = nil
-                self.voiceLabel.stringValue = status?.summary ?? "Local voice status unavailable — Retry to request preparation."
+                let ready = status?.isReady == true
+                self.voiceBar.isHidden = ready; self.voiceHeight.constant = ready ? 0 : 64
+                self.voiceLabel.stringValue = ready ? "" : status?.summary ?? "Local voice status unavailable — Retry to request preparation."
                 self.voiceLabel.toolTip = self.voiceLabel.stringValue
                 self.voiceRetry.isEnabled = status?.canRetry ?? true
             }
@@ -785,6 +965,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         voiceTask?.resume()
     }
 
+    /// QA-only navigation without an origin override: exercises the production
+    /// finite setup/shell origin set and shell API target without starting a VM.
+    func qaConnectProductionLocal() {
+        guard UserDefaults.standard.bool(forKey: "QAHooks") else { return }
+        qaVoiceOrigin = nil
+        Store.backends = [Backend(kind: .thisMac, name: "QA production local origins", url: WizardShared.localSetupURL.absoluteString)]
+        Store.activeIndex = 0; homeURL = WizardShared.localSetupURL
+        load(WizardShared.localSetupURL); startLocalVoice()
+    }
+
     // MARK: Flow
 
     func begin() {
@@ -795,6 +985,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         case .thisMac:
             guard WizardShared.filesFolder != nil else { askFilesFolder(); return }
             guard WizardShared.osInstalled else { installOnThisMac(); return }
+            guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)
@@ -834,6 +1025,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Calls back nil when it isn't (legacy UX, onboarding, still loading) so callers can fall back.
     /// For wizard:orb it waits for the page's wizard:orb-state answer.
     func uxSend(_ event: String, _ detail: [String: Any], done: @escaping (String?) -> Void) {
+        guard isTrustedDocument else { done(nil); return }
         let js = """
         const ux = window.wizardUX;
         if (!ux || !Array.isArray(ux.events) || !ux.events.includes(name)) return null;
@@ -850,6 +1042,31 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             case .failure(let e): NSLog("Wizard: bridge %@ failed: %@", event, e.localizedDescription); done(nil)
             }
         }
+    }
+
+    /// Freeze admission in the trusted MAIN document in the same JavaScript
+    /// turn that reads the voice state. Pending getUserMedia is already listen.
+    func admitUpdateRestart(_ done: @escaping (Bool) -> Void) {
+        guard isTrustedDocument, let captured = web.url else { done(false); return }
+        let setup = Store.active?.kind == .thisMac && NativeOrigin(captured) == NativeOrigin(WizardShared.localSetupURL)
+        let js = """
+        (() => {
+          const state = window.__wux?.voice ?? window.__wos?.voice;
+          const shared = window.WizAppCapture?.getState?.();
+          const knownIdle = state === 'idle' || (\(setup ? "true" : "false") && state == null);
+          if (!knownIdle || shared?.active || shared?.recording || shared?.hold) return false;
+          window.__wizardUpdateFrozen = true;
+          return true;
+        })()
+        """
+        web.evaluateJavaScript(js) { [weak self] value, error in
+            guard let self, error == nil, self.isTrustedDocument, self.web.url == captured else { done(false); return }
+            done(value as? Bool == true)
+        }
+    }
+    func setUpdateFrozen(_ frozen: Bool) {
+        guard isTrustedDocument else { return }
+        web.evaluateJavaScript("window.__wizardUpdateFrozen = \(frozen ? "true" : "false")")
     }
 
     /// Is the page in the window Wizard UX (bridge ready)?
@@ -958,7 +1175,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         installer.onDone = { [weak self] err in
             guard let self else { return }
             if let err {
-                // A bad picked file says so; an unreachable feed just shows the GitHub steps.
+                // A bad picked file says so; an unreachable feed just shows the manual download steps.
                 if err.localizedDescription.contains("free space") {
                     self.showOverlay("Not enough space for Wizard OS", err.localizedDescription, spinning: false,
                                      actions: [("Try Again", #selector(self.retryInstall)), ("Back", #selector(self.backToChooser))])
@@ -977,15 +1194,15 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Your GitHub download may require signing in in your browser. Other guest versions are not compatible with this build.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
                     spinning: false,
                     actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
                               ("Back", #selector(backToChooser))])
     }
 
-    /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the try-wizard
-    /// releases page if the feed itself can't be read.
+    /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the downloads page
+    /// if the feed itself can't be read.
     @objc func openReleasePage() {
         var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
         URLSession.shared.dataTask(with: req) { data, resp, _ in
@@ -993,7 +1210,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             let names = f.map { $0.parts?.map(\.url) ?? ($0.url.map { [$0] } ?? []) } ?? []
             let urls = names.compactMap { URL(string: $0, relativeTo: Store.osFeedURL)?.absoluteURL }
             DispatchQueue.main.async {
-                if urls.isEmpty { NSWorkspace.shared.open(URL(string: "https://github.com/humanitylabs-org/try-wizard/releases/tag/mac-mvp-20261013")!) }
+                if urls.isEmpty { NSWorkspace.shared.open(Store.downloadsPage) }
                 else { urls.forEach { NSWorkspace.shared.open($0) } }
             }
         }.resume()
@@ -1016,15 +1233,16 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func connectLocal() {
         startLocalVoice()
+        let generation = voiceConnectionGeneration
         let started = Date()
         HostControl.ensureRunning()
         HostControl.send("start")
         var shown = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
-            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if elapsed > 0.6 && !shown { shown = true; self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
         }, done: { [weak self] ok in
-            guard let self, Store.active?.kind == .thisMac, !self.voiceBar.isHidden else { return }
+            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
@@ -1036,6 +1254,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func load(_ url: URL) {
+        dragView.header = .zero; dragView.controls = []
         loadedAt = nil
         web.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
     }
@@ -1046,9 +1265,14 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Origins already checked for Wizard UX this session (so a legacy-only back end isn't probed on every load).
     var resolvedOrigins: Set<String> = []
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        dragView.header = .zero; dragView.controls = []
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
         // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
-        if homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
+        if isTrustedDocument, homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
             let key = "\(u.scheme ?? "")://\(h):\(u.port ?? 0)"
             if !resolvedOrigins.contains(key) {
                 resolvedOrigins.insert(key)
@@ -1088,7 +1312,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { decisionHandler(.allow); return }
-        if action.targetFrame == nil || (action.navigationType == .linkActivated && !isWizardOrigin(url)) {
+        // App-origin iframe navigation is not native authority. Preserve Files /
+        // installed-app links in their managed frame without whitelisting the
+        // same origin for script controls or silent device permission.
+        let managedAppLink = action.targetFrame?.isMainFrame == false && Store.active?.kind == .thisMac && NativeOrigin(url)?.isInstalledApp == true
+        if action.targetFrame == nil || (action.navigationType == .linkActivated && !isWizardOrigin(url) && !managedAppLink) {
             if ["http", "https", "mailto"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
             decisionHandler(.cancel); return
         }
@@ -1111,15 +1339,68 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        var c = URLComponents(); c.scheme = origin.protocol; c.host = origin.host
-        if origin.port != 0 { c.port = origin.port }
-        decisionHandler(c.url.map(isWizardOrigin) == true ? .grant : .deny)
+        let allowed = allowsNative(frame) && NativeOrigin(origin) == NativeOrigin(frame.securityOrigin)
+        if UserDefaults.standard.bool(forKey: "QAHooks") {
+            qaMedia.append(["mainFrame": frame.isMainFrame, "origin": "\(origin.protocol)://\(origin.host):\(origin.port)",
+                            "granted": allowed, "type": type.rawValue])
+        }
+        // Native macOS microphone consent still applies; this only settles WebKit's
+        // origin decision. The explicitly selected remote backend keeps its path.
+        decisionHandler(allowed ? .grant : .deny)
     }
 
+    private var selectedControlOrigins: Set<NativeOrigin> {
+        guard let backend = Store.active else { return [] }
+        let urls: [URL]
+        if backend.kind == .thisMac {
+            if UserDefaults.standard.bool(forKey: "QAHooks"), let qa = qaVoiceOrigin {
+                urls = [qa]
+            } else {
+                // Setup redirects to the named shell listener after onboarding.
+                // Only these two exact main origins are privileged; the localhost
+                // app virtual host and every other loopback port remain excluded.
+                urls = [WizardShared.localSetupURL, URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")!]
+            }
+        } else { urls = URL(string: backend.url).map { [$0] } ?? [] }
+        return Set(urls.compactMap(NativeOrigin.init).filter { !$0.isInstalledApp })
+    }
+    /// Native APIs use the selected shell service, never the current navigation
+    /// or the setup front door. QA overrides remain explicit and test-only.
+    var nativeControlURL: URL? {
+        guard let backend = Store.active else { return nil }
+        let url: URL?
+        if backend.kind == .thisMac {
+            url = UserDefaults.standard.bool(forKey: "QAHooks") ? (qaVoiceOrigin ?? URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")) : URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")
+        } else { url = URL(string: backend.url) }
+        guard let origin = url.flatMap(NativeOrigin.init), !origin.isInstalledApp else { return nil }
+        var c = URLComponents(); c.scheme = origin.scheme; c.host = origin.host
+        if origin.port != (origin.scheme == "https" ? 443 : 80) { c.port = origin.port }
+        return c.url
+    }
+    var isTrustedDocument: Bool {
+        guard let actual = web.url.flatMap(NativeOrigin.init), !actual.isInstalledApp else { return false }
+        return selectedControlOrigins.contains(actual)
+    }
+    func allowsNative(_ frame: WKFrameInfo) -> Bool {
+        guard frame.isMainFrame, isTrustedDocument, let origin = NativeOrigin(frame.securityOrigin),
+              !origin.isInstalledApp, let actual = web.url.flatMap(NativeOrigin.init) else { return false }
+        return origin == actual && selectedControlOrigins.contains(origin)
+    }
     private func isWizardOrigin(_ url: URL) -> Bool {
-        if url.host == "127.0.0.1" || url.host == "localhost" { return true }
-        if let b = Store.active, let h = URL(string: b.url)?.host { return url.host == h }
-        return false
+        guard let origin = NativeOrigin(url), !origin.isInstalledApp else { return false }
+        return selectedControlOrigins.contains(origin)
+    }
+    func updateDragRegions(_ params: [String: Any]) {
+        func rect(_ values: [Double]) -> NSRect? {
+            guard values.count == 4, values.allSatisfy({ $0.isFinite }), values[2] >= 0, values[3] >= 0 else { return nil }
+            return NSRect(x: values[0], y: values[1], width: values[2], height: values[3])
+        }
+        guard let h = params["header"] as? [Double], let header = rect(h),
+              let controls = params["controls"] as? [[Double]] else { return }
+        // Only the top header may delegate dragging, never the desktop/composer.
+        guard header.minY >= 0, header.minY < 2, header.height <= 100 else { return }
+        dragView.header = header.intersection(dragView.bounds)
+        dragView.controls = controls.prefix(100).compactMap(rect).map { $0.insetBy(dx: -2, dy: -2) }
     }
 }
 
@@ -1152,10 +1433,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         controller.window?.delegate = self
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-        controller.begin()
         installQuitGuard()
         installWizardKey()
         installMeetings()
+        WizardUpdater.shared.isRecording = { MeetingRecorder.shared.session != nil || VoiceKeys.shared.state["mode"] as? String != "idle" }
+        WizardUpdater.shared.admitWebRestart = { [weak self] done in
+            guard let self else { done(false); return }
+            self.controller.admitUpdateRestart(done)
+        }
+        WizardUpdater.shared.onFreeze = { [weak self] frozen in
+            self?.controller.setUpdateFrozen(frozen)
+            self?.controller.web.isHidden = frozen
+        }
+        WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
+        WizardUpdater.shared.start()
+        if !WizardUpdater.shared.activatingGuest { controller.begin() }
     }
 
     // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
@@ -1190,6 +1482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vk = VoiceKeys.shared
         vk.origin = { [weak self] in self?.wizardOrigin }
         vk.orb = { [weak self] start in self?.orb(start) }
+        vk.mayStartRecording = { WizardUpdater.captureStartAllowed }
         VoiceKeys.deliverInWizard = { [weak self] text, done in
             guard let self, NSApp.isActive, self.controller.window?.isKeyWindow == true else { done(false); return }
             self.controller.uxSend("wizard:dictation", ["text": text]) { done($0 != nil) }
@@ -1204,7 +1497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func recordNew(title: String?, eventId: String?) {
-        guard let o = wizardOrigin else { return }
+        guard WizardUpdater.captureStartAllowed, let o = wizardOrigin else { return }
         let clean = title.map { $0.replacingOccurrences(of: "^(Call: |Starting now: )", with: "", options: .regularExpression) }
         MeetingRecorder.shared.startNew(origin: o, title: eventId == nil ? clean : nil, calendarEventId: eventId) { err in
             if let err {
@@ -1216,7 +1509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Right ⌘: talk to your Wizard with its own orb (new thread → voice; tap again → finish and send).
     /// Wizard UX gets a wizard:orb event and answers with its state; the legacy UX is driven through its buttons.
     func orb(_ start: Bool) {
-        guard let o = wizardOrigin else { return }
+        guard WizardUpdater.captureStartAllowed, let o = wizardOrigin else { return }
         showMainWindow()
         _ = start
         // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
@@ -1235,6 +1528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let self else { return }
                 // Wizard UX answered (voice / sent / busy / none): it owns the outcome.
                 if let state { MeetingLog.log("orb (bridge): \(state)"); return }
+                guard self.controller.isTrustedDocument else { retry(); return }
                 self.controller.web.evaluateJavaScript(legacy) { r, _ in
                     let res = (r as? String) ?? "none"
                     MeetingLog.log("orb (legacy): \(res)")
@@ -1248,12 +1542,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Wizard key, search, menu bar
 
-    /// Origin of the Wizard this window is showing (the place views like /meetings/ live).
+    /// Selected Wizard control origin (never an untrusted navigation destination).
     var wizardOrigin: URL? {
-        let base = controller.web.url ?? Store.active.flatMap { URL(string: $0.url) }
-        guard let u = base, let scheme = u.scheme, let host = u.host, ["http", "https"].contains(scheme) else { return nil }
-        var c = URLComponents(); c.scheme = scheme; c.host = host; c.port = u.port
-        return c.url
+        controller.nativeControlURL
     }
 
     func installWizardKey() {
@@ -1327,8 +1618,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // Closing the window keeps Wizard in the menu bar (Wizard key, search, meeting detection keep working).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func windowDidResize(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.controller.isTrustedDocument else { return }
+            self.controller.web.evaluateJavaScript("window.dispatchEvent(new Event('resize'))")
+        }
+    }
     func windowWillClose(_ notification: Notification) {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+    }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WizardUpdater.shared.shouldTerminate()
     }
     func applicationWillTerminate(_ notification: Notification) {
         // Leave the keyboard as we found it when Wizard isn't running.
@@ -1337,16 +1637,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let s = MeetingRecorder.shared.session { s.me.stop(); s.them?.stop(); MeetingSpool.shared.markDone(s.meetingId) }
     }
 
-    func buildMenus() {
+    @MainActor func buildMenus() {
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Wizard", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(WizardUpdater.checkForUpdates(_:)), keyEquivalent: "").target = WizardUpdater.shared
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Wizard", action: #selector(requestGuardedQuit(_:)), keyEquivalent: "q").target = self
         appItem.submenu = appMenu
+
+        let fileItem = NSMenuItem(); main.addItem(fileItem)
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "New Chat", action: #selector(newWizardChat(_:)), keyEquivalent: "n").target = self
+        file.addItem(withTitle: "New Voice Chat", action: #selector(newWizardVoiceChat(_:)), keyEquivalent: "n").target = self
+        file.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "New Desktop", action: #selector(newWizardDesktop(_:)), keyEquivalent: "t").target = self
+        fileItem.submenu = file
 
         let editItem = NSMenuItem(); main.addItem(editItem)
         let edit = NSMenu(title: "Edit")
@@ -1364,6 +1673,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         view.addItem(withTitle: "Reload", action: #selector(reload), keyEquivalent: "r").target = self
         view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         view.items.last?.keyEquivalentModifierMask = [.command, .control]
+        view.addItem(withTitle: "Full App", action: #selector(fullWizardApp(_:)), keyEquivalent: "f").target = self
+        let focusKeys: [(String, String, Selector)] = [
+            ("Focus App Above", "\u{F700}", #selector(focusWizardAppUp(_:))),
+            ("Focus App Below", "\u{F701}", #selector(focusWizardAppDown(_:))),
+            ("Focus App Left", "\u{F702}", #selector(focusWizardAppLeft(_:))),
+            ("Focus App Right", "\u{F703}", #selector(focusWizardAppRight(_:)))]
+        for (title, key, action) in focusKeys {
+            view.addItem(withTitle: title, action: action, keyEquivalent: key).target = self
+        }
+        view.addItem(withTitle: "Previous Chat", action: #selector(previousWizardChat(_:)), keyEquivalent: "\u{F700}").target = self
+        view.items.last?.keyEquivalentModifierMask = [.option]
+        view.addItem(withTitle: "Next Chat", action: #selector(nextWizardChat(_:)), keyEquivalent: "\u{F701}").target = self
+        view.items.last?.keyEquivalentModifierMask = [.option]
         viewItem.submenu = view
 
         let wizItem = NSMenuItem(); main.addItem(wizItem)
@@ -1374,6 +1696,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let win = NSMenu(title: "Window")
         win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         win.addItem(withTitle: "Close App", action: #selector(closeWizardApp(_:)), keyEquivalent: "w").target = self
+        win.addItem(.separator())
+        win.addItem(withTitle: "Previous Desktop", action: #selector(previousWizardDesktop(_:)), keyEquivalent: "[").target = self
+        win.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        win.addItem(withTitle: "Next Desktop", action: #selector(nextWizardDesktop(_:)), keyEquivalent: "]").target = self
+        win.items.last?.keyEquivalentModifierMask = [.command, .shift]
+        win.addItem(withTitle: "Next Desktop", action: #selector(nextWizardDesktop(_:)), keyEquivalent: "\t").target = self
+        win.items.last?.keyEquivalentModifierMask = [.control]
+        win.items.last?.isAlternate = true
+        win.addItem(withTitle: "Previous Desktop", action: #selector(previousWizardDesktop(_:)), keyEquivalent: "\t").target = self
+        win.items.last?.keyEquivalentModifierMask = [.control, .shift]
+        win.items.last?.isAlternate = true
+        win.addItem(.separator())
+        // The guest owns dynamic workspace state. Forward the visible Home-first slots,
+        // including the next (+) slot; nonexistent slots remain inert in the guest.
+        for slot in 1...9 {
+            let item = win.addItem(withTitle: slot == 1 ? "Home" : "App Workspace \(slot - 1)",
+                                   action: #selector(selectWizardWorkspace(_:)), keyEquivalent: "\(slot)")
+            item.target = self; item.tag = slot; item.keyEquivalentModifierMask = [.option]
+        }
+        let move = NSMenu(title: "Move App to Workspace")
+        for slot in 2...9 { // Home is not a move destination.
+            let item = move.addItem(withTitle: "App Workspace \(slot - 1)",
+                                   action: #selector(moveWizardAppToWorkspace(_:)), keyEquivalent: "\(slot)")
+            item.target = self; item.tag = slot; item.keyEquivalentModifierMask = [.option, .shift]
+        }
+        win.addItem(withTitle: "Move App to Workspace", action: nil, keyEquivalent: "").submenu = move
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
@@ -1394,6 +1742,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
+        wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Bring My Hermes into Wizard…", action: #selector(bringHermes), keyEquivalent: "").target = self
     }
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
@@ -1403,11 +1753,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: nil, suspensionBehavior: .deliverImmediately)
     }
 
-    @objc func qa(_ n: Notification) {
+    @MainActor @objc func qa(_ n: Notification) {
         guard let cmd = n.object as? String else { return }
         let parts = cmd.split(separator: " ", maxSplits: 1).map(String.init)
         let arg = parts.count > 1 ? parts[1] : ""
         switch parts[0] {
+        case "update-check": WizardUpdater.shared.checkForUpdates()
+        case "update-restart": WizardUpdater.shared.action.performClick(nil)
+        case "update-later": WizardUpdater.shared.later.performClick(nil)
+        case "update-busy": WizardUpdater.shared.qaBusy = arg == "on"
+        case "update-state": try? WizardUpdate.write(WizardUpdater.shared.snapshot, WizardUpdate.dir.appendingPathComponent("qa.json"))
+        case "update-host-start": HostControl.ensureRunning()
+        case "update-quit": NSApp.terminate(nil)
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
@@ -1473,6 +1830,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
                 try? String(handled).write(toFile: "/tmp/wizard-mvp-qa-command-w.txt", atomically: true, encoding: .utf8)
             }
+        case "desktop-key":
+            // QAHooks: enter AppKit's real event loop; currentEvent/repeat handling stay real.
+            let spec = arg.split(separator: ",").map(String.init)
+            let key = spec.first ?? "n", shift = spec.contains("shift"), repeatKey = spec.contains("repeat")
+            let flags: NSEvent.ModifierFlags = spec.contains("option") ? [.option] : shift ? [.command, .shift] : [.command]
+            let codes: [String: UInt16] = ["n": 45, "t": 17, "w": 13, "f": 3, "[": 33, "]": 30, "up": 126, "down": 125, "left": 123, "right": 124]
+            let chars = ["up": "\u{F700}", "down": "\u{F701}", "left": "\u{F702}", "right": "\u{F703}"][key] ?? (shift ? key.uppercased() : key)
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                                           timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                                           characters: chars, charactersIgnoringModifiers: chars,
+                                           isARepeat: repeatKey, keyCode: codes[key] ?? 45) {
+                NSApp.postEvent(event, atStart: false)
+                try? "posted".write(toFile: "/tmp/wizard-qa-desktop-key.txt", atomically: true, encoding: .utf8)
+            }
         case "ux-state":
             controller.uxState { ux in
                 let s: [String: Any] = ["wizardUX": ux ?? NSNull(), "url": self.controller.web.url?.absoluteString ?? "",
@@ -1491,6 +1863,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "meeting-prompt-record": CallPrompt.shared.record()
         case "voice-tap": VoiceKeys.shared.tap(arg == "cmd" ? VoiceKeys.rightCommand : VoiceKeys.rightOption)
         case "voice-enable": VoiceKeys.enabled = arg != "off"; VoiceKeys.shared.install(prompt: false)
+        case "voice-default":
+            UserDefaults.standard.removeObject(forKey: "VoiceKeys"); VoiceKeys.shared.install(prompt: false)
+        case "voice-local-fixture":
+            if let url = URL(string: arg) { controller.qaConnectLocalVoice(url) }
+        case "voice-production-origin": controller.qaConnectProductionLocal()
+        case "update-admission":
+            controller.admitUpdateRestart { admitted in
+                let result: [String: Any] = ["admitted": admitted, "trustedDocument": self.controller.isTrustedDocument, "url": self.controller.web.url?.absoluteString ?? ""]
+                if let data = try? JSONSerialization.data(withJSONObject: result, options: .prettyPrinted) {
+                    try? data.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-admission.json"))
+                }
+            }
+        case "update-unfreeze": controller.setUpdateFrozen(false)
+        case "voice-footer-snapshot": controller.qaSnapshotVoiceFooter(to: arg)
+        case "native-authority-state":
+            let c = controller!
+            let s: [String: Any] = ["trustedDocument": c.isTrustedDocument, "nativeControlURL": c.nativeControlURL?.absoluteString ?? "",
+                                   "messages": NativeBridge.shared.qaMessages, "media": c.qaMedia,
+                                   "header": NSStringFromRect(c.dragView.header), "controls": c.dragView.controls.map(NSStringFromRect),
+                                   "dragCount": c.dragView.dragCount, "windowNumber": c.window?.windowNumber ?? 0,
+                                   "frame": NSStringFromRect(c.window?.frame ?? .zero)]
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-authority.json"))
+            }
+        case "native-mouse":
+            // Viewport x/y followed by window movement dx/dy. Dispatch to the
+            // actual window via NSApplication, never call the drag view directly.
+            let a = arg.split(separator: " ").compactMap { Double($0) }
+            guard a.count == 4, let w = controller.window else { return }
+            // Arrange real native focus before dispatch; no DOM click or direct
+            // production drag call is used by this hook.
+            w.makeKeyAndOrderFront(nil); w.makeKey(); NSApp.activate(ignoringOtherApps: true)
+            let p = controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: nil)
+            let hit = controller.dragView.hitTest(controller.dragView.convert(NSPoint(x: a[0], y: a[1]), to: controller.dragView.superview))
+            NSLog("QA native mouse: viewport=(%.1f,%.1f), window=(%.1f,%.1f), dragHit=%@, key=%d", a[0], a[1], p.x, p.y, String(describing: hit), w.isKeyWindow ? 1 : 0)
+            let base = ProcessInfo.processInfo.systemUptime
+            func event(_ type: NSEvent.EventType, _ point: NSPoint, _ offset: Double) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: base + offset,
+                                   windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+            }
+            if let e = event(.leftMouseDragged, NSPoint(x: p.x+a[2], y: p.y+a[3]), 0.1), a[2] != 0 || a[3] != 0 { NSApp.postEvent(e, atStart: false) }
+            if let e = event(.leftMouseUp, NSPoint(x: p.x+a[2], y: p.y+a[3]), 0.2) { NSApp.postEvent(e, atStart: false) }
+            if let e = event(.leftMouseDown, p, 0) { NSApp.sendEvent(e) }
+        case "voice-native-event":
+            // Send real NSEvents through NSApplication, including its installed
+            // local monitor. Deliberately NOT VoiceKeys.tap/event or a DOM key.
+            let base = ProcessInfo.processInfo.systemUptime
+            for spec in arg.split(separator: ";") {
+                let a = spec.split(separator: " ").map(String.init)
+                guard a.count == 4, let code = UInt16(a[1]), let raw = UInt(a[2]), let offset = Double(a[3]) else { return }
+                let type: NSEvent.EventType = a[0] == "key" ? .keyDown : .flagsChanged
+                if let event = NSEvent.keyEvent(with: type, location: .zero,
+                        modifierFlags: NSEvent.ModifierFlags(rawValue: raw), timestamp: base + offset,
+                        windowNumber: controller.window?.windowNumber ?? 0, context: nil,
+                        characters: type == .keyDown ? "c" : "", charactersIgnoringModifiers: type == .keyDown ? "c" : "",
+                        isARepeat: false, keyCode: code) { NSApp.sendEvent(event) }
+            }
         case "panel-snapshot":
             // panel-snapshot <recorder|prompt|hud> <png>
             let a = arg.split(separator: " ", maxSplits: 1).map(String.init)
@@ -1510,6 +1939,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             s["url"] = controller.web.url?.absoluteString ?? ""
             if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
                 try? d.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-meeting.json"))
+            }
+        case "brand-state":
+            let image = statusMenu.item.button?.image
+            let s: [String: Any] = ["menuTemplate": image?.isTemplate ?? false,
+                "menuSize": NSStringFromSize(image?.size ?? .zero),
+                "brandAsset": "wizard-mark-white.png",
+                "overlayBrand": controller.stack.arrangedSubviews.contains { $0.identifier?.rawValue == "wizard-brand-hat" },
+                "bundle": Bundle.main.bundlePath]
+            if let d = try? JSONSerialization.data(withJSONObject: s, options: .prettyPrinted) {
+                try? d.write(to: URL(fileURLWithPath: arg.isEmpty ? "/tmp/wizard-mvp-qa-brand.json" : arg))
             }
         case "keys-state":
             let s: [String: Any] = [
@@ -1573,9 +2012,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Other native windows keep their normal Close behavior. The red window button is unchanged.
     @objc func closeWizardApp(_ sender: Any?) {
         if let key = NSApp.keyWindow, key !== controller.window { key.performClose(sender); return }
-        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
-        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', {key:'w', code:'KeyW', metaKey:true, bubbles:true, cancelable:true}))")
+        dispatchDesktopKey("w", "KeyW")
     }
+
+    // Native menus own the shortcuts, even when an iframe has keyboard focus.
+    func dispatchDesktopKey(_ key: String, _ code: String, shift: Bool = false, option: Bool = false) {
+        guard controller.overlay.isHidden, controller.window?.attachedSheet == nil else { return }
+        if let e = NSApp.currentEvent, e.type == .keyDown, e.isARepeat { return }
+        let event: [String: Any] = ["key": key, "code": code, "metaKey": !option, "altKey": option, "shiftKey": shift,
+                                  "bubbles": true, "cancelable": true]
+        guard let data = try? JSONSerialization.data(withJSONObject: event), let json = String(data: data, encoding: .utf8) else { return }
+        controller.web.evaluateJavaScript("window.dispatchEvent(new KeyboardEvent('keydown', \(json)))")
+    }
+    @objc func selectWizardWorkspace(_ sender: NSMenuItem) {
+        guard (1...9).contains(sender.tag) else { return }
+        dispatchDesktopKey("\(sender.tag)", "Digit\(sender.tag)", option: true)
+    }
+    @objc func moveWizardAppToWorkspace(_ sender: NSMenuItem) {
+        guard (2...9).contains(sender.tag) else { return }
+        dispatchDesktopKey("\(sender.tag)", "Digit\(sender.tag)", shift: true, option: true)
+    }
+    @objc func newWizardChat(_ sender: Any?) { dispatchDesktopKey("n", "KeyN") }
+    @objc func newWizardVoiceChat(_ sender: Any?) { dispatchDesktopKey("N", "KeyN", shift: true) }
+    @objc func newWizardDesktop(_ sender: Any?) { dispatchDesktopKey("t", "KeyT") }
+    @objc func previousWizardDesktop(_ sender: Any?) { dispatchDesktopKey("[", "BracketLeft", shift: true) }
+    @objc func nextWizardDesktop(_ sender: Any?) { dispatchDesktopKey("]", "BracketRight", shift: true) }
+
+    @objc func fullWizardApp(_ sender: Any?) { dispatchDesktopKey("f", "KeyF") }
+    @objc func focusWizardAppUp(_ sender: Any?) { dispatchDesktopKey("ArrowUp", "ArrowUp") }
+    @objc func focusWizardAppDown(_ sender: Any?) { dispatchDesktopKey("ArrowDown", "ArrowDown") }
+    @objc func focusWizardAppLeft(_ sender: Any?) { dispatchDesktopKey("ArrowLeft", "ArrowLeft") }
+    @objc func focusWizardAppRight(_ sender: Any?) { dispatchDesktopKey("ArrowRight", "ArrowRight") }
+    @objc func previousWizardChat(_ sender: Any?) { dispatchDesktopKey("ArrowUp", "ArrowUp", option: true) }
+    @objc func nextWizardChat(_ sender: Any?) { dispatchDesktopKey("ArrowDown", "ArrowDown", option: true) }
 
     func installQuitGuard() {
         quitKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -1623,6 +2092,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func addThisMac() { controller.chooseThisMac(); rebuildWizardMenu() }
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
+    /// Backs up the Hermes on this Mac with its own `hermes backup` and makes it the agent in Wizard OS on this Mac
+    /// (bundled wizard-bring-hermes posts it to the VM's front door). The Mac's Hermes is left as it is.
+    @objc func bringHermes() {
+        let alert = NSAlert()
+        alert.messageText = "Bring your Hermes into Wizard?"
+        alert.informativeText = "Wizard copies your Hermes from this Mac: its memory, skills, chats, settings and " +
+            "sign-ins. From then on it is your agent in Wizard and works inside Wizard OS, away from your Mac's files.\n\n" +
+            "Your Hermes on this Mac isn't changed. In Wizard, its messaging (like Telegram) starts off and its " +
+            "scheduled jobs start paused, so the two copies never double up. Wizard's current agent is saved, so you " +
+            "can switch back."
+        alert.addButton(withTitle: "Bring It In"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let tool = Bundle.main.url(forResource: "wizard-bring-hermes", withExtension: nil, subdirectory: "bring-hermes") else { return }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [tool.path]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+        p.environment = env
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { proc in
+            let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let line = text.split(separator: "\n").last.map(String.init) ?? ""
+            let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+            DispatchQueue.main.async {
+                let done = NSAlert()
+                if proc.terminationStatus == 0, obj?["ok"] as? Bool == true {
+                    let paused = (obj?["paused_jobs"] as? [Any])?.count ?? 0
+                    let off = (obj?["disabled_messaging"] as? [String]) ?? []
+                    done.messageText = "Your Hermes is now your agent in Wizard"
+                    var notes = ["It remembers what it knew and can search its past chats."]
+                    if !off.isEmpty { notes.append("Messaging is off here (\(off.joined(separator: ", "))).") }
+                    if paused > 0 { notes.append("\(paused) scheduled job\(paused == 1 ? " is" : "s are") paused here.") }
+                    done.informativeText = notes.joined(separator: " ")
+                } else {
+                    done.messageText = "Wizard couldn't bring your Hermes in"
+                    done.informativeText = (obj?["detail"] as? String) ?? (obj?["error"] as? String) ?? String(text.suffix(300))
+                }
+                done.runModal()
+                self.controller.begin()
+            }
+        }
+        do { try p.run() } catch { NSLog("Wizard: wizard-bring-hermes failed to start: \(error)") }
+    }
+
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
     @objc func showFilesFolder() {
         if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }

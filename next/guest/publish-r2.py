@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Put a Wizard OS feed folder (latest.json + archive or parts) on Cloudflare R2 and print a signed test feed URL.
 
-  publish-r2.py <feed dir> [--bucket wizard-downloads] [--prefix os/<version>/] [--days 7]
+  publish-r2.py <feed dir> [--bucket aiwizards-downloads] [--prefix os/<version>/] [--days 7]
 
 Credential: CLOUDFLARE_R2_ADMIN_API_TOKEN (an R2 "Admin Read & Write" API token) from the environment or
 ~/.hermes/.env. One token gives both the Cloudflare API (bucket creation) and the S3 keys: Access Key ID = the
@@ -10,7 +10,8 @@ signed URLs.
 
 The bucket stays private. For a test, the uploaded latest.json is rewritten with absolute pre-signed part URLs and
 itself pre-signed, so the Mac app can download end to end without the bucket or a custom domain being public.
-Making it public (custom domain such as downloads.aiwizards.com) is a separate, deliberate release step.
+The production bucket aiwizards-downloads is public at https://downloads.aiwizards.com (see next/mac/DOWNLOADS.md);
+this tool remains the private signed-URL test route for a credential with R2 Admin authority.
 """
 import argparse
 import hashlib
@@ -58,7 +59,7 @@ def rclone(env: dict, *args: str, capture=False) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("feed_dir")
-    ap.add_argument("--bucket", default="wizard-downloads")
+    ap.add_argument("--bucket", default="aiwizards-downloads")
     ap.add_argument("--prefix")
     ap.add_argument("--days", type=int, default=7)
     a = ap.parse_args()
