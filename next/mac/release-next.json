@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "channel": "candidate-only",
+  "base": "main",
+  "baseSource": "68bdbeb",
+  "containsProductionSource": "c7952d68e6a61da74b1e26485293cb7b5d881c7b",
+  "wam": "850cfe3252576b3a9ae9bea54c4fedd173691443",
+  "wamBranch": "integration/wizard-backup-mac-0696805f",
+  "nativeFeatures": ["backup", "restore", "move-to-this-mac"],
+  "guestImageRebuild": "not-authorized",
+  "existingGuestDelivery": "pending significant-release software payload; native-only menus disable themselves on older guests",
+  "releaseGates": [
+    "native candidate build and Swift tests",
+    "guest frontdoor regression tests",
+    "move and Undo on disposable copy of saved 0.4.0 disk",
+    "independent data-preservation review",
+    "existing-guest delivery acceptance"
+  ]
+}

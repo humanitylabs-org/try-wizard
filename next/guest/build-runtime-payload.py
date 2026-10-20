@@ -4,7 +4,7 @@ Run inside the owned Linux QA guest, with archives extracted in --workspace.
 """
 import argparse,hashlib,json,platform,shutil,subprocess,tempfile
 from pathlib import Path
-PINS={'ux':'31bdc3ecb0586f61323b72227ab70506d2627e5d','service':'24a2b3ac9e941c595bb60dc826b52c9308260c8e','wam':'0696805fe000dfc616abd0cf772c52ff83d580d9'}
+PINS={'ux':'31bdc3ecb0586f61323b72227ab70506d2627e5d','service':'24a2b3ac9e941c595bb60dc826b52c9308260c8e','wam':'850cfe3252576b3a9ae9bea54c4fedd173691443'}
 BASE='sha256:b2f114e0520b4f210fd7e99dab08ccae44bb6bb47c870b00581f2cec30c24aca'
 def run(args):return subprocess.check_output(list(map(str,args)),text=True).strip()
 def sha(path):
