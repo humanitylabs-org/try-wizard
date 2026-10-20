@@ -42,6 +42,8 @@ final class VMController {
     var vm: FakeMachine? = FakeMachine()
     var state: State = .running
     var socketDevice: FakeSocket? = FakeSocket()
+    final class FakeColdSerial { var delivered = true }
+    var coldSerial: FakeColdSerial? = nil // production stop() checks it for an unbooted cold maintenance VM
     func cancelColdSerialWait() {}
     func cleanupColdSerial() {}
     func signalLateGuestStop() { stopCompletion?() }
