@@ -4,7 +4,7 @@ import Foundation
 private let outputSize = NSSize(width: 1024, height: 1024)
 
 guard CommandLine.arguments.count == 3 else {
-    fputs("Usage: render-app-icon INPUT_SVG OUTPUT_PNG\n", stderr)
+    fputs("Usage: render-app-icon INPUT_IMAGE OUTPUT_PNG\n", stderr)
     exit(64)
 }
 
@@ -24,7 +24,7 @@ guard let source = NSImage(contentsOf: sourceURL),
         bitsPerPixel: 0
       ),
       let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
-    fputs("render-app-icon: could not load or rasterize the SVG\n", stderr)
+    fputs("render-app-icon: could not load or rasterize the image\n", stderr)
     exit(1)
 }
 

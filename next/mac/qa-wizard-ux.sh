@@ -2,6 +2,8 @@
 # QA: Wizard for Mac 0.5.0 loads Wizard UX (desktop shell) and drives it through the native bridge.
 # Bounded: every wait has a deadline. Never sends a message to the agent (orb take is cancelled).
 set -uo pipefail
+: "${WIZARD_QA_BASE_URL:?Set WIZARD_QA_BASE_URL to the Wizard origin under test}"
+BASE=${WIZARD_QA_BASE_URL%/}
 cd ~/build/wizard-ux-desktop/mac
 APP="$PWD/dist/Wizard.app"
 OLD=$(pgrep -f 'wizard-mizel-mac/mac/dist/Wizard.app/Contents/MacOS/Wizard' | head -1)
@@ -23,8 +25,8 @@ ev() { rm -f /tmp/wizard-mvp-qa-eval.txt; ./qa.sh "eval $1"; for i in $(seq 1 30
 ux() { rm -f /tmp/wizard-mvp-qa-ux.json; ./qa.sh ux-state; for i in $(seq 1 20); do sleep 0.2; [[ -s /tmp/wizard-mvp-qa-ux.json ]] && break; done; cat /tmp/wizard-mvp-qa-ux.json 2>/dev/null; echo; }
 waitux() { for i in $(seq 1 40); do sleep 0.5; ux >/tmp/ux.out; grep -q '"version"' /tmp/ux.out && { cat /tmp/ux.out; return 0; }; done; cat /tmp/ux.out; return 1; }
 
-echo "== 1 connect to James's Wizard by its legacy address → lands on Wizard UX desktop"
-./qa.sh "connect https://private.wizard001.com/wizard/"
+echo "== 1 connect to the configured Wizard origin → lands on Wizard UX desktop"
+./qa.sh "connect $BASE/wizard/"
 waitux && echo PASS_UX_LOADED || echo FAIL_UX_LOADED
 ev "location.pathname + ' shell=' + (window.WIZ_SHELL||'') + ' html=' + document.documentElement.dataset.shell"
 sleep 2; ./qa.sh "snapshot /tmp/wizard-mvp-qa-ux-desktop.png"; sleep 1.5
@@ -53,9 +55,9 @@ ev "(()=>{for(const x of document.querySelectorAll('textarea')){ if(x.value.incl
 
 echo "== 5 legacy opt-out still loads the old UX"
 defaults write org.humanitylabs.wizard.mvp LegacyUX -bool true
-./qa.sh "connect https://private.wizard001.com/wizard/"; sleep 6
+./qa.sh "connect $BASE/wizard/"; sleep 6
 ev "location.pathname + ' wizardUX=' + (!!window.wizardUX)"
 defaults delete org.humanitylabs.wizard.mvp LegacyUX
-./qa.sh "connect https://private.wizard001.com/wizard/"; waitux >/dev/null && echo BACK_ON_UX
+./qa.sh "connect $BASE/wizard/"; waitux >/dev/null && echo BACK_ON_UX
 ls -la /tmp/wizard-mvp-qa-ux-*.png
 echo QA_DONE

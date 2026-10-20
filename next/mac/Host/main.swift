@@ -105,6 +105,68 @@ final class LoopbackBridge {
     }
 }
 
+// MARK: - Cold PID1 serial readiness
+
+// The kernel may discard input queued before hvc0 is initialized. Observe this
+// boot's actual shell prompt before sending anything; never retry PID1 exec.
+// All calls are serialized on the VM's main queue. The generation also rejects
+// callbacks queued before cancellation/restart. Console bytes are never logged.
+final class ColdBootstrapSerial {
+    enum Outcome: Equatable { case waiting, delivered, inactive, failed(String) }
+    static let command = "mount -t proc proc /proc 2>/dev/null; mount -t sysfs sysfs /sys 2>/dev/null; mount -o remount,rw /; mkdir -p /run/wizard-update; mount -t virtiofs -o ro wizard-update /run/wizard-update && exec /usr/bin/python3 /run/wizard-update/source/next/guest/cold-bootstrap.py init\n"
+    let generation = UUID()
+    let input = Pipe()
+    private let reader: FileHandle
+    private let deadline: TimeInterval
+    private var tail = Data()
+    private var active = true
+    private(set) var delivered = false
+
+    init(console: URL, now: TimeInterval, timeout: TimeInterval = 60) throws {
+        reader = try FileHandle(forReadingFrom: console)
+        deadline = now + timeout
+    }
+
+    func poll(generation: UUID, now: TimeInterval) -> Outcome {
+        guard generation == self.generation, active else { return .inactive }
+        guard now < deadline else {
+            cancelWaiting()
+            return .failed("Cold bootstrap shell readiness timed out; no command sent")
+        }
+        do {
+            // Incremental and bounded, including unusually noisy kernel boots.
+            tail.append(try reader.read(upToCount: 65536) ?? Data())
+            let text = String(decoding: tail, as: UTF8.self).replacingOccurrences(of: "\r", with: "")
+            let prompt = "/bin/sh: 0: can't access tty; job control turned off\n# "
+            guard text.hasSuffix(prompt) else {
+                tail = Data(tail.suffix(1024))
+                return .waiting
+            }
+            // Latch BEFORE writing: even a partial/failed write cannot retry init.
+            delivered = true
+            cancelWaiting()
+            try input.fileHandleForWriting.write(contentsOf: Data(Self.command.utf8))
+            return .delivered
+        } catch {
+            cancelWaiting()
+            return .failed("Cold bootstrap serial I/O failed; command will not be retried")
+        }
+    }
+
+    func cancelWaiting() {
+        active = false
+        tail.removeAll()
+        try? reader.close()
+        // Keep the input writer open while PID1 is alive: EOF can panic Linux.
+    }
+
+    func closeAfterStop() {
+        cancelWaiting()
+        try? input.fileHandleForWriting.close()
+        try? input.fileHandleForReading.close()
+    }
+}
+
 // MARK: - Wizard OS virtual machine
 
 final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListenerDelegate {
@@ -132,7 +194,8 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     func start() {
-        guard vm == nil || state == .stopped || state == .error || state == .notInstalled else { return }
+        guard vm == nil || vm?.state == .stopped else { return }
+        cleanupColdSerial()
         guard WizardShared.osInstalled else { state = .notInstalled; return }
         if let free = Self.freeBytes(), free < Self.minFreeToStart {
             fail(String(format: "Not enough free space on this Mac to run Wizard OS safely (%.1f GB free, needs %.0f GB).",
@@ -150,11 +213,12 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             state = .starting
             log("starting Wizard OS (cpus=\(config.cpuCount) mem=\(config.memorySize >> 20)MiB)")
             machine.start { [weak self] result in
-                guard let self else { return }
+                guard let self, self.vm === machine, self.state == .starting else { return }
                 if case .failure(let error) = result {
                     self.fail("VM failed to start: \(error.localizedDescription)")
                 } else {
-                    self.waitUntilReady()
+                    if self.coldSerial != nil { self.waitForColdShell(machine) }
+                    else { self.waitUntilReady() }
                     self.watchDiskSpace()
                 }
             }
@@ -184,6 +248,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     private func fail(_ message: String) {
+        cleanupColdSerial()
         log(message); lastError = message; vm = nil; socketDevice = nil; state = .error
     }
 
@@ -206,17 +271,28 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         poll()
     }
 
-    func stop(completion: (() -> Void)? = nil) {
-        guard let machine = vm, state == .running || state == .starting else { completion?(); return }
+    var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
+    func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
+    func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
+        guard let machine = vm else { completion?(); return }
+        guard state == .running || state == .starting || state == .error else {
+            // A concurrent shutdown is not evidence that the disk is stopped.
+            onTimeout?(); return
+        }
+        cancelColdSerialWait()
         state = .stopping
         log("stopping Wizard OS")
         var finished = false
+        var timedOut = false
         let done = { [weak self] in
-            guard !finished else { return }
+            guard !finished, self?.vm === machine else { return }
             finished = true
+            self?.stopCompletion = nil
+            self?.cleanupColdSerial()
             self?.vm = nil; self?.socketDevice = nil
             self?.state = .stopped
-            completion?()
+            // A late guest stop must not overwrite a terminal update failure.
+            if !timedOut { completion?() }
         }
         stopCompletion = done
         // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
@@ -230,24 +306,78 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
             guard !finished else { return }
+            if !forceOnTimeout {
+                timedOut = true
+                log("update clean shutdown timed out; keeping prior Host, no forced VM stop")
+                try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "Clean shutdown timed out"], WizardUpdate.response)
+                onTimeout?()
+                return
+            }
             log("clean shutdown timed out; forcing stop")
-            machine.stop { _ in DispatchQueue.main.async(execute: done) }
+            machine.stop { error in
+                DispatchQueue.main.async {
+                    guard error == nil else {
+                        try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "VM stop failed; disk retained"], WizardUpdate.response)
+                        onTimeout?(); return
+                    }
+                    done()
+                }
+            }
         }
     }
     private var stopCompletion: (() -> Void)?
+
+    func runGuestPatch(until deadline: Date = Date().addingTimeInterval(90), _ complete: @escaping ([String: Any]?) -> Void) {
+        guard state == .running, let machine = vm, let device = machine.socketDevices.first as? VZVirtioSocketDevice else { complete(nil); return }
+        device.connect(toPort: WizardShared.guestDevShellPort) { [weak self] result in
+            guard let self else { complete(nil); return }
+            switch result {
+            case .failure:
+                if WizardShared.coldBootstrapToken != nil && Date() < deadline {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.runGuestPatch(until: deadline, complete) }
+                } else { complete(nil) }
+            case .success(let connection):
+                self.heldConnections.append(connection)
+                var finished = false
+                let done: ([String: Any]?) -> Void = { receipt in
+                    guard !finished else { return }; finished = true
+                    connection.close(); self.heldConnections.removeAll { $0 === connection }
+                    complete(receipt)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 900) { done(nil) }
+                DispatchQueue.global(qos: .utility).async {
+                    let handle = FileHandle(fileDescriptor: connection.fileDescriptor, closeOnDealloc: false)
+                    do {
+                        try handle.write(contentsOf: Data((WizardGuestPatchCommand.script + "\n").utf8))
+                        let data = try handle.readToEnd() ?? Data()
+                        let text = String(data: data, encoding: .utf8) ?? ""
+                        let line = text.split(separator: "\n").first(where: { $0.hasPrefix("WIZARD_PATCH_OK ") })
+                        let bytes = line.flatMap { String($0.dropFirst("WIZARD_PATCH_OK ".count)).data(using: .utf8) }
+                        let receipt = bytes.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                        DispatchQueue.main.async { done(receipt) }
+                    } catch { DispatchQueue.main.async { done(nil) } }
+                }
+            }
+        }
+    }
 
     func restart() { stop { [weak self] in self?.start() } }
 
     // VZVirtualMachineDelegate
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
         DispatchQueue.main.async {
+            guard self.vm === virtualMachine else { return }
+            self.cleanupColdSerial()
             log("Wizard OS powered off")
             if let c = self.stopCompletion { self.stopCompletion = nil; c() }
             else { self.vm = nil; self.socketDevice = nil; self.state = .stopped }
         }
     }
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
-        DispatchQueue.main.async { self.fail("Wizard OS stopped: \(error.localizedDescription)") }
+        DispatchQueue.main.async {
+            guard self.vm === virtualMachine else { return }
+            self.fail("Wizard OS stopped: \(error.localizedDescription)")
+        }
     }
 
     // Guest -> Mac: open https links in the default browser.
@@ -275,15 +405,56 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         return true
     }
 
+    private var coldSerial: ColdBootstrapSerial?
+    private var coldSerialTimer: Timer?
+
+    private func cancelColdSerialWait() {
+        coldSerialTimer?.invalidate(); coldSerialTimer = nil
+        coldSerial?.cancelWaiting()
+    }
+
+    private func cleanupColdSerial() {
+        cancelColdSerialWait()
+        coldSerial?.closeAfterStop(); coldSerial = nil
+    }
+
+    private func waitForColdShell(_ machine: VZVirtualMachine) {
+        guard let serial = coldSerial, state == .starting else { return }
+        let generation = serial.generation
+        coldSerialTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak machine] timer in
+            guard let self, let machine, self.vm === machine,
+                  self.coldSerial?.generation == generation, self.state == .starting else {
+                timer.invalidate(); return
+            }
+            switch serial.poll(generation: generation, now: ProcessInfo.processInfo.systemUptime) {
+            case .waiting: break
+            case .delivered:
+                timer.invalidate(); self.coldSerialTimer = nil
+                log("Cold bootstrap command delivered after PID1 shell readiness")
+                self.state = .running
+            case .failed(let message):
+                timer.invalidate(); self.coldSerialTimer = nil
+                // Keep the live VM and writer owned. Never fall back to normal
+                // boot or drop its disk ownership; activation must stop/rollback.
+                log(message); self.lastError = message; self.state = .error
+            case .inactive:
+                timer.invalidate(); self.coldSerialTimer = nil
+            }
+        }
+    }
     private func makeConfiguration() throws -> VZVirtualMachineConfiguration {
         let dir = WizardShared.osDir
         let manifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("manifest.json")))) as? [String: Any] ?? [:]
         let boot = VZLinuxBootLoader(kernelURL: dir.appendingPathComponent("boot/vmlinux"))
         boot.initialRamdiskURL = dir.appendingPathComponent("boot/initrd")
         boot.commandLine = (manifest["cmdline"] as? String) ?? "console=hvc0 root=/dev/vda rw quiet"
+        if let token = WizardShared.coldBootstrapToken {
+            // Fixed command line: bypass systemd completely until PID1 seals Docker.
+            boot.commandLine = "console=hvc0 root=/dev/vda rw init=/bin/sh wizard.dev=1 wizard.cold=\(token)"
+        }
         // Developer/QA only: with ~/Library/Application Support/Wizard/dev-shell present, the guest opens a root shell on
         // vsock 9200, bridged to 127.0.0.1:48000 (used by mac/qa-guest.sh for `wam doctor` and friends).
-        if WizardShared.devShell { boot.commandLine += " wizard.dev=1" }
+        if WizardShared.devShell || WizardShared.guestUpdatePayload != nil { boot.commandLine += " wizard.dev=1" }
 
         let c = VZVirtualMachineConfiguration()
         c.bootLoader = boot
@@ -296,8 +467,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         let want: UInt64 = physical >= (16 << 30) ? (wantMiB << 20) : (min(wantMiB, 4096) << 20)
         c.memorySize = min(max(want, VZVirtualMachineConfiguration.minimumAllowedMemorySize), VZVirtualMachineConfiguration.maximumAllowedMemorySize)
 
+        // .cached, not .automatic: with .automatic, Apple's virtio block device corrupts Linux ext4 guests (checksum
+        // errors, read-only remount), most often under host memory pressure. UTM (#5919), Lima (#2026) and Lume (#1099)
+        // made the same change.
         let disk = try VZDiskImageStorageDeviceAttachment(url: dir.appendingPathComponent("disk.img"), readOnly: false,
-                                                          cachingMode: .automatic, synchronizationMode: .full)
+                                                          cachingMode: .cached, synchronizationMode: .full)
         c.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: disk)]
 
         let net = VZVirtioNetworkDeviceConfiguration()
@@ -317,11 +491,20 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             c.directorySharingDevices = [fs]
             log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
         }
+        if let payload = WizardShared.guestUpdatePayload {
+            let share = VZVirtioFileSystemDeviceConfiguration(tag: "wizard-update")
+            share.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: payload, readOnly: true))
+            c.directorySharingDevices.append(share)
+        }
 
         let consoleURL = WizardShared.logsDir.appendingPathComponent("console.log")
-        FileManager.default.createFile(atPath: consoleURL.path, contents: nil)
+        // A failed truncation must not admit a prompt from a previous boot.
+        try Data().write(to: consoleURL)
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
-        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: nil,
+        if WizardShared.coldBootstrapToken != nil {
+            coldSerial = try ColdBootstrapSerial(console: consoleURL, now: ProcessInfo.processInfo.systemUptime)
+        }
+        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: coldSerial?.input.fileHandleForReading,
                                                              fileHandleForWriting: try FileHandle(forWritingTo: consoleURL))
         c.serialPorts = [serial]
         try c.validate()
@@ -339,7 +522,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
 
     private func writeStatus() {
-        var s: [String: Any] = ["state": state.rawValue, "pid": getpid(), "updatedAt": Date().timeIntervalSince1970]
+        var s: [String: Any] = ["state": state.rawValue, "pid": getpid(), "updatedAt": Date().timeIntervalSince1970, "hostProtocol": WizardRelease.peer, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path]
         if let b = bootStartedAt { s["bootStartedAt"] = b.timeIntervalSince1970 }
         if let r = readyAt { s["readyAt"] = r.timeIntervalSince1970 }
         if let secs = bootSeconds { s["bootSeconds"] = secs }
@@ -358,6 +541,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     var quitting = false
+    var preparingUpdate = false
+    var guestPatchBusy = false
+    private let diskOwnership = WizardDiskOwnership()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
@@ -367,12 +553,15 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .contains(where: { $0.processIdentifier != mine }) {
             log("another Wizard Host is running; exiting"); exit(0)
         }
+        do { try diskOwnership.acquire() }
+        catch { log(error.localizedDescription); exit(1) }
+        if WizardShared.legacyBootstrapNeeded && WizardShared.coldBootstrapToken == nil {
+            log("Legacy disk requires explicit cold upgrade in Wizard.app"); exit(1)
+        }
         log("Wizard Host launched (pid \(mine))")
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        let image = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: "Wizard")
-        image?.isTemplate = true
-        item.button?.image = image
+        item.button?.image = WizardBrand.menuBarImage()
         let menu = NSMenu(); menu.delegate = self
         statusLine.isEnabled = false
         menu.addItem(statusLine)
@@ -409,9 +598,19 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: nil, suspensionBehavior: .deliverImmediately)
         refresh()
         vm.start()
+        // A successful stop keeps the durable guest gate closed until the next local boot.
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            guard let self, self.vm.state == .running, !self.preparingUpdate, !self.guestPatchBusy,
+                  WizardShared.guestUpdatePayload == nil,
+                  let token = WizardUpdate.json(WizardUpdate.maintenanceJournal)["token"] as? String else { return }
+            WizardUpdate.releaseMaintenance(token)
+        }
     }
 
     @objc func command(_ n: Notification) {
+        if n.object as? String == "prepare-update" { prepareUpdate(); return }
+        if n.object as? String == "apply-guest-update" { applyGuestUpdate(); return }
+        if preparingUpdate || guestPatchBusy { return }
         switch n.object as? String {
         case "start": vm.start()
         case "stop": vm.stop()
@@ -419,6 +618,58 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "quit": quitAll()
         default: break
         }
+    }
+
+    private func applyGuestUpdate() {
+        guard !guestPatchBusy, !preparingUpdate, WizardShared.guestUpdatePayload != nil else { return }
+        let request = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-command.json"))
+        let enclosingApp = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL.path
+        guard let nonce = request["nonce"] as? String, UUID(uuidString: nonce) != nil,
+              let pid = request["pid"] as? Int32, kill(pid, 0) == 0,
+              request["appPath"] as? String == enclosingApp, request["peer"] as? Int == WizardRelease.peer,
+              let expires = request["expires"] as? Double, expires > Date().timeIntervalSince1970 else { return }
+        let response = WizardUpdate.dir.appendingPathComponent("guest-response.json")
+        if WizardUpdate.json(response)["nonce"] as? String == nonce { return }
+        guestPatchBusy = true
+        let apply: (String?) -> Void = { reason in
+            if let reason { self.guestPatchBusy = false; try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": reason], response); return }
+            self.vm.runGuestPatch { receipt in
+                // Keep admission closed until the maintenance guest is stopped and
+                // the normal boot (or restored rollback disk) explicitly releases.
+                self.guestPatchBusy = false
+                if let receipt { try? WizardUpdate.write(["nonce": nonce, "state": "applied", "receipt": receipt], response) }
+                else { try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Guest migration failed; private updater.log retained"], response) }
+            }
+        }
+        if WizardShared.coldBootstrapToken != nil { apply(nil) }
+        else { WizardUpdate.maintenance(nonce, apply) }
+    }
+
+    private func prepareUpdate() {
+        guard !preparingUpdate else { return }
+        let request = WizardUpdate.json(WizardUpdate.request)
+        let enclosingApp = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL.path
+        guard let nonce = request["nonce"] as? String, UUID(uuidString: nonce) != nil,
+              let pid = request["pid"] as? Int32, kill(pid, 0) == 0,
+              request["appPath"] as? String == enclosingApp,
+              request["peer"] as? Int == WizardRelease.peer,
+              let expires = request["expires"] as? Double, expires > Date().timeIntervalSince1970 else { return }
+        preparingUpdate = true
+        let stopWhenIdle: (String?) -> Void = { [weak self] reason in
+            guard let self else { return }
+            if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
+            self.vm.stop(forceOnTimeout: false, onTimeout: {
+                try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Clean shutdown not confirmed; rollback disk retained"], WizardUpdate.response)
+                if WizardShared.coldBootstrapToken == nil { WizardUpdate.releaseMaintenance(nonce) }
+                self.preparingUpdate = false
+            }) {
+                try? WizardUpdate.write(["nonce": nonce, "state": "stopped", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "dataHome": WizardShared.supportDir.path], WizardUpdate.response)
+                self.quitting = true
+                NSApp.terminate(nil)
+            }
+        }
+        if self.vm.state == .stopped || self.vm.state == .notInstalled || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
+        else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
     }
 
     func refresh() {
@@ -445,7 +696,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var iconVisible = true
     private func writeIconState() {
         let f = WizardShared.supportDir.appendingPathComponent("host-icon.json")
-        let s: [String: Any] = ["iconVisible": iconVisible, "updatedAt": Date().timeIntervalSince1970]
+        let s: [String: Any] = ["iconVisible": iconVisible, "updatedAt": Date().timeIntervalSince1970,
+            "brandAsset": "wizard-mark-white.png", "menuTemplate": item?.button?.image?.isTemplate ?? false,
+            "menuSize": NSStringFromSize(item?.button?.image?.size ?? .zero)]
         if let d = try? JSONSerialization.data(withJSONObject: s) { try? d.write(to: f, options: .atomic) }
     }
 
@@ -454,17 +707,25 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
     }
-    @objc func startOS() { vm.start() }
-    @objc func stopOS() { vm.stop() }
-    @objc func restartOS() { vm.restart() }
+    @objc func startOS() { if !preparingUpdate && !guestPatchBusy { vm.start() } }
+    @objc func stopOS() { if !preparingUpdate && !guestPatchBusy { vm.stop() } }
+    @objc func restartOS() { if !preparingUpdate && !guestPatchBusy { vm.restart() } }
     @objc func showLogs() { NSWorkspace.shared.open(WizardShared.logsDir) }
     @objc func quitAll() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if quitting { return .terminateNow }
-        quitting = true
-        vm.stop { NSApp.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
+        switch WizardHostTermination.decide(quitting: quitting,
+                    canTerminateWithoutStopping: vm.canTerminateWithoutStopping,
+                    updateBusy: preparingUpdate || guestPatchBusy) {
+        case .terminate: return .terminateNow
+        case .cancel: return .terminateCancel
+        case .stopThenRetry:
+            quitting = true
+            vm.stop { NSApp.terminate(nil) }
+            // Return to the main queue before waiting for VZ callbacks. Do not
+            // nest AppKit's terminateLater loop inside a notification callback.
+            return .terminateCancel
+        }
     }
 }
 

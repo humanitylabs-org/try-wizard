@@ -412,56 +412,86 @@ final class VoiceHUD {
 final class VoiceKeys {
     static let shared = VoiceKeys()
     static var enabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "VoiceKeys") }
+        // Foreground voice is available on first launch; keep an explicit user opt-out.
+        get { (UserDefaults.standard.object(forKey: "VoiceKeys") as? Bool) ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "VoiceKeys") }
     }
     static let rightOption: UInt16 = 61, rightCommand: UInt16 = 54
+    // Keep system-wide capture and Right Option dictation opt-in. Default
+    // foreground Right Command must not commandeer another app's shortcuts.
+    private static var backgroundEnabled: Bool { UserDefaults.standard.bool(forKey: "VoiceKeys") }
 
     enum Mode: String { case idle, dictating, transcribing, orb }
     private(set) var mode: Mode = .idle
     private(set) var monitors: [Any] = []
-    private var downKey: UInt16?, downAt = Date(), chorded = false
+    private var globalMonitor: Any?
+    private var focusObserver: NSObjectProtocol?
+    private var downKey: UInt16?, downAt: TimeInterval = 0, chorded = false
     private let capture = VoiceCapture()
     private var trustTimer: Timer?
     private(set) var lastText = ""
     private(set) var lastError = ""
     var origin: () -> URL? = { nil }
     var orb: (_ start: Bool) -> Void = { _ in }
+    var mayStartRecording: () -> Bool = { true }
 
     var trusted: Bool { AXIsProcessTrusted() }
 
-    /// Called at launch (no prompt) and when the user turns voice keys on (prompts once for Accessibility).
+    /// Local AppKit events need no Accessibility permission. Only background
+    /// dictation/voice in other apps requires the optional global monitor.
     func install(prompt: Bool) {
         guard Self.enabled else { uninstall(); return }
-        if !trusted {
-            if prompt { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
-            trustTimer?.invalidate()
-            trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
-                guard let self, Self.enabled else { t.invalidate(); return }
-                if self.trusted { t.invalidate(); self.addMonitors() }
+        if monitors.isEmpty {
+            if let l = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown], handler: { [weak self] e in self?.event(e); return e }) { monitors.append(l) }
+            focusObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.resetTap() }
+        }
+        trustTimer?.invalidate(); trustTimer = nil
+        guard Self.backgroundEnabled else {
+            if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }; globalMonitor = nil
+            return
+        }
+        if trusted { addGlobalMonitor(); return }
+        if prompt { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
+            guard let self, Self.enabled else { t.invalidate(); return }
+            if self.trusted { t.invalidate(); self.trustTimer = nil; self.addGlobalMonitor() }
+        }
+    }
+    private func addGlobalMonitor() {
+        guard globalMonitor == nil else { return }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown], handler: { [weak self] e in self?.event(e) })
+    }
+    private func resetTap() { downKey = nil; chorded = false }
+    func uninstall() {
+        monitors.forEach(NSEvent.removeMonitor); monitors = []
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }; globalMonitor = nil
+        if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }; focusObserver = nil
+        trustTimer?.invalidate(); trustTimer = nil; resetTap()
+    }
+
+    private func event(_ e: NSEvent) {
+        if e.type == .keyDown { if downKey != nil { chorded = true }; return }
+        let k = e.keyCode
+        guard k == Self.rightOption || k == Self.rightCommand else {
+            if let downKey {
+                chorded = true
+                let pendingFlag: NSEvent.ModifierFlags = downKey == Self.rightOption ? .option : .command
+                if !e.modifierFlags.contains(pendingFlag) { resetTap() }
             }
             return
         }
-        addMonitors()
-    }
-    private func addMonitors() {
-        guard monitors.isEmpty else { return }
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown], handler: { [weak self] e in self?.event(e) }) { monitors.append(g) }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown], handler: { [weak self] e in self?.event(e); return e }) { monitors.append(l) }
-        MeetingLog.log("voice keys on (Right ⌥ dictation, Right ⌘ Wizard)")
-    }
-    func uninstall() { monitors.forEach(NSEvent.removeMonitor); monitors = []; trustTimer?.invalidate() }
-
-    private func event(_ e: NSEvent) {
-        if e.type == .keyDown { chorded = true; return }
-        let k = e.keyCode
-        guard k == Self.rightOption || k == Self.rightCommand else { if downKey != nil { chorded = true }; return }
+        guard k != Self.rightOption || Self.backgroundEnabled else { if downKey != nil { chorded = true }; return }
         let flag: NSEvent.ModifierFlags = k == Self.rightOption ? .option : .command
         if e.modifierFlags.contains(flag) {
-            downKey = k; downAt = Date(); chorded = e.modifierFlags.intersection([.shift, .control, .option, .command]).subtracting(flag).isEmpty == false
+            // Do not replace a pending press (e.g. another modifier/chord).
+            if downKey != nil { chorded = true; return }
+            downKey = k; downAt = e.timestamp
+            chorded = !e.modifierFlags.intersection([.shift, .control, .option, .command]).subtracting(flag).isEmpty
         } else if downKey == k {
-            downKey = nil
-            if !chorded && Date().timeIntervalSince(downAt) < 0.45 { tap(k) }
+            let elapsed = e.timestamp - downAt
+            let shouldTap = !chorded && elapsed >= 0 && elapsed < 0.45
+            resetTap()
+            if shouldTap { tap(k) }
         }
     }
 
@@ -472,7 +502,9 @@ final class VoiceKeys {
     func toggleDictation() {
         switch mode {
         case .idle:
+            guard mayStartRecording() else { return }
             MeetingRecorder.micAuthorized { ok in
+                guard self.mayStartRecording() else { return }
                 guard ok else { VoiceHUD.shared.show("Microphone access is off for Wizard", color: WizStyle.rec, live: false); VoiceHUD.shared.hide(after: 2.5); return }
                 do {
                     try self.capture.start(); self.mode = .dictating
@@ -540,7 +572,9 @@ final class VoiceKeys {
     }
 
     var state: [String: Any] {
-        ["enabled": Self.enabled, "trusted": trusted, "monitors": monitors.count, "mode": mode.rawValue, "orbTaps": orbTaps, "lastText": lastText, "lastError": lastError]
+        ["enabled": Self.enabled, "trusted": trusted, "monitors": monitors.count,
+         "globalMonitor": globalMonitor != nil, "pendingKey": downKey.map { Int($0) } ?? -1,
+         "mode": mode.rawValue, "orbTaps": orbTaps, "lastText": lastText, "lastError": lastError]
     }
 }
 
