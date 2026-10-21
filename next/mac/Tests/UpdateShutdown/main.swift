@@ -42,6 +42,8 @@ final class VMController {
     var vm: FakeMachine? = FakeMachine()
     var state: State = .running
     var socketDevice: FakeSocket? = FakeSocket()
+    final class FakeColdSerial { var delivered = true }
+    var coldSerial: FakeColdSerial? = nil // production stop() checks it for an unbooted cold maintenance VM
     func cancelColdSerialWait() {}
     func cleanupColdSerial() {}
     func signalLateGuestStop() { stopCompletion?() }
@@ -65,7 +67,12 @@ final class VMController {
     static var failApply = false
     static var concurrentStop = false
     static var host = ProductionHost()
-    static func ensureRunning() { isRunning = true }
+    static func ensureRunning() {
+        isRunning = true
+        if WizardShared.coldBootstrapToken != nil {
+            try! "WIZARD_COLD_FENCED".write(to:WizardShared.logsDir.appendingPathComponent("console.log"),atomically:true,encoding:.utf8)
+        }
+    }
     static func waitForLocalWizard(timeout: TimeInterval, tick: (TimeInterval)->Void, done: (Bool)->Void) { done(true) }
     static func send(_ command: String) {
         if command == "apply-guest-update" {
@@ -89,7 +96,6 @@ final class VMController {
     let disk = WizardShared.osDir.appendingPathComponent("disk.img")
     try Data("ORIGINAL".utf8).write(to:disk)
     try WizardUpdate.write(["applyGuest":true,"phase":"installing","kind":cold ? "legacy-cold":"modern","dataHome":WizardShared.supportDir.path,"diskIdentity":WizardDiskIdentity.read(disk)!,"nonce":UUID().uuidString,"releaseID":"fixture"],WizardUpdate.journal)
-    try "WIZARD_COLD_FENCED".write(to:WizardShared.logsDir.appendingPathComponent("console.log"),atomically:true,encoding:.utf8)
     try WizardUpdate.write(["token":"held"],WizardUpdate.maintenanceJournal)
     try WizardGuestActivation.snapshotStoppedDisk()
     let machine = HostControl.host.vm.vm!

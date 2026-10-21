@@ -2,11 +2,19 @@ import AppKit
 import Sparkle
 import Darwin
 
+/// The window is always dark (darkAqua), but a CGColor taken once from a dynamic NSColor resolves against the
+/// Mac's own appearance. In Light Mode the bar was painted white behind the window's white text, so update and
+/// upgrade messages were invisible. Resolve the colour whenever the bar draws, under its own appearance.
+final class NoticeBarView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() { layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor }
+}
+
 /// Sparkle owns signature validation, download, atomic replacement and relaunch.
 /// Wizard owns the top notice, explicit restart choice and local Host shutdown lease.
 @MainActor final class WizardUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate {
     static let shared = WizardUpdater()
-    let view = NSView()
+    let view = NoticeBarView()
     let label = NSTextField(wrappingLabelWithString: "")
     let action = NSButton(title: "Update and restart", target: nil, action: nil)
     let later = NSButton(title: "Later", target: nil, action: nil)
@@ -42,15 +50,24 @@ import Darwin
     private var plannedGuestActivation = false
     private(set) var activatingGuest = false
     var onGuestFinished: () -> Void = {}
+    /// Upgrade progress and failure for the window's main overlay (text, failed). The window is frozen while the
+    /// guest upgrades, so the overlay is the only large surface the owner sees.
+    var onActivationStatus: (String, Bool) -> Void = { _, _ in }
 
     func attach(to root: NSView) -> NSView {
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.wantsLayer = true; view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        view.wantsLayer = true
         root.addSubview(view)
         height = view.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([view.leadingAnchor.constraint(equalTo: root.leadingAnchor), view.trailingAnchor.constraint(equalTo: root.trailingAnchor), view.topAnchor.constraint(equalTo: root.topAnchor), height])
         label.font = .systemFont(ofSize: 12); label.maximumNumberOfLines = 3
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The label takes the spare width; the buttons keep their natural size (Later used to stretch across the bar).
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for button in [action, later] {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         action.target = self; action.action = #selector(updateAndRestart)
         later.target = self; later.action = #selector(hideNotice)
         for control in [label, action, later] { control.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(control) }
@@ -118,10 +135,13 @@ import Darwin
                 "guestPatch": true, "applyGuest": true], WizardUpdate.journal)
             try WizardUpdate.write(["token": nonce, "admission": "cold-pid1"], WizardUpdate.maintenanceJournal)
             ownership.release()
-            WizardGuestActivation.shared.onProgress = { [weak self] text in self?.show("guest-activating", text) }
+            WizardGuestActivation.shared.onProgress = { [weak self] text in
+                self?.show("guest-activating", text); self?.onActivationStatus(text, false)
+            }
             WizardGuestActivation.shared.onDone = { [weak self] error in
                 guard let self else { return }
                 self.activatingGuest = false; self.releaseLease()
+                if let error { self.onActivationStatus(error, true) }
                 if error == nil {
                     // Disk-bound normal-boot receipt was persisted under ownership
                     // before launching the Host; this callback confirms live health.
@@ -142,13 +162,24 @@ import Darwin
         if updater.canCheckForUpdates { updater.checkForUpdates() }
     }
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
+    private var noticeToken = UUID()
     private func show(_ state: String, _ text: String, retry: Bool = false) {
         phase = state; message = text; label.stringValue = text
         view.isHidden = false; height?.constant = 94
         action.title = retry ? "Retry" : "Update and restart"
         action.isEnabled = retry || ready != nil && !preparing
+        // Offer the button only when it can do something (a ready update or a retry), not greyed out under news.
+        action.isHidden = !(retry || ready != nil)
         later.isEnabled = !preparing
         try? WizardUpdate.write(snapshot, WizardUpdate.dir.appendingPathComponent("ui.json"))
+        // Good news needs no answer: let it go by itself unless something newer replaced it.
+        let token = UUID(); noticeToken = token
+        if state == "installed" || state == "current" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                guard let self, self.noticeToken == token, !self.preparing else { return }
+                self.hideNotice()
+            }
+        }
     }
     var snapshot: [String: Any] {
         let installed = NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String ?? "unconfirmed"
@@ -250,7 +281,9 @@ import Darwin
         guard journal["dataHome"] as? String == WizardShared.supportDir.path else { return }
         if journal["phase"] as? String == "guest-activating" {
             activatingGuest = true; preparing = true; onFreeze(true)
-            WizardGuestActivation.shared.onProgress = { [weak self] text in self?.show("recovering", text) }
+            WizardGuestActivation.shared.onProgress = { [weak self] text in
+                self?.show("recovering", text); self?.onActivationStatus(text, false)
+            }
             WizardGuestActivation.shared.onDone = { [weak self] error in
                 guard let self else { return }
                 self.activatingGuest = false; self.releaseLease(); self.onGuestFinished()
