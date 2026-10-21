@@ -246,11 +246,14 @@ if [[ -n $archive_cache ]]; then
     die "--archive-dir must name a regular directory: $archive_cache"
 fi
 
+scratch_root=${TMPDIR:-/private/tmp}
+scratch_root=${scratch_root%/}
+[[ $scratch_root == /* && -d $scratch_root ]] || die "TMPDIR must name an absolute directory"
 work_dir=
 remove_work_dir() {
   local path=$1
   [[ -n $path && ( -e $path || -L $path ) ]] || return 0
-  [[ $path == /private/tmp/omarchy-qemu-source-build.* ]] || \
+  [[ $path == "$scratch_root"/omarchy-qemu-source-build.* ]] || \
     die "refusing to remove unexpected scratch path: $path"
   rm -rf -- "$path"
 }
@@ -267,7 +270,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-work_dir=$(mktemp -d /private/tmp/omarchy-qemu-source-build.XXXXXX)
+work_dir=$(mktemp -d "$scratch_root/omarchy-qemu-source-build.XXXXXX")
 archive_dir="$work_dir/archives"
 listing_dir="$work_dir/listings"
 source_parent="$work_dir/source"

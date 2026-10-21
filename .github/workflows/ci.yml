@@ -9,38 +9,42 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+# Do not use a concurrency group: it can discard pending runs on a single Mac.
 jobs:
   checks:
-    name: ${{ matrix.target == 'test' && 'Tests' || 'Build' }} (${{ matrix.os }})
+    name: ${{ matrix.target == 'test' && 'Tests' || 'Build' }} (macOS 26.7.1, ARM64)
+    # Only trusted branches in this private repository may use the runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
         target: [test, runtime]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    runs-on: [self-hosted, macOS, ARM64, try-wizard]
+    # Allow up to 15 minutes for the shared worker, then the original 30-minute job budget.
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify runner scheduling contracts
+        run: python3 tests/test-ci-worker-lock.py
 
       # This compiles the Swift product and runs the native, shell, and guest
-      # contract suites. The full build additionally requires privileged ARM64
-      # Docker, which is unavailable on GitHub-hosted macOS runners.
+      # contract suites. It does not build a guest image. The runner supplies
+      # WIZARD_CI_WORKER_LOCK to serialize with other heavy work on this Mac.
       - name: Run test suite
         if: matrix.target == 'test'
-        run: make test
+        run: python3 scripts/ci-with-worker-lock.py make test
 
       - name: Install runtime build tool
         if: matrix.target == 'runtime'
         run: command -v pkg-config || brew install pkg-config
 
-      # Build the actual graphics stack and QEMU on both supported OS families.
+      # Build the actual graphics stack and QEMU on the available Mac OS version.
       # Includes VirGL shader regressions and the complete binary compatibility audit.
       - name: Build and verify native runtime
         if: matrix.target == 'runtime'
-        run: make runtime
+        run: python3 scripts/ci-with-worker-lock.py make runtime
