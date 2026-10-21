@@ -1,10 +1,16 @@
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+import sys
 from pathlib import Path
 import unittest
 from unittest import mock
 
 HELPER = Path(__file__).resolve().parents[1] / 'native-overlay/usr/local/lib/try-omarchy/guest-clock-recover'
-clock = SourceFileLoader('guest_clock_recover', str(HELPER)).load_module()
+LOADER = SourceFileLoader("guest_clock_recover", str(HELPER))
+SPEC = spec_from_loader(LOADER.name, LOADER)
+clock = module_from_spec(SPEC)
+sys.modules[LOADER.name] = clock
+LOADER.exec_module(clock)
 
 
 class ClockRecoveryTests(unittest.TestCase):

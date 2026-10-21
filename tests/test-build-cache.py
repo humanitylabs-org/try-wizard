@@ -164,7 +164,7 @@ class BuildCacheTests(unittest.TestCase):
         self.assertLess(runtime, app)
         self.assertIn("Build output:", dry_run)
         self.assertIn(
-            str(REPOSITORY / "dist/app.noindex/Try Omarchy.app"), dry_run
+            str(REPOSITORY / "dist/app.noindex/Wizard.app"), dry_run
         )
 
         forced = subprocess.run(
@@ -192,19 +192,21 @@ class BuildCacheTests(unittest.TestCase):
         build_script = (REPOSITORY / "macos/build-app.sh").read_text()
         open_script = (REPOSITORY / "macos/open-qemu-gpu.sh").read_text()
         self.assertIn(
-            'app="$repo_dir/dist/app.noindex/Try Omarchy.app"',
+            'app="$repo_dir/dist/app.noindex/Wizard.app"',
             build_script,
         )
         self.assertIn(
-            'legacy_app="$repo_dir/dist/Try Omarchy.app"',
+            'legacy_app="$repo_dir/dist/Wizard.app"',
             build_script,
         )
         self.assertIn('rm -rf -- "$legacy_app"', build_script)
         self.assertNotIn(".metadata_never_index", build_script)
         self.assertIn(
-            'app="$repo_dir/dist/app.noindex/Try Omarchy.app"',
+            'app="$repo_dir/dist/app.noindex/Wizard.app"',
             open_script,
         )
+        self.assertIn('bundle_identifier=com.aiwizards.desktop.development', build_script)
+        self.assertIn('[[ $bundle_identifier == com.aiwizards.desktop.development ]]', open_script)
 
     def test_runtime_file_manifest_is_the_single_validated_closure(self) -> None:
         manifest = REPOSITORY / "macos/runtime-files.txt"
@@ -307,10 +309,10 @@ class BuildCacheTests(unittest.TestCase):
     def test_app_validation_requires_packaged_icon(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = root / "dist/app.noindex/Try Omarchy.app"
+            app = root / "dist/app.noindex/Wizard.app"
             for relative in (
                 "Contents/MacOS/omarchy-vm-helper",
-                "Contents/Resources/runtime/bin/Try Omarchy",
+                "Contents/Resources/runtime/bin/Wizard",
                 "Contents/Resources/guest/rootfs.ext4.zst",
                 "Contents/Resources/guest/launch.plist",
             ):
@@ -322,6 +324,29 @@ class BuildCacheTests(unittest.TestCase):
                 build_cache.CacheError, "app bundle is missing or unsafe"
             ):
                 build_cache.validate_app(root, None)
+
+    def test_app_validation_accepts_the_current_branded_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "dist/app.noindex/Wizard.app"
+            for relative in (
+                "Contents/MacOS/omarchy-vm-helper",
+                "Contents/Resources/TryOmarchy.icns",
+                "Contents/Resources/runtime/bin/Wizard",
+                "Contents/Resources/guest/rootfs.ext4.zst",
+                "Contents/Resources/guest/launch.plist",
+            ):
+                path = app / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture\n")
+            # Signing and Mach-O checks need macOS; isolate only those process
+            # boundaries, leaving the bundle path and required-file checks real.
+            with patch.object(build_cache.subprocess, "run", return_value=
+                              subprocess.CompletedProcess([], 0, stdout=b"signature")) as run:
+                snapshot = build_cache.validate_app(root, None)
+            self.assertIn("codeSignature", snapshot)
+            self.assertEqual(3, run.call_count)
+            self.assertEqual([str(app)] * 3, [call.args[0][-1] for call in run.call_args_list])
 
     def test_app_fingerprint_tracks_git_version_without_source_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -265,9 +265,9 @@ struct StartMenuPresentationTests {
     @Test("immersive guidance distinguishes windowed and fullscreen launch")
     func immersiveGuidance() {
         #expect(StartMenuPresentation.immersiveDetail(isEnabled: true)
-            == "Omarchy opens Full Screen with the Mac menu bar and Dock hidden.")
+            == "Wizard opens Full Screen with the Mac menu bar and Dock hidden.")
         #expect(StartMenuPresentation.immersiveDetail(isEnabled: false)
-            == "Omarchy opens in a window with the Mac menu bar and Dock available.")
+            == "Wizard opens in a resizable window, like any Mac app.")
     }
 
 }

@@ -225,7 +225,7 @@ struct StartMenuStartupTests {
             menu.prepareForPresentation(visibleFrame: nil)
             let content = try #require(menu.window.contentView)
             let launch = try #require(descendant(withIdentifier: "launch-button", in: content) as? NSButton)
-            #expect(launch.accessibilityLabel() == (running ? "Done" : state == "complete" ? "Launch Omarchy" : "Update and Launch"))
+            #expect(launch.accessibilityLabel() == (running ? "Done" : state == "complete" ? "Open Wizard" : "Update and Launch"))
             #expect(descendant(withIdentifier: "boot-fixes-result", in: content) == nil)
             #expect(!textFields(in: content).contains { $0.stringValue.contains(report.summary) })
             #expect(!textFields(in: content).contains { $0.stringValue.contains(report.detail) })

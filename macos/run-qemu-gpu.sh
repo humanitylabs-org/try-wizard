@@ -378,7 +378,7 @@ if spec_profile != "factory" or manifest_profile != spec_profile:
 profile_contract = {
     "filesystemLabel": "omarchy-factory",
     "filesystemUuid": "89054943-1f4e-4f14-b934-d6db3fba4254",
-    "sizeMiB": 8192,
+    "sizeMiB": 6144,
     "hostname": "omarchy-factory",
     "username": None,
     "uid": None,

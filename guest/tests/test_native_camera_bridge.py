@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import ctypes
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+import sys
 from pathlib import Path
 import struct
 import unittest
@@ -13,7 +15,11 @@ from unittest import mock
 
 GUEST = Path(__file__).resolve().parents[1]
 BRIDGE_PATH = GUEST / "native-overlay/usr/local/bin/omarchy-native-camera-bridge"
-bridge = SourceFileLoader("omarchy_native_camera_bridge", str(BRIDGE_PATH)).load_module()
+LOADER = SourceFileLoader("omarchy_native_camera_bridge", str(BRIDGE_PATH))
+SPEC = spec_from_loader(LOADER.name, LOADER)
+bridge = module_from_spec(SPEC)
+sys.modules[LOADER.name] = bridge
+LOADER.exec_module(bridge)
 
 
 class NativeCameraBridgeTests(unittest.TestCase):
