@@ -74,8 +74,8 @@ struct StartupPreferenceStoreTests {
     }
 
     @Test("Missing, damaged and unsupported settings use the Wizard startup default", arguments: [
-        "", "broken", "{}", "{\"schemaVersion\":2,\"startAutomatically\":true}",
-        "{\"schemaVersion\":1,\"startAutomatically\":\"true\"}", String(repeating: "x", count: 4097),
+        "", "broken", "{}", "{\"schemaVersion\":2,\"startAutomatically\":false}",
+        "{\"schemaVersion\":1,\"startAutomatically\":\"false\"}", String(repeating: "x", count: 4097),
     ])
     func rejectsInvalidSettings(contents: String) throws {
         let root = try temporaryRoot()
