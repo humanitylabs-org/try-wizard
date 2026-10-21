@@ -7,7 +7,7 @@ Native App, Host, manifest, migration and release implementation remain unchange
 ## Observed facts
 
 Thales evidence root:
-`/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater/evidence-repair`.
+`$WIZARD_WORK_ROOT/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater/evidence-repair`.
 
 - `sparkle-historical.log`: real Autoupdate49102 verifies feed/archive successfully and extracts the candidate. Installed101 process49098 exits at18:44:50 (Mac log-local time). There is no successful installation receipt in this capture. Frozen native readback remains101.
 - `installer-privacy-historical.log`: requests526.4241 (Updater49103),526.4244 (Autoupdate49102) and526.4245 use `kTCCServiceSystemPolicyAllFiles`, attributed to `org.humanitylabs.wizard.mvp`; preflight authValue0 replies promptly. This is **not** sufficient evidence for a privacy hang.
@@ -23,8 +23,8 @@ It verifies the existing archive and complete appcast using official Sparkle2.10
 Run with a unique `PROBE_ID` (evidence directories are not overwritten):
 
 ```sh
-ROOT=/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater
-lockf -k -t 2700 /Volumes/ThalesMedia/AndroidBuilds/worker.lock \
+ROOT=$WIZARD_WORK_ROOT/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater
+lockf -k -t 2700 $WIZARD_WORK_ROOT/AndroidBuilds/worker.lock \
   env UPDATER_ROOT="$ROOT" PROBE_ID=probe1 \
   /usr/bin/python3 -u "$ROOT/source/next/mac/tools/update-repair-probe.py"
 ```

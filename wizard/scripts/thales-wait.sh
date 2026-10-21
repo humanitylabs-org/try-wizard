@@ -1,6 +1,7 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Poll the booting guest for up to ~7 minutes. Part 3 of the boot test.
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 for i in $(seq 1 84); do
   code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' http://127.0.0.1:18930/healthz)
   if [[ $code == 200 ]]; then

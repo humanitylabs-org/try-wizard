@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+
 import plistlib
 import shutil
 import signal
@@ -16,6 +17,9 @@ import sys
 sys.dont_write_bytecode = True
 from build_driver import PRODUCTION, SOURCES
 
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
 
 def sha(path):
     with path.open('rb') as f:
@@ -23,7 +27,7 @@ def sha(path):
 
 
 def clean_pin(path, pin):
-    assert path.resolve().is_relative_to('/Volumes/ThalesMedia')
+    assert path.resolve().is_relative_to(WORK_ROOT)
     assert subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip() == pin
     assert not subprocess.check_output(['git', '-C', path, 'status', '--porcelain'], text=True).strip()
 
@@ -41,7 +45,7 @@ def main():
     assert os.uname().sysname == 'Darwin'
     assert spec['sourceDir'] == str(harness) and spec['productionSource'] == PRODUCTION
     clean_pin(harness, spec['harnessSource']); clean_pin(source, PRODUCTION)
-    assert root.resolve().is_relative_to('/Volumes/ThalesMedia') and not root.exists()
+    assert root.resolve().is_relative_to(WORK_ROOT) and not root.exists()
     assert app.parent == Path('/Applications') and not app.exists()
     # No relabelled old binary: both build and driver sources must be exact pins.
     source_hashes = {}
@@ -51,10 +55,11 @@ def main():
         source_hashes[name] = hashlib.sha256(pinned).hexdigest()
     root.mkdir(mode=0o700)
     os.umask(0o077)
+    (WORK_ROOT / 'tmp').mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, PATH='/opt/homebrew/bin:'+os.environ['PATH'],
-               TMPDIR='/Volumes/ThalesMedia/tmp', PYTHONDONTWRITEBYTECODE='1',
-               UV_CACHE_DIR='/Volumes/ThalesMedia/tmp/uv-cold-cache',
-               UV_PYTHON_INSTALL_DIR='/Volumes/ThalesMedia/tmp/uv-cold-python',
+               TMPDIR=str(WORK_ROOT / 'tmp'), PYTHONDONTWRITEBYTECODE='1',
+               UV_CACHE_DIR=str(WORK_ROOT / 'tmp/uv-cold-cache'),
+               UV_PYTHON_INSTALL_DIR=str(WORK_ROOT / 'tmp/uv-cold-python'),
                CLANG_MODULE_CACHE_PATH=str(root/'module-cache'))
     report = {'productionSource':PRODUCTION, 'harnessSource':spec['harnessSource'],
               'sourceSHA256':source_hashes, 'specSHA256':sha(a.spec), 'build':'307',

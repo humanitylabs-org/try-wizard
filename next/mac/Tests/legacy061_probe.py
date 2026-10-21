@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+
 import plistlib
 import re
 import shutil
@@ -22,6 +23,9 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 DOMAIN = 'org.humanitylabs.wizard.mvp'
 FROZEN = 'e4c2316351baa9fb0aa8ebd7c2de7f022f136d92'
@@ -170,8 +174,8 @@ def main():
     a = p.parse_args()
     assert os.uname().sysname == 'Darwin', 'Mac-only diagnostic'
     for path in [a.root, a.baseline_disk, a.boot_dir, a.old_app, a.quit_helper]:
-        assert path.resolve().is_relative_to('/Volumes/ThalesMedia'), path
-    assert a.new_app.resolve().is_relative_to('/Applications') or a.new_app.resolve().is_relative_to('/Volumes/ThalesMedia')
+        assert path.resolve().is_relative_to(WORK_ROOT), path
+    assert a.new_app.resolve().is_relative_to('/Applications') or a.new_app.resolve().is_relative_to(WORK_ROOT)
     assert not a.root.exists(), 'Use a new evidence directory; never overwrite a run'
     assert a.baseline_disk.is_file() and a.quit_helper.is_file()
     assert a.old_launch_app.parent == Path('/Applications') and a.old_launch_app.suffix == '.app'

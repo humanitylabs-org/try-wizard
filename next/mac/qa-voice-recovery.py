@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Thales-only isolated QA guest: install owned fixes, prove interrupted voice recovery.
-Run under /Volumes/ThalesMedia/AndroidBuilds/worker.lock. No daily services touched.
+Run under $WIZARD_WORK_ROOT/AndroidBuilds/worker.lock. No daily services touched.
 """
 import base64
 import subprocess

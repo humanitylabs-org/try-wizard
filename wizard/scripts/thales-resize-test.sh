@@ -1,7 +1,8 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Free-resize check: does the guest display follow the window shape (no 16:9 lock)?
 # 1) current window vs guest mode  2) relaunch with a phone-shaped saved frame and re-check.
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 mon() { python3 -c 'import json;print(json.dumps({"cmd":"sudo -u wizard XDG_RUNTIME_DIR=/run/user/$(id -u wizard) HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/$(id -u wizard)/hypr | head -1) hyprctl monitors | sed -n 2p","timeout":20}))' | curl -s -m 30 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:18930/api/dev/exec; echo; }
 echo "== now"; swift /tmp/wd-win.swift 2>&1 | head -1; mon
 echo "== phone-shaped"

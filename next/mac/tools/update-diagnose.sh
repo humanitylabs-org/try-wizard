@@ -1,7 +1,8 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Read-only historical diagnostics; no process or privacy changes.
 set -euo pipefail
-ROOT=/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater
+ROOT="$WIZARD_WORK_ROOT/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater"
 E="$ROOT/evidence-repair"
 mkdir -p "$E"
 date -u +%FT%TZ > "$E/diagnostic-start.txt"

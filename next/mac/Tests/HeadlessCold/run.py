@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+
 import plistlib
 import shutil
 import signal
@@ -25,6 +26,9 @@ SOURCE = HERE.parents[3]
 sys.path.insert(0,str(HERE.parent))
 import legacy061_probe as legacy
 from build_driver import PRODUCTION
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def save(path, value):
@@ -116,13 +120,13 @@ def main():
     p.add_argument('--worker-lease',choices=['inherited'],required=True);a=p.parse_args()
     spec=json.loads(a.spec.read_text()); root=Path(spec['evidenceRoot'])
     assert os.uname().sysname=='Darwin'
-    assert root.resolve().is_relative_to('/Volumes/ThalesMedia') and not root.exists()
+    assert root.resolve().is_relative_to(WORK_ROOT) and not root.exists()
     source=Path(spec['sourceDir']); assert source.resolve()==SOURCE
     head=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
     assert head==spec['harnessSource']
     run(['git','-C',source,'diff','--exit-code','HEAD','--'])
     baseline=Path(spec['baselineDisk']); boot=Path(spec['bootDir']); candidate=Path(spec['candidateApp']);old=Path(spec['oldApp'])
-    assert all(x.resolve().is_relative_to('/Volumes/ThalesMedia') for x in (baseline,boot,old))
+    assert all(x.resolve().is_relative_to(WORK_ROOT) for x in (baseline,boot,old))
     release=json.loads((candidate/'Contents/Resources/wizard-release.json').read_text())
     assert release['releaseID']==PRODUCTION and release['build']=='307'
     assert plistlib.loads((old/'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']=='0.6.1'
@@ -134,6 +138,7 @@ def main():
     original_prefs=prefs()
     root.mkdir(mode=0o700)
     (root/'tmp').mkdir(mode=0o700)
+    (WORK_ROOT / 'tmp').mkdir(parents=True, exist_ok=True)
     os.environ['TMPDIR']=str(root/'tmp')
     os.environ['CLANG_MODULE_CACHE_PATH']=str(root/'build/module-cache')
     report={'harnessSource':head,'productionReleaseID':PRODUCTION,'success':False,'gates':[],

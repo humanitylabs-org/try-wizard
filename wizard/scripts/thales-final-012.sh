@@ -1,6 +1,7 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Final acceptance for 0.1.2: fresh default size, guest follows window, narrow frame clamps to 520.
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 defaults delete Wizard "NSWindow Frame WizardWindow" 2>/dev/null
 defaults delete Wizard "NSWindow Frame WizardMainWindow" 2>/dev/null
 bash "$D/scripts/thales-quick-update-test.sh" 2>&1 | grep -E "installed|codesign|guest up"

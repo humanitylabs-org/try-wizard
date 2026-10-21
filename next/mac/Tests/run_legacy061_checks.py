@@ -6,8 +6,12 @@ import argparse
 import json
 import os
 from pathlib import Path
+
 import subprocess
 import sys
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def main():
@@ -18,13 +22,14 @@ def main():
     root = Path(spec['evidenceRoot'])
     source = Path(__file__).resolve().parents[1]
     assert os.uname().sysname == 'Darwin'
-    assert source.is_relative_to('/Volumes/ThalesMedia')
-    assert root.resolve().is_relative_to('/Volumes/ThalesMedia')
+    assert source.is_relative_to(WORK_ROOT)
+    assert root.resolve().is_relative_to(WORK_ROOT)
     assert not root.exists(), 'New evidence root only'
     assert subprocess.check_output(['git', '-C', source, 'rev-parse', 'HEAD'], text=True).strip() == spec['source']
     root.mkdir(parents=True)
     os.chmod(root, 0o700)
-    os.environ['TMPDIR'] = '/Volumes/ThalesMedia/tmp'
+    (WORK_ROOT / 'tmp').mkdir(parents=True, exist_ok=True)
+    os.environ['TMPDIR'] = str(WORK_ROOT / 'tmp')
     results = {'source': spec['source'], 'upgradeAccepted': False, 'checks': []}
     def save():
         (root / 'checks.json').write_text(json.dumps(results, indent=2) + '\n')
