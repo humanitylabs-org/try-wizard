@@ -4,21 +4,21 @@ import Testing
 
 @Suite("Full Screen preferences")
 struct FullscreenPreferenceStoreTests {
-    @Test("Immersive mode is on until the user changes it")
-    func defaultsToImmersive() {
+    @Test("Windowed mode is the default until the user chooses immersive mode")
+    func defaultsToWindowed() {
         let fixture = DefaultsFixture()
 
         #expect(fixture.store.load() == .defaults)
-        #expect(fixture.store.load().isImmersive)
+        #expect(!fixture.store.load().isImmersive)
     }
 
     @Test("Immersive choice persists")
     func savesChoice() {
         let fixture = DefaultsFixture()
-        fixture.store.save(FullscreenPreferences(isImmersive: false))
+        fixture.store.save(FullscreenPreferences(isImmersive: true))
 
         let reopened = FullscreenPreferenceStore(defaults: fixture.defaults)
-        #expect(reopened.load() == FullscreenPreferences(isImmersive: false))
+        #expect(reopened.load() == FullscreenPreferences(isImmersive: true))
     }
 
     @Test("Invalid or future preferences fail safely")
@@ -29,7 +29,7 @@ struct FullscreenPreferenceStoreTests {
 
         let future = try JSONSerialization.data(withJSONObject: [
             "schemaVersion": FullscreenPreferenceStore.schemaVersion + 1,
-            "isImmersive": false,
+            "isImmersive": true,
         ])
         fixture.defaults.set(future, forKey: FullscreenPreferenceStore.key)
         #expect(fixture.store.load() == .defaults)

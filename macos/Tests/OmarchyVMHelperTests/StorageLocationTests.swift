@@ -795,7 +795,7 @@ struct StorageLocationLaunchConfigurationTests {
         let support = try #require(FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first)
-        #expect(root == support.appendingPathComponent("Try Omarchy/VM/v1", isDirectory: true).standardizedFileURL)
+        #expect(root == support.appendingPathComponent("Wizard/VM/v1", isDirectory: true).standardizedFileURL)
         // Keep the regression independent of a real user disk or result cache.
         let workspace = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: workspace) }

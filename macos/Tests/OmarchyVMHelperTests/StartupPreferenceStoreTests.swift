@@ -24,7 +24,7 @@ struct StartupPreferenceStoreTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
-    @Test("Skip launcher is opt-in and persists only within its workspace")
+    @Test("Startup defaults to opening Wizard and explicit choices stay within their workspace")
     func savesChoice() throws {
         let root = try temporaryRoot()
         let other = try temporaryRoot()
@@ -35,24 +35,25 @@ struct StartupPreferenceStoreTests {
         try initializeWorkspace(root)
         try initializeWorkspace(other)
         let store = StartupPreferenceStore()
-        #expect(!store.load(storageRoot: root))
-        #expect(!store.load(storageRoot: nil))
+        #expect(store.load(storageRoot: root))
+        #expect(store.load(storageRoot: nil))
 
-        try store.save(true, storageRoot: root)
-        #expect(StartupPreferenceStore().load(storageRoot: root))
-        #expect(!store.load(storageRoot: other))
         try store.save(false, storageRoot: root)
         #expect(!StartupPreferenceStore().load(storageRoot: root))
+        #expect(store.load(storageRoot: other))
         try store.save(true, storageRoot: root)
+        #expect(StartupPreferenceStore().load(storageRoot: root))
+        try store.save(false, storageRoot: root)
+        #expect(!StartupPreferenceStore().load(storageRoot: root))
         try FileManager.default.removeItem(at: root.appendingPathComponent(StartupPreferenceStore.fileName))
-        #expect(!store.load(storageRoot: root))
-        try store.save(true, storageRoot: root)
+        #expect(store.load(storageRoot: root))
+        try store.save(false, storageRoot: root)
         try FileManager.default.removeItem(at: root)
-        #expect(!store.load(storageRoot: root))
+        #expect(store.load(storageRoot: root))
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
                                                 attributes: [.posixPermissions: 0o700])
         try initializeWorkspace(root)
-        #expect(!store.load(storageRoot: root))
+        #expect(store.load(storageRoot: root))
     }
 
     @Test("A choice before first launch leaves an empty custom folder usable")
@@ -60,18 +61,19 @@ struct StartupPreferenceStoreTests {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = StartupPreferenceStore()
-        try store.save(true, storageRoot: root)
-        #expect(store.load(storageRoot: root))
+        // Use a non-default choice so an ignored pending write cannot pass.
+        try store.save(false, storageRoot: root)
+        #expect(!store.load(storageRoot: root))
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
-        #expect(!StartupPreferenceStore().load(storageRoot: root))
+        #expect(StartupPreferenceStore().load(storageRoot: root))
         try initializeWorkspace(root)
         try store.persistPendingChoice(storageRoot: root)
-        #expect(StartupPreferenceStore().load(storageRoot: root))
+        #expect(!StartupPreferenceStore().load(storageRoot: root))
         try FileManager.default.removeItem(at: root.appendingPathComponent(StartupPreferenceStore.fileName))
-        #expect(!store.load(storageRoot: root))
+        #expect(store.load(storageRoot: root))
     }
 
-    @Test("Missing, damaged and unsupported settings fail closed", arguments: [
+    @Test("Missing, damaged and unsupported settings use the Wizard startup default", arguments: [
         "", "broken", "{}", "{\"schemaVersion\":2,\"startAutomatically\":true}",
         "{\"schemaVersion\":1,\"startAutomatically\":\"true\"}", String(repeating: "x", count: 4097),
     ])
@@ -80,7 +82,7 @@ struct StartupPreferenceStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try initializeWorkspace(root)
         try writeSettings(contents, in: root)
-        #expect(!StartupPreferenceStore().load(storageRoot: root))
+        #expect(StartupPreferenceStore().load(storageRoot: root))
     }
 
     @Test("A settings symlink is neither read nor overwritten")
@@ -89,13 +91,15 @@ struct StartupPreferenceStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try initializeWorkspace(root)
         let target = root.appendingPathComponent("target")
-        let contents = Data("{\"schemaVersion\":1,\"startAutomatically\":true}".utf8)
+        let contents = Data("{\"schemaVersion\":1,\"startAutomatically\":false}".utf8)
         try contents.write(to: target)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
         let file = root.appendingPathComponent(StartupPreferenceStore.fileName)
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
         let store = StartupPreferenceStore()
-        #expect(!store.load(storageRoot: root))
+        // The symlink target is false, unlike the true fallback: following it
+        // would fail this assertion even though invalid files use the default.
+        #expect(store.load(storageRoot: root))
         #expect(throws: HelperError.self) { try store.save(false, storageRoot: root) }
         #expect(try Data(contentsOf: target) == contents)
     }
@@ -110,24 +114,24 @@ struct StartupPreferenceStoreTests {
             preference: preference)?.path == "/private/tmp/override-vm")
         #expect(QEMUGPUStorageSpaceEstimate.storageRootURL(environment: [:])?.path
                 == FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/Try Omarchy/VM/v1").path)
+                    .appendingPathComponent("Library/Application Support/Wizard/VM/v1").path)
     }
 
-    @Test("Only an existing VM with an enabled preference and no Option override skips the menu",
+    @Test("Wizard opens directly regardless of the legacy preference or disk, unless Option is held",
           arguments: [false, true], [false, true])
-    func respectsPreferenceAndOverride(isEnabled: Bool, optionKeyHeld: Bool) {
+    func respectsDirectLaunchAndOverride(isEnabled: Bool, optionKeyHeld: Bool) {
         for hasExistingVM in [false, true] {
             #expect(StartupPolicy.shouldStartAutomatically(
                 isEnabled: isEnabled,
                 hasExistingVM: hasExistingVM,
                 optionKeyHeld: optionKeyHeld,
                 initialArguments: []
-            ) == (isEnabled && hasExistingVM && !optionKeyHeld))
+            ) == !optionKeyHeld)
         }
     }
 
-    @Test("A surviving settings file cannot skip the launcher after the disk is deleted")
-    func deletedDiskShowsLauncher() throws {
+    @Test("Deleting the disk keeps direct launch enabled so Wizard can initialize it again")
+    func deletedDiskAllowsDirectLaunch() throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         try initializeWorkspace(root)
@@ -149,10 +153,12 @@ struct StartupPreferenceStoreTests {
                 hasExistingVM: QEMUGPUStorageSpaceEstimate.hasRecordedPersistentDisk(stateRoot: root.path),
                 optionKeyHeld: false, initialArguments: [])
         }
+        #expect(QEMUGPUStorageSpaceEstimate.hasRecordedPersistentDisk(stateRoot: root.path))
         #expect(shouldSkip())
         try FileManager.default.removeItem(at: disk)
+        #expect(!QEMUGPUStorageSpaceEstimate.hasRecordedPersistentDisk(stateRoot: root.path))
         #expect(store.load(storageRoot: root))
-        #expect(!shouldSkip())
+        #expect(shouldSkip())
     }
 
     @Test("Explicit resets and disposable sessions always show the launcher",
