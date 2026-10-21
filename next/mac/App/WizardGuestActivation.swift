@@ -27,9 +27,13 @@ import Darwin
             try WizardUpdate.write(journal, WizardUpdate.journal)
             guard WizardShared.guestUpdatePayload != nil else { throw WizardUpdate.error("Guest payload validation failed") }
             onProgress("Starting local software activation; your disk, accounts and chats stay in place…")
+            // Capture the boot boundary before launching: a fast Host may already
+            // have written its first output by the time ensureRunning returns.
+            let bootStart = Date()
+            waitingNoticeShown = false
             HostControl.ensureRunning()
             if WizardShared.coldBootstrapToken != nil {
-                waitColdBoot(since: Date()); return
+                waitColdBoot(since: bootStart); return
             }
             HostControl.waitForLocalWizard(timeout: 300, tick: { _ in }) { ready in
                 guard ready else { self.finish("Guest did not become ready for migration"); return }
@@ -46,11 +50,10 @@ import Darwin
         let attributes = try? FileManager.default.attributesOfItem(atPath: console.path)
         let written = (attributes?[.size] as? NSNumber)?.intValue ?? 0
         let modified = attributes?[.modificationDate] as? Date ?? .distantPast
-        // The Host truncates the console before each boot, so output newer than this activation is this boot's kernel.
-        // A console that already carries a cold-boot verdict is handled exactly as before this wait existed.
-        let verdict = written > 0 && ((try? String(contentsOf: console, encoding: .utf8)).map {
-            $0.contains("WIZARD_COLD_FENCED") || $0.contains("WIZARD_COLD_FAILED") } ?? false)
-        if (written > 0 && modified >= start) || verdict {
+        // The Host truncates the console before each boot. Both ordinary output
+        // and cold verdicts must be newer than this activation's launch boundary;
+        // a retained verdict is not evidence that the new VM has started.
+        if written > 0 && modified >= start {
             waitingNoticeShown = false; waitColdStarted(Date().addingTimeInterval(150)); return
         }
         let status = WizardUpdate.json(WizardShared.statusFile)

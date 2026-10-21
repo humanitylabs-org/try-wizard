@@ -37,6 +37,11 @@ enum WizardUpdate {
     static var replacementOnStop = false
     static func ensureRunning() {
         isRunning = true
+        if WizardShared.coldBootstrapToken != nil {
+            // Like the real Host: only this launch may produce a verdict.
+            // Synchronous output also covers a boot faster than ensureRunning.
+            try! "WIZARD_COLD_FENCED".write(to: WizardShared.logsDir.appendingPathComponent("console.log"), atomically: true, encoding: .utf8)
+        }
         try! WizardUpdate.write(["state": "running"], WizardShared.statusFile)
         if WizardUpdate.json(WizardUpdate.journal)["phase"] as? String != "guest-activating" {
             // Reconnection cannot be accepted before the Host's release completes.
@@ -67,7 +72,6 @@ enum WizardUpdate {
     try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true)
     try Data("ORIGINAL".utf8).write(to: WizardShared.osDir.appendingPathComponent("disk.img"))
     try WizardUpdate.write(["applyGuest": true, "phase": "installing", "kind": cold ? "legacy-cold" : "modern", "dataHome": WizardShared.supportDir.path, "diskIdentity": WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img"))!, "nonce": UUID().uuidString, "releaseID": "test-release"], WizardUpdate.journal)
-    if cold { try "WIZARD_COLD_FENCED".write(to: WizardShared.logsDir.appendingPathComponent("console.log"), atomically: true, encoding: .utf8) }
     try WizardUpdate.write(["token": "test-owner"], WizardUpdate.maintenanceJournal)
     let originalIdentity = WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img"))!
     try WizardGuestActivation.snapshotStoppedDisk()
