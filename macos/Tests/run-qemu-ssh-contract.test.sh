@@ -584,7 +584,7 @@ assert_contains "$development_validation" \
 
 # Verified older factories retain their creation-time host renderer metadata.
 # Accept that known ABI, but reject arbitrary backends before launching QEMU.
-for renderer in angle-metal unsupported-renderer macos-opengl; do
+for renderer in angle-metal unsupported-renderer macos-opengl invalid-image-size; do
   /usr/bin/python3 - "$development_guest" "$renderer" <<'PY_GRAPHICS'
 import hashlib
 import json
@@ -594,7 +594,10 @@ import sys
 guest = Path(sys.argv[1])
 spec_path = guest / "build-spec.json"
 spec = json.loads(spec_path.read_text())
-spec["runtime"]["graphics"]["hostRenderer"] = sys.argv[2]
+if sys.argv[2] == "invalid-image-size":
+    spec["image"]["sizeMiB"] += 1
+else:
+    spec["runtime"]["graphics"]["hostRenderer"] = sys.argv[2]
 spec_path.write_text(json.dumps(spec) + "\n")
 manifest_path = guest / "guest-manifest.json"
 manifest = json.loads(manifest_path.read_text())
@@ -613,6 +616,9 @@ PY_GRAPHICS
     >"$test_root/graphics-$renderer.stdout" 2>"$test_root/graphics-$renderer.stderr" || graphics_status=$?
   if [[ $renderer == unsupported-renderer ]]; then
     [[ $graphics_status != 0 ]] || fail 'unsupported graphics backend was accepted'
+  elif [[ $renderer == invalid-image-size ]]; then
+    [[ $graphics_status != 0 ]] || fail 'unsupported factory image size was accepted'
+    assert_contains "$(<"$test_root/graphics-$renderer.stderr")" 'build spec image contract is invalid'
   else
     [[ $graphics_status == 0 ]] || fail "compatible graphics metadata rejected: $renderer"
   fi
