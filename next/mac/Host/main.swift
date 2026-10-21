@@ -117,7 +117,8 @@ final class ColdBootstrapSerial {
     let generation = UUID()
     let input = Pipe()
     private let reader: FileHandle
-    private let deadline: TimeInterval
+    private var deadline: TimeInterval
+    private let timeout: TimeInterval
     private var tail = Data()
     private var active = true
     private(set) var delivered = false
@@ -125,6 +126,7 @@ final class ColdBootstrapSerial {
     init(console: URL, now: TimeInterval, timeout: TimeInterval = 60) throws {
         reader = try FileHandle(forReadingFrom: console)
         deadline = now + timeout
+        self.timeout = timeout
     }
 
     func poll(generation: UUID, now: TimeInterval) -> Outcome {
@@ -152,6 +154,10 @@ final class ColdBootstrapSerial {
             return .failed("Cold bootstrap serial I/O failed; command will not be retried")
         }
     }
+
+    /// Count readiness from the VM's actual start. macOS can hold `VZVirtualMachine.start` behind a permission
+    /// prompt for the shared folder; that wait is the owner's, not the guest's.
+    func arm(now: TimeInterval) { deadline = now + timeout }
 
     func cancelWaiting() {
         active = false
@@ -279,6 +285,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             // A concurrent shutdown is not evidence that the disk is stopped.
             onTimeout?(); return
         }
+        // A cold maintenance boot whose bootstrap command was never sent has run only the kernel and the bare
+        // PID1 shell. Nothing listens on the control port there, so a clean poweroff can never arrive and the
+        // update path (no forced stop) used to sit in "stopping" forever. Nothing in the guest has written to
+        // the disk, and a failed activation restores the stopped-disk rollback clone anyway: stop it directly.
+        let idleColdBoot = coldSerial.map { !$0.delivered } ?? false
         cancelColdSerialWait()
         state = .stopping
         log("stopping Wizard OS")
@@ -295,6 +306,20 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             if !timedOut { completion?() }
         }
         stopCompletion = done
+        if idleColdBoot {
+            log("maintenance boot never received its command; stopping it directly")
+            machine.stop { error in
+                DispatchQueue.main.async {
+                    guard error == nil else {
+                        log("maintenance boot stop failed: \(error!.localizedDescription)")
+                        try? WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.request)["nonce"] ?? "", "state": "failed", "error": "VM stop failed; disk retained"], WizardUpdate.response)
+                        onTimeout?(); return
+                    }
+                    done()
+                }
+            }
+            return
+        }
         // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
         socketDevice?.connect(toPort: WizardShared.guestControlPort) { result in
             if case .success(let conn) = result {
@@ -420,6 +445,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
 
     private func waitForColdShell(_ machine: VZVirtualMachine) {
         guard let serial = coldSerial, state == .starting else { return }
+        serial.arm(now: ProcessInfo.processInfo.systemUptime)
         let generation = serial.generation
         coldSerialTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak machine] timer in
             guard let self, let machine, self.vm === machine,

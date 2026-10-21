@@ -29,13 +29,41 @@ import Darwin
             onProgress("Starting local software activation; your disk, accounts and chats stay in place…")
             HostControl.ensureRunning()
             if WizardShared.coldBootstrapToken != nil {
-                waitColdStarted(Date().addingTimeInterval(150)); return
+                waitColdBoot(since: Date()); return
             }
             HostControl.waitForLocalWizard(timeout: 300, tick: { _ in }) { ready in
                 guard ready else { self.finish("Guest did not become ready for migration"); return }
                 self.migrate()
             }
         } catch { onDone(error.localizedDescription) }
+    }
+    /// The fence budget (150 s) counts from the VM's first console output, not from launching the Host. macOS can
+    /// hold the VM start behind a permission prompt (a shared folder in Documents, asked for by the Virtualization
+    /// service, not by this app) for as long as the owner takes to answer. Counting that wait used to fail the upgrade.
+    private var waitingNoticeShown = false
+    private func waitColdBoot(since start: Date) {
+        let console = WizardShared.logsDir.appendingPathComponent("console.log")
+        let attributes = try? FileManager.default.attributesOfItem(atPath: console.path)
+        let written = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+        let modified = attributes?[.modificationDate] as? Date ?? .distantPast
+        // The Host truncates the console before each boot, so output newer than this activation is this boot's kernel.
+        // A console that already carries a cold-boot verdict is handled exactly as before this wait existed.
+        let verdict = written > 0 && ((try? String(contentsOf: console, encoding: .utf8)).map {
+            $0.contains("WIZARD_COLD_FENCED") || $0.contains("WIZARD_COLD_FAILED") } ?? false)
+        if (written > 0 && modified >= start) || verdict {
+            waitingNoticeShown = false; waitColdStarted(Date().addingTimeInterval(150)); return
+        }
+        let status = WizardUpdate.json(WizardShared.statusFile)
+        if status["state"] as? String == "error", (status["updatedAt"] as? Double ?? 0) >= start.timeIntervalSince1970 {
+            finish(status["error"] as? String ?? "Wizard OS could not start; restoring the stopped disk"); return
+        }
+        let waited = Date().timeIntervalSince(start)
+        guard waited < 900 else { finish("Wizard OS did not start within 15 minutes; restoring the stopped disk"); return }
+        if waited > 3 && !waitingNoticeShown {
+            waitingNoticeShown = true
+            onProgress("Waiting for macOS to start Wizard's computer. If it asks whether Wizard may access a folder, click Allow.")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitColdBoot(since: start) }
     }
     private func waitColdStarted(_ deadline: Date) {
         let log = (try? String(contentsOf: WizardShared.logsDir.appendingPathComponent("console.log"), encoding: .utf8)) ?? ""

@@ -1166,6 +1166,38 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     @objc func backToChooser() { showChooser() }
     @objc func retryInstall() { installOnThisMac() }
     @objc func retry() { begin() }
+    @objc func quitWizard() { NSApp.terminate(nil) }
+
+    // MARK: Start errors the owner can fix
+
+    /// This attempt's Host start error, from host-status.json (stale errors from an earlier start are ignored).
+    static func hostStartError(since start: Date) -> String? {
+        let status = WizardUpdate.json(WizardShared.statusFile)
+        guard status["state"] as? String == "error", (status["updatedAt"] as? Double ?? 0) >= start.timeIntervalSince1970 else { return nil }
+        return status["error"] as? String
+    }
+    /// Virtualization reports a shared folder it may not open (the owner clicked Don't Allow on the macOS folder
+    /// prompt) as an invalid directory-sharing configuration. macOS never asks twice, so Try Again alone can't help.
+    static func isFolderBlocked(_ error: String) -> Bool { error.localizedCaseInsensitiveContains("directory sharing") }
+    func showFolderBlocked() {
+        let folder = WizardShared.filesFolder ?? WizardShared.defaultFilesFolder
+        let path = (folder.path as NSString).abbreviatingWithTildeInPath
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].standardizedFileURL.path
+        let item = folder.standardizedFileURL.path.hasPrefix(documents + "/") ? "Documents Folder" : "this folder"
+        showOverlay("Wizard can't use your shared folder",
+                    "macOS didn't allow Wizard to open \(path), so Wizard's computer can't start. macOS won't ask again: "
+                    + "open System Settings → Privacy & Security → Files & Folders, turn on \(item) under Wizard MVP, "
+                    + "then click Try Again. Or choose a different folder for your Wizard's files.",
+                    spinning: false,
+                    actions: [("Try Again", #selector(retry)), ("Open Privacy Settings", #selector(openFilesPrivacy)),
+                              ("Choose Folder…", #selector(chooseFilesFolder)), ("Quit Wizard", #selector(quitWizard))])
+    }
+    @objc func openFilesPrivacy() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
 
     func installOnThisMac() {
         showOverlay("Setting up Wizard on this Mac", "Downloading Wizard OS, a small Linux computer just for your Wizard. This happens once.", progress: nil)
@@ -1238,11 +1270,22 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         HostControl.ensureRunning()
         HostControl.send("start")
         var shown = false
+        var failed = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
-            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
-            if elapsed > 0.6 && !shown { shown = true; self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac.") }
+            guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
+            if let error = Self.hostStartError(since: started) {
+                failed = true
+                if Self.isFolderBlocked(error) { self.showFolderBlocked(); return }
+                self.showOverlay("Wizard OS didn't start", error, spinning: false,
+                                 actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
+                return
+            }
+            if elapsed > 0.6 && !shown {
+                shown = true
+                self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
+            }
         }, done: { [weak self] ok in
-            guard let self, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
+            guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
@@ -1446,6 +1489,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.controller.web.isHidden = frozen
         }
         WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
+        WizardUpdater.shared.onActivationStatus = { [weak self] text, failed in
+            guard let controller = self?.controller else { return }
+            guard failed else { controller.showOverlay("Upgrading your Wizard", text, spinning: true); return }
+            if WizardWindowController.isFolderBlocked(text) { controller.showFolderBlocked(); return }
+            let hostLog = (WizardShared.logsDir.appendingPathComponent("host.log").path as NSString).abbreviatingWithTildeInPath
+            controller.showOverlay("The upgrade didn't finish",
+                                   "\(text)\n\nYour Wizard's previous disk is kept. Try again, or quit and send "
+                                   + "\(hostLog) to the Wizard team.",
+                                   spinning: false,
+                                   actions: [("Try Again", #selector(WizardWindowController.retry)),
+                                             ("Quit Wizard", #selector(WizardWindowController.quitWizard))])
+        }
         WizardUpdater.shared.start()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
     }
