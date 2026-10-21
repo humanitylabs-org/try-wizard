@@ -51,7 +51,7 @@ esac
 stale_fixture=''
 trap '/bin/rm -rf "$test_root"; [[ -z "$stale_fixture" ]] || /bin/rm -rf "$stale_fixture"' EXIT HUP INT TERM
 
-app="$test_root/Try Omarchy.app"
+app="$test_root/Wizard.app"
 contents="$app/Contents"
 resources="$contents/Resources"
 shim_dir="$test_root/bin"
@@ -133,7 +133,7 @@ exit 0
 SH
 chmod 755 "$contents/MacOS/omarchy-vm-helper"
 
-cat >"$resources/runtime/bin/Try Omarchy" <<'SH'
+cat >"$resources/runtime/bin/Wizard" <<'SH'
 #!/bin/bash
 # Identity markers validated by the production launcher:
 # TryOmarchy.icns
@@ -188,7 +188,7 @@ import threading
 import time
 
 arguments = sys.argv[1:]
-is_recovery = "Try Omarchy Boot Recovery" in arguments
+is_recovery = "Wizard Boot Recovery" in arguments
 log_variable = "FAKE_QEMU_RECOVERY_LOG" if is_recovery else "FAKE_QEMU_LOG"
 geometry = os.environ.get("TRYOMARCHY_KEYBOARD", "")
 Path(os.environ[log_variable]).write_text(
@@ -291,7 +291,7 @@ PY
     ;;
 esac
 SH
-chmod 755 "$resources/runtime/bin/Try Omarchy"
+chmod 755 "$resources/runtime/bin/Wizard"
 
 cat >"$resources/scripts/qemu-persistent-storage.sh" <<'SH'
 #!/bin/bash
@@ -685,7 +685,7 @@ assert_not_contains "$disabled_qemu" hostfwd
 assert_not_contains "$disabled_qemu" tryomarchy.ssh_access
 assert_keyboard_lockstep "$test_root/disabled/qemu.log" iso
 assert_contains "$disabled_qemu" \
-  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=on,full-grab=on,immersive=on,swap-opt-cmd=off'
+  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off'
 assert_contains "$disabled_qemu" \
   'socket,id=omarchy-authentication-bridge,path='
 assert_contains "$disabled_qemu" \
@@ -893,6 +893,10 @@ run_scenario non-immersive 0 '' OMARCHY_QEMU_GPU_IMMERSIVE=0
 non_immersive_qemu=$(<"$test_root/non-immersive/qemu.log")
 assert_contains "$non_immersive_qemu" \
   'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off'
+
+run_scenario immersive 0 '' OMARCHY_QEMU_GPU_IMMERSIVE=1
+assert_contains "$(<"$test_root/immersive/qemu.log")" \
+  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=on,full-grab=on,immersive=on,swap-opt-cmd=off'
 
 run_scenario hvf-trace 0 '' OMARCHY_QEMU_GPU_HVF_TRACE_LOG=/private/tmp/omarchy-hvf-trace.log
 assert_line_pair "$test_root/hvf-trace/qemu.log" -trace hvf_vm_map

@@ -39,7 +39,7 @@ case "$test_root" in
 esac
 trap '/bin/rm -rf "$test_root"' EXIT HUP INT TERM
 
-app="$test_root/Try Omarchy.app"
+app="$test_root/Wizard.app"
 contents="$app/Contents"
 resources="$contents/Resources"
 shim_dir="$test_root/bin"
@@ -114,7 +114,7 @@ exit 0
 SH
 chmod 755 "$contents/MacOS/omarchy-vm-helper"
 
-cat >"$resources/runtime/bin/Try Omarchy" <<'SH'
+cat >"$resources/runtime/bin/Wizard" <<'SH'
 #!/bin/bash
 # Identity markers validated by the production launcher:
 # TryOmarchy.icns
@@ -220,7 +220,7 @@ PY
     ;;
 esac
 SH
-chmod 755 "$resources/runtime/bin/Try Omarchy"
+chmod 755 "$resources/runtime/bin/Wizard"
 
 cat >"$resources/scripts/qemu-persistent-storage.sh" <<'SH'
 #!/bin/bash
@@ -485,7 +485,7 @@ run_scenario small-host-default 0 FAKE_HOST_MEMSIZE=7516192768
 assert_line_pair "$test_root/small-host-default/qemu.log" -m 4096M
 
 # An older runtime must not silently claim to reclaim memory on macOS.
-sed -i '' '/^# HVF free-page backing replacement failed$/d' "$resources/runtime/bin/Try Omarchy"
+sed -i '' '/^# HVF free-page backing replacement failed$/d' "$resources/runtime/bin/Wizard"
 run_scenario old-runtime 1
 assert_contains "$(<"$test_root/old-runtime/stderr")" 'lacks macOS memory reclamation'
 
