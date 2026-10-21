@@ -8,10 +8,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+
 import plistlib
 import shutil
 import subprocess
 import sys
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def sha(p):
@@ -27,14 +31,15 @@ def main():
     spec=json.loads(a.spec.read_text()); root=Path(spec['evidenceRoot'])
     source=Path(__file__).resolve().parents[3]
     assert os.uname().sysname=='Darwin'
-    assert source.is_relative_to('/Volumes/ThalesMedia') and root.is_relative_to('/Volumes/ThalesMedia')
+    assert source.is_relative_to(WORK_ROOT) and root.is_relative_to(WORK_ROOT)
     assert not root.exists(), 'Immutable evidence directory only'
     assert subprocess.check_output(['git','-C',source,'rev-parse','HEAD'],text=True).strip()==spec['source']
     assert not subprocess.check_output(['git','-C',source,'status','--porcelain'],text=True).strip()
     # The durable worker is the only owner of the shared resource lease. No
     # nested flock or detached VM/background worker is created here.
     root.mkdir(parents=True,mode=0o700)
-    env=dict(os.environ,PATH='/opt/homebrew/bin:'+os.environ['PATH'],TMPDIR='/Volumes/ThalesMedia/tmp',PYTHONDONTWRITEBYTECODE='1',UV_CACHE_DIR='/Volumes/ThalesMedia/tmp/uv-cold-cache',UV_PYTHON_INSTALL_DIR='/Volumes/ThalesMedia/tmp/uv-cold-python')
+    (WORK_ROOT / 'tmp').mkdir(parents=True, exist_ok=True)
+    env=dict(os.environ,PATH='/opt/homebrew/bin:'+os.environ['PATH'],TMPDIR=str(WORK_ROOT / 'tmp'),PYTHONDONTWRITEBYTECODE='1',UV_CACHE_DIR=str(WORK_ROOT / 'tmp/uv-cold-cache'),UV_PYTHON_INSTALL_DIR=str(WORK_ROOT / 'tmp/uv-cold-python'))
     result={'schema':1,'source':spec['source'],'build':'307','phase':'focused-checks','upgradeAccepted':False,
             'factoryRebuilt':False,'published':False,'checks':[],'baselineUntouched':None,
             'remainingAcceptance':['actual VM post-apply rollback','active capture/foreign Host refusal UI','physical microphone speech','meeting upload']}

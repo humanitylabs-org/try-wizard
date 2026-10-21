@@ -7,7 +7,8 @@ set -u
 B=${WIZARD_QA_DOWNLOAD_BASE%/}
 AS="$HOME/Library/Application Support/Wizard"
 APP="$HOME/Applications/WizardNext/Wizard.app"
-W=/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-mac
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
+W="$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-mac"
 T=/tmp/wizard-e2e; rm -rf $T; mkdir -p $T
 
 echo "== stop running Wizard"

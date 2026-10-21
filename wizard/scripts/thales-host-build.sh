@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Rebuild host side only (QEMU runtime with Cocoa edit -> app -> DMG -> small app-update tarball).
 # Guest image is reused unchanged, so existing Wizards keep their disk.
 set -uo pipefail
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 VER=${1:?version}
 bash ~/wd-heal.sh >/dev/null 2>&1 || true
 source "$D/env.sh"

@@ -1,10 +1,11 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Lifecycle acceptance on Thales (Wizard OS 0.2 stack). Assumes qa-fresh.sh ran (installed + onboarded).
 #   1. close the window: Wizard OS keeps running        2. warm open x3 (Wizard OS running)
 #   3. cold open x2 (Wizard OS stopped)                  4. chats, installed apps and files survive all of it
 #   5. memory: VM process footprint, guest free -m, per-container memory
 set -u
-EV=${1:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/evidence/lifecycle}
+EV=${1:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/evidence/lifecycle}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 AS="$HOME/Library/Application Support/Wizard"
 APP="$HOME/Applications/WizardNext/Wizard.app"

@@ -7,8 +7,11 @@ a scheduled job and a (fake) Telegram token. Target: a clone of an onboarded Wiz
 import hashlib, json, os, socket, subprocess as sp, sys, time
 from pathlib import Path
 
-Q = Path('/Volumes/ThalesMedia/Projects/wizard-desktop/existing-hermes-20261014')
-BASE = Path('/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-jan-20261013')
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
+Q = (WORK_ROOT / 'Projects/wizard-desktop/existing-hermes-20261014')
+BASE = (WORK_ROOT / 'Projects/wizard-desktop/mac-mvp-jan-20261013')
 E = Path(os.environ.get('E') or Q / 'evidence-r8'); E.mkdir(parents=True, exist_ok=True)
 SRC = Q / 'bring-src'
 DISK = Q / 'import-test.img'
@@ -94,6 +97,7 @@ def chat(sid, msg):
 
 STATE = r'''
 import json, sqlite3, yaml, pathlib, re
+
 D = pathlib.Path('/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data')
 cfg = yaml.safe_load((D/'config.yaml').read_text()) or {}
 env = {l.split('=',1)[0].strip() for l in (D/'.env').read_text().splitlines() if '=' in l and not l.lstrip().startswith('#')}

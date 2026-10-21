@@ -7,12 +7,16 @@ import hashlib
 import json
 import os
 from pathlib import Path
+
 import subprocess
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def main():
     p = argparse.ArgumentParser(); p.add_argument('--out', type=Path, required=True); a = p.parse_args()
-    assert os.uname().sysname == 'Darwin' and a.out.resolve().is_relative_to('/Volumes/ThalesMedia')
+    assert os.uname().sysname == 'Darwin' and a.out.resolve().is_relative_to(WORK_ROOT)
     a.out.mkdir(parents=True, exist_ok=False)
     mac = Path(__file__).resolve().parents[1]
     host = (mac/'Host/main.swift').read_text()

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Thales native Wizard menu/event-loop acceptance. No real sends; defaults restored."""
 import fcntl,json,pathlib,plistlib,subprocess as sp,time,os
+
+
 # Supply the full desktop URL for the Wizard under test; no owner-specific default.
 URL=os.environ['QA_NATIVE_URL']
 if not URL:raise SystemExit('Set QA_NATIVE_URL to the desktop URL under test')
-BASE=pathlib.Path('/Volumes/ThalesMedia/Projects/wizard-desktop/dynamic-keys')
+WORK_ROOT = pathlib.Path(os.environ.get("WIZARD_WORK_ROOT") or pathlib.Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
+BASE=(WORK_ROOT / 'Projects/wizard-desktop/dynamic-keys')
 APP=BASE/'native/dist/Wizard.app';OUT=BASE/'evidence/native';OUT.mkdir(parents=True,exist_ok=True)
 DOMAIN='org.humanitylabs.wizard';passed=[]
 def run(*args,check=True):return sp.run(args,check=check,text=True,stdout=sp.PIPE,stderr=sp.PIPE)
@@ -28,7 +32,8 @@ def wait(js):
   if ev(js)=='1':return
   time.sleep(.2)
  raise AssertionError('native state deadline: '+js)
-lock=open('/Volumes/ThalesMedia/AndroidBuilds/worker.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
+(WORK_ROOT / 'AndroidBuilds').mkdir(parents=True, exist_ok=True)
+lock=open(str(WORK_ROOT / 'AndroidBuilds/worker.lock'),'a');fcntl.flock(lock,fcntl.LOCK_EX)
 if run('pgrep','-f','/Wizard.app/Contents/MacOS/Wizard',check=False).stdout.strip():raise SystemExit('Prior native app is running; preserve it')
 backup=OUT/'defaults.plist';saved=run('defaults','export',DOMAIN,str(backup),check=False).returncode==0;proc=None;receipt={}
 try:

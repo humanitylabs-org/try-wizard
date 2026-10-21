@@ -25,7 +25,7 @@ Required build environment:
 - Optional `SIGN_IDENTITY`: defaults to ad hoc `-` for developer QA. Actual Developer ID + notarization remain separate external gates.
 - Optional `GUEST_UPDATE_PAYLOAD`: exact assembled bounded runtime migration payload below, not a factory disk.
 
-Run the existing `next/mac/build.sh` under the shared `/Volumes/ThalesMedia/AndroidBuilds/worker.lock`. It signs explicit nested Sparkle helpers/framework inside-out, embeds Host, signs the app and verifies strict/deep. Only ad hoc developer builds carry disabled library validation. There is **no** downloaded-bundle re-signing or quarantine-clearing updater step.
+Run the existing `next/mac/build.sh` under the shared `$WIZARD_WORK_ROOT/AndroidBuilds/worker.lock`. It signs explicit nested Sparkle helpers/framework inside-out, embeds Host, signs the app and verifies strict/deep. Only ad hoc developer builds carry disabled library validation. There is **no** downloaded-bundle re-signing or quarantine-clearing updater step.
 
 ## Stage the feed (do not publish)
 
@@ -59,7 +59,7 @@ After migration the new Host stops cleanly, journal disables maintenance, normal
 ## Evidence / QA
 
 All compilation, Sparkle, native/VM/browser and sustained QA stays on Thales under the shared lock. Root:
-`/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater`.
+`$WIZARD_WORK_ROOT/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater`.
 
 `tools/update-remote-qa.sh` obtains verified Sparkle if necessary and runs `tools/update-native-qa.py`. The latter builds a real bootstrap101, signed102/103 archives, installs101 in an owned external directory, exercises real check/download/Update button/relaunch, Later and busy guard, tampered archive/feed, authentic incompatible peer and offline errors, launches the retained prior bundle, and restores original preferences from a private snapshot. It writes receipts/screenshots/logs. The busy injection is explicitly a native guard test, not proof of an active real engine or physical microphone recording.
 

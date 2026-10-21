@@ -1,7 +1,8 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Thales only, called under the shared worker.lock; no local build fallback.
 set -euo pipefail
-ROOT=/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater
+ROOT="$WIZARD_WORK_ROOT/Projects/wizard-desktop/mac-mvp-fix-round-20261014/updater"
 printf 'LOCK_ACQUIRED %s\n' "$(date -u +%FT%TZ)"
 cd "$ROOT/sparkle"
 if [[ ! -d Sparkle.framework ]]; then

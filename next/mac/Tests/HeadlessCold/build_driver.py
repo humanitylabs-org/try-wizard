@@ -3,9 +3,14 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+
 import shutil
 import subprocess
+
+WORK_ROOT = Path(os.environ.get("WIZARD_WORK_ROOT") or Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 PRODUCTION = 'c7952d68e6a61da74b1e26485293cb7b5d881c7b'
 SOURCES = ['next/mac/Host/main.swift', 'next/mac/Shared/Shared.swift',
@@ -90,8 +95,8 @@ def main():
     p.add_argument('--extract-only',action='store_true'); a=p.parse_args()
     generate(a.source,a.out)
     if a.extract_only: return
-    if not str(a.out.resolve()).startswith('/Volumes/ThalesMedia/'):
-        raise RuntimeError('Compilation must use durable Thales external-volume worker')
+    if os.uname().sysname != 'Darwin' or not a.out.resolve().is_relative_to(WORK_ROOT):
+        raise RuntimeError('Compilation requires macOS and output under WIZARD_WORK_ROOT')
     (a.out/'module-cache').mkdir()
     cmd=['xcrun','swiftc','-O','-target','arm64-apple-macos14.0','-swift-version','5',
          '-module-cache-path',str(a.out/'module-cache'),

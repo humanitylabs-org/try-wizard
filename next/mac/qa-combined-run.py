@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Bounded exact-DMG test continuation; caller owns shared keep-file lock."""
 import datetime, hashlib, json, os, pathlib, plistlib, signal, subprocess, time
-R=pathlib.Path('/Volumes/ThalesMedia/Projects/wizard-desktop/mac-mvp-fix-round-20261014/compose')
+
+WORK_ROOT = pathlib.Path(os.environ.get("WIZARD_WORK_ROOT") or pathlib.Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
+WORK_ROOT.mkdir(parents=True, exist_ok=True)
+
+R=(WORK_ROOT / 'Projects/wizard-desktop/mac-mvp-fix-round-20261014/compose')
 S=R/'source-smoke-r1';Q=pathlib.Path(os.environ.get('COMBINED_QA_ROOT',str(R/'native-qa-r1')));E=Q/'evidence';E.mkdir(parents=True,exist_ok=True)
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 receipt={'started':now(),'state':'running','sourceSnapshot':str(S),'tests':{}}

@@ -1,6 +1,7 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Persistence test: quit Wizard (SIGTERM -> clean VM shutdown), relaunch, verify state survived.
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 H=$(pgrep -f "Wizard.app/Contents/MacOS/omarchy-vm-helper" | head -1)
 echo "helper=$H"
 kill -TERM "$H"
