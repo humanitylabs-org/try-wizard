@@ -37,7 +37,10 @@ def main():
                             capture_output=True, text=True)
     (out / 'stdout.log').write_text(result.stdout)
     (out / 'stderr.log').write_text(result.stderr)
-    stale = 'STALE_VERDICT_STARTS_150S_BUDGET=true' in result.stdout
+    stale = None
+    for line in result.stdout.splitlines():
+        if line.startswith('STALE_VERDICT_STARTS_150S_BUDGET='):
+            stale = line.split('=', 1)[1] == 'true'
     receipt = {'scope': 'unchanged production waitColdBoot; isolated file/status I/O and captured scheduling; no real permission dialog or VM',
                'production_sha256': hashlib.sha256(production.encode()).hexdigest(),
                'method_sha256': hashlib.sha256(method.encode()).hexdigest(),
