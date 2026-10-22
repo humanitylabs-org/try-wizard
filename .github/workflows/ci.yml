@@ -32,6 +32,13 @@ jobs:
       - name: Verify runner scheduling contracts
         run: python3 tests/test-ci-worker-lock.py
 
+      - name: Install guest HTTP test dependencies in an isolated environment
+        if: matrix.target == 'test'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/backup-tests-${GITHUB_RUN_ID}"
+          "$RUNNER_TEMP/backup-tests-${GITHUB_RUN_ID}/bin/python" -m pip install -r next/guest/tests/requirements.txt
+          printf '%s\n' "$RUNNER_TEMP/backup-tests-${GITHUB_RUN_ID}/bin" >> "$GITHUB_PATH"
+
       # This compiles the Swift product and runs the native, shell, and guest
       # contract suites. It does not build a guest image. The runner supplies
       # WIZARD_CI_WORKER_LOCK to serialize with other heavy work on this Mac.

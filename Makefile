@@ -78,6 +78,7 @@ test-backup:
 	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s $(ROOT)/next/guest/tests -p test_backup_frontdoor.py -v
 
 test-contracts:
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-backup-test-dependencies.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_cold_boot_wait.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-portable-paths.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-configured-endpoints.py"
