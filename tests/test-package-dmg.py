@@ -18,7 +18,7 @@ class PackageDMGTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="package-dmg-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.app = self.root / "Try Omarchy.app"
+        self.app = self.root / "Wizard.app"
         self.app.mkdir()
         self.log = self.root / "commands.jsonl"
         self.bin = self.root / "bin"
@@ -67,12 +67,12 @@ elif tool == "osascript" and os.environ.get("DMG_TEST_FAIL_LAYOUT"):
                 commands = self.commands()
                 create = next(c for c in commands if c[:2] == ["hdiutil", "create"])
                 labels.append(create[create.index("-volname") + 1])
-                self.assertNotEqual(labels[-1], "Try Omarchy")
+                self.assertNotEqual(labels[-1], "Wizard")
                 attach = next(c for c in commands if c[:2] == ["hdiutil", "attach"])
                 mount = attach[attach.index("-mountpoint") + 1]
                 self.assertEqual(Path(mount).name, labels[-1])
                 layout = next(c for c in commands if c[0] == "osascript")
-                rename = ["diskutil", "rename", mount, "Try Omarchy"]
+                rename = ["diskutil", "rename", mount, "Wizard"]
                 self.assertEqual(layout[2:], [mount, self.app.name])
                 self.assertLess(commands.index(layout), commands.index(rename))
                 self.assertLess(commands.index(rename),

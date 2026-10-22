@@ -28,6 +28,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -248,7 +249,7 @@ async def hermes(method: str, path: str, body: Any = None, *, timeout: float = 2
 async def shell(method: str, path: str, body: Any = None, *, timeout: float = 60,
                 headers: dict[str, str] | None = None) -> tuple[int, Any]:
     """The Agent Service API (what Wizard UX itself calls), on the VM's loopback."""
-    all_headers = {"Content-Type": "application/json", **(headers or {})}
+    all_headers = {"Content-Type": "application/json", "Host": urlsplit(PUBLIC_UX_ORIGIN).netloc, **(headers or {})}
     return await _request(method, f"{SHELL_ORIGIN}{path}", body, all_headers, timeout)
 
 
@@ -650,6 +651,78 @@ async def post_finish(_: web.Request) -> web.Response:
     return web.json_response({"target": f"{PUBLIC_UX_ORIGIN}{UX_PATH}?session={session_id}", **public_state()})
 
 
+# ── Bring My Hermes into Wizard (an existing Hermes's own `hermes backup` zip) ──
+# The Mac posts the zip here (127.0.0.1:48030, Mac loopback only). Browsers can't: the custom header forces a CORS
+# preflight this server never answers, and cross-site mutations are refused above. The zip holds sign-ins, so it is
+# streamed into a root-only folder, never the shared Files folder, and deleted when the import ends.
+IMPORT_TOOL = "/opt/wizard/bin/wizard-import-hermes"
+IMPORT_DIR = Path("/var/lib/wizard/agent-import-incoming")
+IMPORT_MAX = 64 << 30
+_import_lock = asyncio.Lock()
+
+
+def _import_headers_ok(request: web.Request) -> bool:
+    return request.headers.get("X-Wizard-Import") == "hermes-backup" and request.headers.get("Origin") is None
+
+
+async def _run_importer(*args: str, timeout: float = 3600) -> tuple[int, dict]:
+    proc = await asyncio.create_subprocess_exec("sudo", "-n", IMPORT_TOOL, *args, stdin=asyncio.subprocess.DEVNULL,
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    line = (out.decode(errors="replace").strip().splitlines() or [""])[-1]
+    try:
+        return proc.returncode or 0, json.loads(line)
+    except ValueError:
+        return proc.returncode or 1, {"ok": False, "error": "importer_no_reply"}
+
+
+async def post_agent_import(request: web.Request) -> web.Response:
+    if not _import_headers_ok(request):
+        return json_error("Send the backup with X-Wizard-Import: hermes-backup.", 403)
+    size = request.content_length or 0
+    if not 0 < size <= IMPORT_MAX:
+        return json_error("Backup size missing or too large.", 413)
+    if _import_lock.locked():
+        return json_error("An import is already running.", 409)
+    async with _import_lock:
+        await asyncio.to_thread(subprocess.run, ["sudo", "-n", "install", "-d", "-o", "wizard", "-g", "wizard",
+                                                 "-m", "0700", str(IMPORT_DIR)], check=True)
+        dst = IMPORT_DIR / f"hermes-backup-{secrets.token_hex(6)}.zip"
+        try:
+            fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            got = 0
+            with os.fdopen(fd, "wb") as fh:
+                async for chunk in request.content.iter_chunked(1 << 20):
+                    got += len(chunk)
+                    if got > size:
+                        return json_error("Backup larger than announced.", 400)
+                    fh.write(chunk)
+            if got != size:
+                return json_error(f"Backup ended early ({got} of {size} bytes).", 400)
+            code, result = await _run_importer("file", str(dst))
+            return web.json_response(result, status=200 if result.get("ok") else 500)
+        finally:
+            dst.unlink(missing_ok=True)
+
+
+async def post_agent_import_undo(request: web.Request) -> web.Response:
+    if not _import_headers_ok(request):
+        return json_error("Send X-Wizard-Import: hermes-backup.", 403)
+    if _import_lock.locked():
+        return json_error("An import is already running.", 409)
+    async with _import_lock:
+        code, result = await _run_importer("undo")
+    return web.json_response(result, status=200 if result.get("ok") else 500)
+
+
+async def get_agent_import(_: web.Request) -> web.Response:
+    code, result = await _run_importer("status", timeout=30)
+    last = (result or {}).get("last") or {}
+    return web.json_response({"running": _import_lock.locked(),
+                              "last": {k: last.get(k) for k in ("stamp", "complete", "undone", "disabled_messaging",
+                                                                 "paused_jobs", "sessions_after")} if last else None})
+
+
 def build_app() -> web.Application:
     app = web.Application(client_max_size=8 * 1024 * 1024, middlewares=[same_origin_mutations])
     app.add_routes([
@@ -668,6 +741,9 @@ def build_app() -> web.Application:
         web.post("/api/brain/chatgpt/cancel", post_codex_cancel),
         web.post("/api/verify", post_verify),
         web.post("/api/finish", post_finish),
+        web.post("/api/agent-import", post_agent_import),
+        web.post("/api/agent-import/undo", post_agent_import_undo),
+        web.get("/api/agent-import", get_agent_import),
         web.static("/static", STATIC),
     ])
     # Import by file so source-loaded contract tests and the systemd entrypoint use

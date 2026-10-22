@@ -164,7 +164,9 @@ virgl_sha256=065bc56e89e6f631f96101cd62eba0748e48eb888b434edc86e89d05395e76f3
 virgl_tap_root=homebrew-virglrenderer-1.0.42
 virgl_tap_archive_name="$virgl_tap_root.tar.gz"
 virgl_tap_url="https://codeload.github.com/startergo/homebrew-virglrenderer/tar.gz/refs/tags/v1.0.42"
-virgl_tap_sha256=950273fbba46905b6112ee2bd0598c1da706c25319a7347058cbc52f04ba96dd
+# Upstream re-pointed tag v1.0.42 on 2026-10-18 (e7daef1 -> de31b78); the only change is
+# .github/workflows/bottle.yml, so the formula is identical. Hash is for the de31b78 archive.
+virgl_tap_sha256=43831461ece8c8bc821e717632a9d3c297010338ceb50738bc1c88b1d8c02f02
 pyyaml_root=pyyaml-6.0.3
 pyyaml_archive_name="$pyyaml_root.tar.gz"
 pyyaml_url="https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/$pyyaml_archive_name"
@@ -246,11 +248,14 @@ if [[ -n $archive_cache ]]; then
     die "--archive-dir must name a regular directory: $archive_cache"
 fi
 
+scratch_root=${TMPDIR:-/private/tmp}
+scratch_root=${scratch_root%/}
+[[ $scratch_root == /* && -d $scratch_root ]] || die "TMPDIR must name an absolute directory"
 work_dir=
 remove_work_dir() {
   local path=$1
   [[ -n $path && ( -e $path || -L $path ) ]] || return 0
-  [[ $path == /private/tmp/omarchy-qemu-source-build.* ]] || \
+  [[ $path == "$scratch_root"/omarchy-qemu-source-build.* ]] || \
     die "refusing to remove unexpected scratch path: $path"
   rm -rf -- "$path"
 }
@@ -267,7 +272,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-work_dir=$(mktemp -d /private/tmp/omarchy-qemu-source-build.XXXXXX)
+work_dir=$(mktemp -d "$scratch_root/omarchy-qemu-source-build.XXXXXX")
 archive_dir="$work_dir/archives"
 listing_dir="$work_dir/listings"
 source_parent="$work_dir/source"

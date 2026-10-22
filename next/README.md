@@ -92,7 +92,7 @@ is a QA hook with no setup callback for an already installed guest, not evidence
 complete user-facing OS-update workflow. `qa-fresh.sh` (env `FEED_URL` / `FEED_DIR`),
 `qa-file-parts.sh` and `qa-capacity.sh` are destructive to the local QA Wizard: back it
 up first. Thales QA state is retained under
-`/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`
+`$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/backup-prior-wizard-state`
 and `…/backup-qa-checkpoints-20261012`. See `QA-0.2.3.md` for what ran.
 
 **Known blocker:** the fresh Hermes agent does not have the installed apps' MCP
@@ -129,7 +129,7 @@ offline provisioned disk, but changes to the overlay must be injected and checke
 beforehand (or rebuild from base). Never accept a failed fsck through `|| true`.
 
 All sustained build/VM acceptance work for this project runs on Thales, queued
-behind `/Volumes/ThalesMedia/AndroidBuilds/worker.lock`; Telos is the source/control
+behind `$WIZARD_WORK_ROOT/AndroidBuilds/worker.lock`; Telos is the source/control
 plane. The measured timings are observations, not promises on another machine.
 
 ## Layout

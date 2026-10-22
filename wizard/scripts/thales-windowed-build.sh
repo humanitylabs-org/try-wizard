@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Windowed rebuild on Thales: patch fork -> rebuild QEMU runtime (Cocoa edit) -> app -> headless DMG.
 # Guest image is reused unchanged, so existing Wizards keep their disk.
 set -uo pipefail
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 bash ~/wd-heal.sh >/dev/null 2>&1 || true
 source "$D/env.sh"
 mkdir -p "$D/tmp"

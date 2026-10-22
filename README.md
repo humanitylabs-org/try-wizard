@@ -55,3 +55,17 @@ Prototype 0.1.1. Verified on a Mac mini: clean install from DMG, onboarding to f
 ## Credits and license
 
 MIT, inherited from Try Omarchy (see `LICENSE`, `THIRD_PARTY_NOTICES.md`). The Omarchy name and mark belong to their owners; the Wizard build replaces them with its own name and icon.
+
+## Portable QA configuration
+
+Set `WIZARD_WORK_ROOT` to your work disk for build, VM and QA data; Python/local
+smokes default to `${TMPDIR:-/tmp}/wizard-work`, while disk-heavy Mac shell
+scripts require it explicitly. Remote staging requires `WIZARD_BUILD_HOST`
+(no default). Never put personal mount paths or SSH aliases in tracked scripts.
+Use `HERMES_HOME` (default `$HOME/.hermes`) for Hermes state. Source checkouts in
+local smoke scripts can be selected with `WIZARD_UX_DIR` and
+`WIZARD_SETUP_SCRIPT`; capture these before the disposable smoke `HOME` is set.
+
+The tracked-file portable-paths guard runs first in `make test-contracts` (also
+part of `make test` / CI). Run it alone on Linux with
+`python3 tests/test-portable-paths.py`. Native Swift/VM checks still need macOS.

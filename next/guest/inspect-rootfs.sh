@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Read-only breakdown of a Wizard OS factory rootfs: per-image sizes, volumes, app data, models.
 # usage (Thales): bash inspect-rootfs.sh <dir containing rootfs.img>
 set -u
-. /Volumes/ThalesMedia/Projects/wizard-desktop/env.sh >/dev/null 2>&1
+. "$WIZARD_WORK_ROOT/Projects/wizard-desktop/env.sh" >/dev/null 2>&1
 W=${1:?dir}
 colima ssh -p wb -- sudo bash -s "$W" <<'EOF'
 set -u

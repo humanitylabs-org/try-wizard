@@ -1,4 +1,6 @@
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import threading
@@ -6,8 +8,12 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-agent = SourceFileLoader("onepassword_touch_id_agent", str(
-    ROOT / "native-overlay/usr/local/lib/try-omarchy/onepassword-touch-id-agent")).load_module()
+LOADER = SourceFileLoader("onepassword_touch_id_agent", str(
+    ROOT / "native-overlay/usr/local/lib/try-omarchy/onepassword-touch-id-agent"))
+SPEC = spec_from_loader(LOADER.name, LOADER)
+agent = module_from_spec(SPEC)
+sys.modules[LOADER.name] = agent
+LOADER.exec_module(agent)
 
 
 class OnePasswordAuthorizationTests(unittest.TestCase):

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Wizard quick update: swaps in a new Wizard.app but keeps the 1.8 GB Linux image
 # already on this Mac, so only the small app part is downloaded.
-# Usage: curl -fsSL https://private.wizard001.com/reports/wizard-desktop/update.sh | bash
+# Export WIZARD_UPDATE_BASE to the release directory before running:
+# curl -fsSL "$WIZARD_UPDATE_BASE/update.sh" | bash
 set -euo pipefail
-BASE=${WIZARD_UPDATE_BASE:-https://private.wizard001.com/reports/wizard-desktop}
+: "${WIZARD_UPDATE_BASE:?Set WIZARD_UPDATE_BASE to the release directory URL}"
+BASE=${WIZARD_UPDATE_BASE%/}
 VER=__VER__
 SHA=__SHA__
 APP=${WIZARD_APP:-/Applications/Wizard.app}

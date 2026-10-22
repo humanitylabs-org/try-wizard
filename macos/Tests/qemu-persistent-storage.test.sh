@@ -884,8 +884,8 @@ assert test -d "$newline_stage"
 assert test -f "$newline_stage/$newline_entry"
 qemu_persistent_storage_release_lock
 
-# The production default is branded for Try Omarchy and never recreates the
-# former Omarchy-only Application Support path.
+# The production default is branded for Wizard. Retired Try Omarchy storage
+# stays untouched and the former Omarchy-only path is not recreated.
 saved_state_root=$OMARCHY_QEMU_GPU_STATE_ROOT
 saved_home=$HOME
 saved_multi_disk=$OMARCHY_QEMU_GPU_DEVELOPMENT_MULTI_DISK
@@ -909,7 +909,7 @@ qemu_persistent_storage_select \
   persistent "$identity_a" "$source_disk" "$source_sha" "$source_bytes" ''
 assert_eq \
   "$QEMU_SELECTED_DISK" \
-  "$default_home/Library/Application Support/Try Omarchy/VM/v1/disks/current/rootfs.ext4"
+  "$default_home/Library/Application Support/Wizard/VM/v1/disks/current/rootfs.ext4"
 assert test -f "$old_branded_root/sentinel"
 assert test ! -e "$default_home/Library/Application Support/Omarchy"
 qemu_persistent_storage_release_lock

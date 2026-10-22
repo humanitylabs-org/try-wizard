@@ -8,6 +8,8 @@ import hashlib
 import io
 from contextlib import redirect_stdout
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+import sys
 import json
 from pathlib import Path
 import socket
@@ -23,7 +25,11 @@ BROKER_PATH = (
     GUEST
     / "native-overlay/usr/local/lib/try-omarchy/native-authentication-broker"
 )
-broker = SourceFileLoader("native_authentication_broker", str(BROKER_PATH)).load_module()
+LOADER = SourceFileLoader("native_authentication_broker", str(BROKER_PATH))
+SPEC = spec_from_loader(LOADER.name, LOADER)
+broker = module_from_spec(SPEC)
+sys.modules[LOADER.name] = broker
+LOADER.exec_module(broker)
 
 
 class NativeAuthenticationProtocolTests(unittest.TestCase):

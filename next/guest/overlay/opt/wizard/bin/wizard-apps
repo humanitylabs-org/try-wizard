@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "wizard-app-manager"))
-from wam import cli  # noqa: E402
+from wam import cli, fresh_agent  # noqa: E402
 
 LATER = ["transcriber", "browser", "wizard-ai-accounts"]   # installed after first launch / on first use
 VOICE = "transcriber"
@@ -111,6 +111,10 @@ def factory(hermes_image: str | None) -> None:
         p = c.runtipi_root / "app-data" / cli.STORE / app
         if p.exists():
             subprocess.run(["sudo", "rm", "-rf", str(p)], check=True)
+    subprocess.run(['sudo', '/opt/wizard/bin/wizard-product-configure'], check=True)
+    product = fresh_agent.main(c, 'connect')
+    if not product.get('ok'):
+        raise RuntimeError('Wizard product runtime connection failed')
     cli.write_registry(c, rt)
     say("prune", docker("image", "prune", "-af").stdout.strip().splitlines()[-1:])
     docker("builder", "prune", "-af")
@@ -123,10 +127,12 @@ def engine_container(app: str) -> str:
 
 def shared_vm_terminal(c, rt) -> None:
     """Stock Hermes terminal backend `ssh` to wizard@wizard-vm: commands and file tools run in this VM, where the agent
-    can install what a project needs (sudo, apt, docker). The key is made per box by wizard-firstboot."""
+    can install what a project needs (sudo, apt, docker). The key is made per box by wizard-firstboot in
+    ~/.wizard-os/agent-ssh, which wam mounts read-only at /opt/agent-ssh (outside the app's data folder, which Runtipi
+    chmods a+rwx on every start)."""
     cid = engine_container("hermes-agent")
     for k, v in [("terminal.backend", "ssh"), ("terminal.ssh_host", "wizard-vm"), ("terminal.ssh_user", "wizard"),
-                 ("terminal.ssh_port", "22"), ("terminal.ssh_key", "/opt/data/.ssh-vm/id_ed25519"), ("terminal.cwd", "~")]:
+                 ("terminal.ssh_port", "22"), ("terminal.ssh_key", "/opt/agent-ssh/id_ed25519"), ("terminal.cwd", "~")]:
         r = docker("exec", "-u", "1000:1000", "-e", "HERMES_HOME=/opt/data", cid, "/opt/hermes/.venv/bin/hermes", "config", "set", k, v)
         if r.returncode != 0:
             raise SystemExit(f"hermes config set {k}: {(r.stderr or r.stdout).strip()[-300:]}")

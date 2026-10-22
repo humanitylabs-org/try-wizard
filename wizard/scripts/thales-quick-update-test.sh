@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Test the quick-update path on Thales: serve the app tarball locally, update the installed 0.1.1
 # in ~/Applications, launch, and check the window is free-form and a normal size.
 set -uo pipefail
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 cd "$D/try-omarchy/dist" || exit 1
 python3 -m http.server 18777 --bind 127.0.0.1 >/dev/null 2>&1 &
 SRV=$!

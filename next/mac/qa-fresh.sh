@@ -1,4 +1,5 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Fresh-install acceptance on a real Mac (Thales), Wizard OS 0.2 stack:
 #   wipe Wizard OS + prefs -> install Wizard.app from the DMG -> "On this Mac" -> "Keep files in ~/Wizard?" ->
 #   download Wizard OS from a feed (local http server with the built image: the real download + SHA-256 path) ->
@@ -7,7 +8,7 @@
 #
 #   qa-fresh.sh <Wizard-x.dmg> <wizard-os-x.tar.xz> [evidence dir]     (env FEED_URL / FEED_DIR: see feed below)
 set -u
-DMG=${1:?dmg}; OS=${2:?wizard-os tar.xz}; EV=${3:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/evidence/fresh}
+DMG=${1:?dmg}; OS=${2:?wizard-os tar.xz}; EV=${3:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/evidence/fresh}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 AS="$HOME/Library/Application Support/Wizard"
 APP="$HOME/Applications/WizardNext/Wizard.app"
