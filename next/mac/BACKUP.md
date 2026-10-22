@@ -27,6 +27,13 @@ requires an explicit confirmation that the original Wizard is off. Undo also war
 Wizard's active state will return. Long operations use a job ID, phase text and an indeterminate spinner;
 there is no invented percentage or unsafe cancellation during a restore.
 
+The engine may deliberately return exit **3** for a partial import when an app in the backup is newer than this
+box. The front door preserves `ok:false, partial:true` and projects only bounded app IDs and version labels,
+never raw engine messages. The Mac shows **Partly restored — kept paused**, names the refused apps, explains
+that their data here was left unchanged, and asks the owner to update this box before restoring again. It does
+not show the all-apps-arrived success text or offer immediate activation. Verification also displays known
+newer-app refusals. Other nonzero exit codes, and exit 3 for any operation other than import, remain failures.
+
 ## HTTP contract
 
 **Every** route, including reads, requires `X-Wizard-Backup: wizardbackup-v1`, refuses the presence
@@ -85,6 +92,7 @@ Pin the WAM and front-door revisions together in a release. No guest image rebui
 
 ## Verification
 
+- Install the HTTP test dependency in an isolated virtualenv with `python3 -m pip install -r next/guest/tests/requirements.txt`; CI does this before running the worker-locked suite.
 - `make test-backup` runs Swift contract tests and guest endpoint tests. The main `make test` delegates
   to `test-all`, which includes this target. It is separate from the legacy macOS helper's test target.
 - `python3 -m unittest discover -s next/guest/tests -v` includes real HTTP and controlled-subprocess

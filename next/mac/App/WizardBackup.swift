@@ -253,8 +253,13 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
             guard confirm("Restore this Wizard backup?", WizardBackupContract.summary(verified["result"] as? [String: Any] ?? [:]), action: "Restore Here") else {
                 _ = try? await client.call("jobs/\(id)", method: "DELETE"); return
             }
-            _ = try await wait(client.call("jobs/\(id)/import", method: "POST", body: ["secret": secret, "confirm": true]))
+            let imported = try await wait(client.call("jobs/\(id)/import", method: "POST", body: ["secret": secret, "confirm": true]))
             hideProgress(); didRestore()
+            let result = imported["result"] as? [String: Any] ?? [:]
+            if result["partial"] as? Bool == true {
+                alert("Partly restored — kept paused", WizardBackupContract.partialRestoreSummary(result)).runModal()
+                return  // Never offer immediate activation as if every app arrived.
+            }
             if alert("Restored — paused until you switch over", "Your agents, apps and files are here. Messaging, scheduled jobs and backups stay paused so they do not run alongside the original. Undo Last Restore puts back what was here.",
                      buttons: ["Keep Paused", "Make This My Active Wizard…"]).runModal() == .alertSecondButtonReturn {
                 try await activateConfirmed()

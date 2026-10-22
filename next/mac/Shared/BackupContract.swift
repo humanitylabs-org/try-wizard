@@ -29,6 +29,15 @@ enum WizardBackupContract {
         return "\(slug.isEmpty ? "Wizard" : slug)-\(formatter.string(from: date)).wizardbackup"
     }
 
+    static func refusedApps(_ result: [String: Any]) -> String {
+        let refused = result["refused"] as? [[String: String]] ?? []
+        return refused.map { "\($0["id"] ?? "App"): backup \($0["backup"] ?? "unknown"), this box \($0["here"] ?? "unknown")" }.joined(separator: "\n")
+    }
+
+    static func partialRestoreSummary(_ result: [String: Any]) -> String {
+        "Some apps were not restored because their backups are newer than this box. Their data here was left unchanged.\n\n" + refusedApps(result) + "\n\nUpdate this box, then restore again. The rest arrived paused. Keep the original backup; Undo Last Restore puts back what was here."
+    }
+
     static func summary(_ result: [String: Any]) -> String {
         let agents = result["agents"] as? [String] ?? []
         let apps = result["apps"] as? [String] ?? []
@@ -42,6 +51,8 @@ enum WizardBackupContract {
         for (key, label) in [("install", "Restore apps (install if needed)"), ("replace", "Replace app data"), ("leave", "Leave unchanged")] {
             if let values = plan[key] as? [String], !values.isEmpty { lines.append(label + ": " + values.joined(separator: ", ")) }
         }
+        let refused = refusedApps(result)
+        if !refused.isEmpty { lines.append("Will not restore (backup is newer):\n" + refused + "\nUpdate this box, then restore again.") }
         if let warnings = result["warnings_count"] as? Int, warnings > 0 {
             lines.append("\(warnings) compatibility or omitted-file warnings. Review with wam backup verify before relying on this copy.")
         }

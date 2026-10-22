@@ -48,6 +48,19 @@ final class BackupContractTests: XCTestCase {
         }
     }
 
+    func testNewerAppRefusalIsVisibleBeforeAndAfterRestore() {
+        let result: [String: Any] = ["partial": true, "refused": [["id": "files", "backup": "3.0.0", "here": "2.0.0"]]]
+        let plan = WizardBackupContract.summary(result)
+        let partial = WizardBackupContract.partialRestoreSummary(result)
+        for text in ["files", "3.0.0", "2.0.0", "Update this box"] {
+            XCTAssertTrue(plan.contains(text), text)
+            XCTAssertTrue(partial.contains(text), text)
+        }
+        XCTAssertTrue(partial.contains("left unchanged"))
+        XCTAssertTrue(partial.contains("paused"))
+        XCTAssertFalse(partial.contains("Your agents, apps and files are here"))
+    }
+
     func testWarningIsVisibleAndEmptyPlanIsSafe() {
         XCTAssertTrue(WizardBackupContract.summary(["warnings_count": 2]).contains("2 compatibility"))
         XCTAssertTrue(WizardBackupContract.summary([:]).contains("0 agents"))

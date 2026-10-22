@@ -55,6 +55,9 @@ else:
         'files': {'bytes': 1234, 'count': 3}, 'secret_config': secret},
         'plan': {'install':['app-one'], 'replace':[], 'leave':[], 'agents':['agent-one', 'agent-two'], 'warnings':[]},
         'entries':12, 'content_bytes':3456, 'stamp':'fixture', 'digest_match': True}
+if secret == 'partial-secret':
+    r = {'ok': False, 'partial': True, 'refused': [{'id':'files', 'backup': {'version':'3.0.0'}, 'here': {'version':'2.0.0'}, 'message': secret}], 'error': secret}
+    print(json.dumps(r)); sys.exit(3)
 print(json.dumps(r))
 '''
 
@@ -170,6 +173,36 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((folder / "bundle.wizardbackup").exists())
         self.assertEqual([p.name for p in folder.iterdir()], ["receipt.json"])
         self.assertNotIn(SECRET, (folder / "receipt.json").read_text())
+
+    async def test_exit_three_is_a_visible_partial_import_not_full_success(self):
+        j = await self.upload()
+        path = "jobs/" + j["id"]
+        await self.finish(await self.post(path + "/verify", {"secret": SECRET}))
+        done = await self.finish(await self.post(path + "/import", {"secret": "partial-secret", "confirm": True}))
+        self.assertEqual(done["state"], "complete")
+        self.assertEqual(done["phase"], "Partly restored; update this box")
+        self.assertFalse(done["result"]["ok"])
+        self.assertTrue(done["result"]["partial"])
+        self.assertEqual(done["result"]["refused"], [{"id":"files", "backup":"3.0.0", "here":"2.0.0"}])
+        folder = self.door.root / j["id"]
+        self.assertFalse((folder / "bundle.wizardbackup").exists())
+        self.assertFalse(list(folder.glob("key-*")))
+        self.assertNotIn("partial-secret", json.dumps(done))
+        self.assertNotIn("partial-secret", (folder / "receipt.json").read_text())
+
+    async def test_exit_three_is_not_accepted_for_other_operations(self):
+        j = await self.upload()
+        done = await self.finish(await self.post("jobs/" + j["id"] + "/verify", {"secret": "partial-secret"}))
+        self.assertEqual(done["state"], "failed")
+        self.assertNotIn("partial-secret", json.dumps(done))
+
+    def test_refusal_projection_never_carries_raw_engine_prose(self):
+        raw = {"plan": {"refused": [{"id":"files", "backup":{"version":"3.0.0", "secret":"private"},
+               "here":{"version":"2.0.0"}, "message":"private engine error", "config":"private"},
+               {"id":"../private", "backup":{"version":"private/path"}}]}}
+        projected = door_module.public_result("verify", raw)
+        self.assertEqual(projected["refused"], [{"id":"files", "backup":"3.0.0", "here":"2.0.0"}])
+        self.assertNotIn("private", json.dumps(projected))
 
     async def test_failure_key_not_in_logs_status_receipt_or_argv(self):
         logs = io.StringIO(); handler = logging.StreamHandler(logs); logging.getLogger().addHandler(handler)

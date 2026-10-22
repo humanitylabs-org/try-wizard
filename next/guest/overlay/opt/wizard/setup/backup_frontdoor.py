@@ -66,9 +66,23 @@ def redact_strings(value, secret):
     return value
 
 
+def public_refusals(rows):
+    """Only bounded app IDs and version labels cross the native boundary, never engine prose."""
+    result = []
+    for row in rows[:1000] if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,62}", str(row.get("id", ""))):
+            continue
+        clean = {"id": row["id"]}
+        for key in ("backup", "here"):
+            version = (row.get(key) or {}).get("version") if isinstance(row.get(key), dict) else None
+            clean[key] = str(version)[:80] if version is not None and re.fullmatch(r"[0-9A-Za-z.+_-]{1,80}", str(version)) else "unknown"
+        result.append(clean)
+    return result
+
+
 def public_result(op, raw):
     """Project only the contract's owner-safe fields; never return raw error/manifest/config."""
-    result: dict = {"ok": True}
+    result: dict = {"ok": raw.get("ok", True), "partial": raw.get("partial") is True}
     for key in ("bytes", "entries", "content_bytes", "seconds", "stamp", "digest_match"):
         if key in raw:
             result[key] = raw[key]
@@ -80,6 +94,7 @@ def public_result(op, raw):
     result["files"] = {k: files.get(k, 0) for k in ("count", "bytes")}
     plan = raw.get("plan") or {}
     result["plan"] = {k: plan.get(k, []) for k in ("install", "replace", "leave", "agents")}
+    result["refused"] = public_refusals(raw.get("refused") or plan.get("refused") or [])
     # Warn about omitted entries without echoing filenames or stderr (which may be confidential).
     result["warnings_count"] = len(plan.get("warnings") or []) + len(raw.get("skipped_links") or []) + int(raw.get("skipped_in_apps_count") or 0) + len(raw.get("changed_while_reading") or [])
     return result
@@ -171,7 +186,10 @@ class BackupDoor:
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout)
                 raw = json.loads(out)
-                if proc.returncode or not isinstance(raw, dict) or not raw.get("ok", True):
+                partial = (args[0] == "import" and proc.returncode == 3 and isinstance(raw, dict)
+                           and raw.get("ok") is False and raw.get("partial") is True
+                           and isinstance(raw.get("refused"), list) and bool(raw["refused"]))
+                if not partial and (proc.returncode or not isinstance(raw, dict) or not raw.get("ok", True)):
                     raise ValueError("Engine refused")
                 return raw
             finally:
@@ -329,7 +347,7 @@ class BackupDoor:
                 path.chmod(0o600)
                 done = {"sha256": await asyncio.to_thread(digest, path), "total_bytes": path.stat().st_size}
             j.update(result=result, state="verified" if op == "verify" else "complete",
-                     phase="Verified" if op == "verify" else "Finished", **done)
+                     phase="Verified" if op == "verify" else ("Partly restored; update this box" if result["partial"] else "Finished"), **done)
             if op == "undo" and raw.get("digest_match") is not True:
                 j.update(state="failed", error="Undo finished with differences. Keep both copies until these are checked.")
         except (Exception, asyncio.CancelledError):
