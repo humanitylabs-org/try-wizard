@@ -619,9 +619,11 @@ async def post_verify(_: web.Request) -> web.Response:
     return web.json_response({"reply": text, **public_state()})
 
 
+# The owner's first message (shown in the Setup preview bubble too). The agent's `wizard-guide` system skill answers
+# it: a short hello, three things to try, and the offer of one Wizard tip a day for five days (wizard_tips).
 FIRST_TASK = (
-    "Hi {name}! Tell me in a few friendly sentences who you are and which apps you can use on this computer "
-    "(check your tools), then where my files live."
+    "Hi {name}! I'm new to Wizard. Say hello in a couple of sentences, show me three things I can try right now, "
+    "and ask if I'd like a quick Wizard tip each day for the next five days."
 )
 
 
