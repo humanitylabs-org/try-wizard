@@ -28,12 +28,12 @@
     },
     "wizard-agent-service": {
       "repo": "humanitylabs-org/wizard-agent-service",
-      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "commit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
       "review": "draft candidate; not promoted"
     },
     "wizard-ux": {
       "repo": "humanitylabs-org/wizard-ux",
-      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "commit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
       "review": "draft candidate; not promoted"
     }
   },
@@ -42,14 +42,14 @@
       "app": "wizard-ux",
       "repo": "humanitylabs-org/wizard-ux",
       "index_version": "0.3.0-candidate.20261012",
-      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "commit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
       "note": "RC source selection; replacement candidate image must be built before provisioning"
     },
     "agent-service": {
       "app": "wizard-agent-service",
       "repo": "humanitylabs-org/wizard-agent-service",
       "index_version": "0.3.0-candidate.20261012",
-      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "commit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
       "note": "RC source selection; replacement candidate image must be built before provisioning"
     },
     "agent": {
@@ -167,26 +167,18 @@
   },
   "candidateImagePolicy": {
     "wizard-app-manager": {
-      "mode": "reuse-stable-image-only-if-image-inputs-identical",
+      "mode": "build-from-pinned-source-with-trust-remediation",
       "sourceCommit": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
-      "imageSourceCommit": "db4325adcb6ff93de70f760c8b584c93a71f058f",
-      "imageInputs": [
-        "packages/**",
-        "Dockerfile",
-        "package.json",
-        "bun.lock",
-        "turbo.json",
-        ".github/workflows/image.yml"
-      ]
+      "digest": null
     },
     "wizard-agent-service": {
       "mode": "build-from-pinned-source",
-      "sourceCommit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "sourceCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
       "digest": null
     },
     "wizard-ux": {
       "mode": "build-from-pinned-source",
-      "sourceCommit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "sourceCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
       "digest": null
     }
   },

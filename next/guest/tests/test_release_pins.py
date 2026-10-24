@@ -75,7 +75,9 @@ class ReleasePins(unittest.TestCase):
     def test_download_verified_before_initial_execution(self):
         s = (ROOT / 'overlay/opt/wizard/bin/wizard-provision').read_text()
         self.assertLess(s.index('sha256sum -c -'), s.index('bash /tmp/os.sh'))
-        self.assertIn('WAM_REF="$WAM_COMMIT"', s)
+        self.assertIn('-u WAM_REF WIZARD_RELEASE="$WIZARD_RELEASE"', s)
+        self.assertIn('WIZARD_STRICT=1', s)
+        self.assertNotIn('WAM_REF="$WAM_COMMIT"', s)
         self.assertNotIn('https://aiwizards.com/os.sh', s)
         self.assertNotIn('checkout -q', s)
 

@@ -7,6 +7,8 @@ exec > >(tee -a /var/log/wizard-provision.log) 2>&1
 P=/var/lib/wizard/provision.env           # written by build-image.sh: pins
 [ -r "$P" ] && . "$P"
 WAM_COMMIT="${WAM_COMMIT:-}"
+WIZARD_RELEASE="${WIZARD_RELEASE:?frozen Wizard OS release required}"
+WIZARD_RELEASE_BASE="${WIZARD_RELEASE_BASE:?immutable local release base required}"
 WAM_IMAGE="${WAM_IMAGE:-}"
 OS_SH_URL="${OS_SH_URL:?pinned os.sh URL required}"
 OS_SH_SHA256="${OS_SH_SHA256:?pinned os.sh sha256 required}"
@@ -42,12 +44,12 @@ stamp network
 # then runs get.sh as that user: clone wizard-app-manager main, install.sh (Runtipi box-only, wam, defaults).
 curl -fsSL "$OS_SH_URL" -o /tmp/os.sh || fail "download os.sh"
 printf '%s  %s\n' "$OS_SH_SHA256" /tmp/os.sh | sha256sum -c - || fail "os.sh digest mismatch (not executed)"
-WAM_REF="$WAM_COMMIT" WIZARD_MODE=fresh WAM_IMAGE="$WAM_IMAGE" WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
+env -u WAM_IMAGE -u WIZARD_SHELL_IMAGE -u WIZARD_UX_IMAGE -u WIZARD_AGENT_SERVICE_IMAGE -u WAM_REF WIZARD_RELEASE="$WIZARD_RELEASE" WIZARD_RELEASE_BASE="$WIZARD_RELEASE_BASE" WIZARD_STRICT=1 WIZARD_MODE=fresh WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
 stamp os_sh
-# Verify the one-liner actually honored its immutable WAM_REF; never run mutable main as a first pass.
+# Verify the release selected its immutable WAM commit before any Mac layers.
 if [ -n "$WAM_COMMIT" ]; then
   head=$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD)
-  [ "$head" = "$WAM_COMMIT" ] || fail "os.sh did not install the selected WAM_REF"
+  [ "$head" = "$WAM_COMMIT" ] || fail "os.sh did not install the frozen release WAM commit"
 fi
 stamp pinned
 # Wait until every default app answers (bootstrap installs them in the background of Runtipi's queue).

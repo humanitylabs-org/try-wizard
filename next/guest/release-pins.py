@@ -44,7 +44,9 @@ def shell(path):
     p, s = load(path)
     env = {'VERSION': p['factory']['version'], 'WAM_COMMIT': s['wam'],
            'WAM_IMAGE': p['runtimeBuild']['wamImage'], 'HERMES_IMAGE': p['runtimeBuild']['hermesImage'],
-           'OS_SH_URL': p['osInstaller']['url'], 'OS_SH_SHA256': p['osInstaller']['sha256']}
+           'OS_SH_URL': p['osInstaller']['url'], 'OS_SH_SHA256': p['osInstaller']['sha256'],
+           'WIZARD_RELEASE': json.loads((Path(path).parent / p['wizardOsCandidate']['path']).read_text())['version'],
+           'WIZARD_RELEASE_BASE': 'file:///var/lib/wizard/frozen-release'}
     return '\n'.join(k + '=' + shlex.quote(v) for k, v in env.items())
 
 

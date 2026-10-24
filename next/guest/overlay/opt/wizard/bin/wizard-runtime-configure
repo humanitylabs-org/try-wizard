@@ -7,7 +7,9 @@ from pathlib import Path
 import yaml
 ROOT=Path('/home/wizard/runtipi')
 OS=ROOT/'app-data/wizard-os'
-CONF=ROOT/'user-config/wizardapps/wizard-shell/docker-compose.yml'
+# Frozen-release factory uses the split Service; retained installed guests keep their existing topology.
+SERVICE_APP='wizard-agent-service' if (ROOT/'user-config/wizardapps/wizard-agent-service/docker-compose.yml').is_file() else 'wizard-shell'
+CONF=ROOT/('user-config/wizardapps/'+SERVICE_APP+'/docker-compose.yml')
 def run(args):return subprocess.check_output(args,text=True).strip()
 def container(service):
  ids=run(['docker','ps','-q','--filter','label=com.docker.compose.service='+service]).split()
@@ -53,7 +55,7 @@ def main():
   from managed_maintenance import ManagedMaintenance
   ManagedMaintenance('/var/lib/wizard/managed')
  if sys.argv[1:]==['--secrets-only']:return
- engine=container('hermes-agent-engine');service=container('wizard-shell')
+ engine=container('hermes-agent-engine');service=container(SERVICE_APP)
  image=managed['image'] if managed else engine['Image']
  meta=json.loads(run(['docker','image','inspect',image]))[0]
  if meta['Architecture']!='arm64':raise SystemExit('arm64 stock image required')
@@ -65,10 +67,10 @@ def main():
  for p in [OS/'agents',OS/'runtime-secrets',ROOT/'app-data/wizardapps/wizard-shell/data/upload-staging'] :mkdir(p)
  for name in ['runtime-token','delivery-token']:token(OS/'runtime-secrets'/name)
  # Keep the recipient's existing state paths and all other overlay keys.
- doc=yaml.safe_load(CONF.read_text());svc=doc['services']['wizard-shell'];env=svc.setdefault('environment',{})
+ doc=yaml.safe_load(CONF.read_text());svc=doc['services'][SERVICE_APP];env=svc.setdefault('environment',{})
  env.update({'WIZARD_AGENTS_DIR':'/wizard-agents','WIZARD_AGENT_RUNTIME_URL':'http://wizard-app-lifecycle:7796',
   'WIZARD_AGENT_RUNTIME_TOKEN_FILE':'/wizard-runtime/runtime-token','WIZARD_AGENT_DELIVERY_TOKEN_FILE':'/wizard-runtime/delivery-token',
-  'WIZARD_AGENT_UPSTREAM':'network','WIZARD_AGENT_GATEWAY_URL':'http://wizard-shell:8787/wizard/mcp',
+  'WIZARD_AGENT_UPSTREAM':'network','WIZARD_AGENT_GATEWAY_URL':'http://'+SERVICE_APP+':8787/wizard/mcp',
   'WIZARD_UPLOAD_STATE_PATH':'/state/uploads.sqlite3','WIZARD_UPLOAD_STAGING_DIR':'/state/upload-staging',
   'WIZARD_UPLOAD_RESERVE_BYTES':'1073741824','WIZARD_USER_FILES_ROOT':'/media','WIZARD_USER_FILES_INDEX_PATH':'/state/user-files.json',
   'WIZARD_MEDIA_ROOT':'/media','WIZARD_MEDIA_AGENT_ROOT':'/media','WIZARD_FILES_ROOT':'/media',

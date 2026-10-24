@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--stage-root', type=Path, required=True)
     a = parser.parse_args()
     root = a.stage_root.resolve()
-    if sys.platform != 'darwin' or not root.is_relative_to(Path('/Volumes/ThalesMedia')):
+    if sys.platform != 'darwin' or not root.is_relative_to(Path(os.environ.get('THALES_MEDIA','/unconfigured-external-media'))):
         raise SystemExit('Use the Thales external-volume worker')
     checks = root / 'source-checks'
     checks.mkdir(exist_ok=False)

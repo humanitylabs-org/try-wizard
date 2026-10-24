@@ -24,7 +24,7 @@ The last assertion is broader than the visual behavior it is trying to protect. 
 
 ## Real Thales execution and screenshots
 
-Evidence root: `/Volumes/ThalesMedia/QA/mac-launch-472-review`.
+Evidence root: `$THALES_MEDIA/QA/mac-launch-472-review` (exact retained location in PR body).
 
 - `protected-assertions.log`: candidate three protected files, exit 1, seven failures.
 - `main-protected-assertions.log`: exact frozen-main three protected files, exit 0.
@@ -46,3 +46,7 @@ Human inspection of Nebula candidate/baseline confirms the central orb gains a w
 REUSE: existing `tools/qa-orb-desk-icon.cjs`, unchanged guard files and fixtures.
 EXTEND: review evidence and differential execution only.
 NEW: no UI implementation or parallel component.
+
+## Launch baseline decision (2026-10-24)
+
+Archimedes, owner of this launch, explicitly directs: live `8fa9804` is the accepted baseline; James's running install is the merge gate. The five owner hashes and two core dock assertions now accept that behavior. Core CSS is SHA-256 guarded, not exempted from regression testing. Source CSS/JS is unchanged by this acceptance. Screenshots above remain targeted phone-dock evidence, not whole-release acceptance.

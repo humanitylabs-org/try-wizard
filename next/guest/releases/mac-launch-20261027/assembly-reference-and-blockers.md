@@ -1,38 +1,69 @@
-# Assembly reference and exact engineering blockers
+# Build-307 retained-factory assembly adapter — launch input checkpoint
 
-## What the previous 0.7.0 / build-307 actually did
+## Recipe decision (launch owner instruction, 2026-10-24)
 
-Read on Thales under `Projects/wizard-desktop/mac-release-20261015` (external media):
+Do **not** wait for a new pins-only fresh factory. `assemble.py` clones the exact retained build-307/OS-0.4 factory, installs the frozen source RC with WAM #204, and applies the Mac-specific layers. It never calls `build-image.sh all` or rebuilds the Debian/Alpine factory base.
 
-| Retained reference | SHA-256 (small file read this turn) |
+The original 307 handoff prohibited rebuilding during that **older** release. It was provenance evidence, not a prohibition on this newly authorized significant release. Original v3/v4 freezes remain untouched.
+
+## Actual retained input, read back on Thales
+
+Relative to `$THALES_MEDIA/Projects/wizard-desktop/mac-release-20261015`:
+
+| Input | SHA-256 |
 |---|---|
-| `final-package/run-factory.py` | `1fbff60eed1cbba40962f124bc226b486f4f83fe594707c439a7286d66b7f2b2` |
-| `final-package/seal-factory.py` | `63ce063f842081b6a06cf6c7b799924f22f0cd29cddad04e9f478d6a445bd4e1` |
-| `final-package/wait-runtipi.py` | `85a3621b8970ac1b7a94b984cf94d90c341b83d88e3c4fc080b445f3404bb0d2` |
-| `final-package/factory/result.json` | `c226d9b7eaae2b6e22e0c621f527692130d93808d3cfbb79bccdc34cc5fa4406` |
-| `final-package/factory-sanitization.json` | `365cf030ded35349316f5f022b685f83e413c5fafc63f67c989d65c12967d972` |
-| `FINAL307-HANDOFF.md` | `2fac4a7e27bc870f96e3b34b287e4affebb5d8a6dca073e3470ab9dfb2a99e7b` |
+| `final-package/factory-publish-source/rootfs.img` (17,179,869,184 bytes) | `64ddc2b8123b3185668aab666cd93843a228d769a2ab55c68e64e00a4c1f1366` |
+| `final-package/factory-publish-source/boot/vmlinux` | `5028c424ee9fd0f4d18c38269122e30e3d084deb1b13404ab070a3f478ddd30a` |
+| `final-package/factory-publish-source/boot/initrd` | `b32a28fd79ea7cedea49520befe694f513fb35af53203074006a016128c3c06b` |
+| retained native-303 `Wizard Host` executable (disposable factory transport only) | `799b1618496aaa0aa7040c87913c0870662ecfde3a0a5a588f874015bf861bb0` |
 
-The retained factory runner is from the build-306 preparation, not a new build-307 factory rebuild. It cloned `guest-runtime/baseline-factory.img`, copied the retained boot checkpoint, booted an explicitly owned isolated host, mounted a shared payload, waited for Runtipi, applied `upgrade-mvp-stack.py`, refused any prior onboarding/accounts/sessions/agents, sealed identities and cleanly powered off. Receipt says `phase=sanitized`, host exited, original unchanged and lock released. Sources were native `f0a302329b39a8c14c028d70239543e062d0cb4f`, Service `24a2b3ac9e941c595bb60dc826b52c9308260c8e`, WAM `0696805fe000dfc616abd0cf772c52ff83d580d9`, UX `31bdc3ecb0586f61323b72227ab70506d2627e5d`.
+The complete 16-GiB rootfs SHA-256 was calculated this turn, not copied from an old receipt. Boot identities match the retained sealed manifest. `pins.json.assembly` records these inputs with portable `${THALES_MEDIA}` paths; the parent submit descriptors supply the exact mount. The old host is **not** relabelled as the new native candidate.
 
-The 307 handoff explicitly says **do not build a new VM/factory/native product** and **do not rebuild/re-publish OS 0.4.0**. It reuses retained runtime archives with matching sealed-manifest hashes in 306/307. It is not a missing standalone pins-only fresh bootstrap recipe waiting to be copied. Its old paths, payload sources, hard-coded localhost ports, candidate Host, baseline image and signing spec must not be relabeled as today's pins. No signer path or signing material was copied into this candidate.
+Retained scripts read as reference, not executed: `run-factory.py` `1fbff60eed1cbba40962f124bc226b486f4f83fe594707c439a7286d66b7f2b2`; `seal-factory.py` `63ce063f842081b6a06cf6c7b799924f22f0cd29cddad04e9f478d6a445bd4e1`; `wait-runtipi.py` `85a3621b8970ac1b7a94b984cf94d90c341b83d88e3c4fc080b445f3404bb0d2`.
 
-## Launch source/default set frozen, executable bootstrap not yet frozen
+## Implemented adapter
 
-`wizard-os-release-candidate.json` freezes the current stable **0.3.39**, read from WAM releases on 2026-10-24, plus exact reconciled WAM/Service/UX and proven portable Recorder selections. All eleven default rows have source commits. The old `wizard-os-stable.json` 0.3.38 remains historical context; it is not passed off as the current pointer.
+- Verify the base/boot/owned Host hashes, refuse occupied dev-shell ports and insufficient external-volume space, clone with APFS CoW, boot **only** the owned disposable data home.
+- Refuse account/onboarding/session/agent state before installing anything.
+- Generate a get.sh-compatible local release from actual pull-verified candidate image receipts; validate selected source commits/digests and the sha256-pinned archived `get.sh` before first execution.
+- Install with explicit `WIZARD_RELEASE`, immutable local `WIZARD_RELEASE_BASE`, `WIZARD_STRICT=1` and explicit image digests. Remove `WAM_REF` and inherited image overrides. Read back the WAM commit, installed release pins, strict `release.json` result, default-source verification and running core images.
+- Apply the frozen native overlay, selected Service agent-runtime package, managed-stock runtime contract, product plugin, import/phone/runtime wiring. `wizard-runtime-configure` supports the selected split Service and retains the old combined topology for existing guests.
+- Require TLS checks on the guest host and every running container; DNS/network errors are not evidence of revoked-chain rejection. Seal only the pristine guest, remove recipient identity/secrets, shut down cleanly, and exit only this spawned Host.
+- Offline fsck; check sealed machine identity/WAM source; zero free blocks while verifying allocated bytes remain identical; emit BOM/manifest and archive, then stream-read/hash its actual members.
 
-The RC is deliberately an **unpublished source assembly-input record**, not an executable `get.sh` release record. Existing stable image provenance is preserved in `bootstrapImages`; candidate Service/UX output digests remain null rather than invented. WAM's official image-input paths have zero diff from its recorded image source (`db4325a`) to candidate `7a1f0fdc`; the freeze specifies this reuse condition instead of relabeling a new image build. The shell/Service source changes cannot be attributed to the old stable image digests.
+The recipe's `--plan` and fail-closed source contracts have been exercised. **No clone, VM boot, get.sh install, container build, seal or package operation has been executed this turn.** Implementation is staged for the parent, not represented as a previously proven new guest build. Signing is unsigned/pluggable, with no signing material copied.
 
-## Remaining blockers, not a submit-ready build claim
+## Candidate images and source verification
 
-1. **Complete assembly adapter still absent (`pins.json.execution=null`).** It must consume pins.json, materialize exact source archives, build/select the candidate images, generate a validated local Wizard OS runtime release, build or verify a digest-pinned pristine factory base, boot only an owned disposable VM, apply all source/host/runtime overlays, install the pinned Recorder with explicit device policy, seal fresh identity, clean shutdown/fsck, produce BOM and sparse archive. Retained `run-factory.py` only supplies the older clone/apply/seal segment. No new unexercised wrapper is represented as a working assembly.
-2. **Bootstrap consumer still wrong.** `wizard-provision` invokes `get.sh` with `WAM_REF`, which explicitly chooses unpinned developer mode and bypasses release/default selection. Merely adding WIZARD_RELEASE while retaining WAM_REF does not fix it. Pass a validated generated release using WIZARD_RELEASE and a local immutable WIZARD_RELEASE_BASE, with no WAM_REF, then read back all default recipe and image identities. Source RC intent alone does not satisfy that contract.
-3. **Mutable build toolchain and external inputs.** Current guest Dockerfile uses `debian:trixie` and live apt; build-image.sh also uses mutable Alpine/Debian helpers. Existing runtime shell base is a local image ID, not a portable staged base-image archive. Installer code invokes additional Runtipi/catalog inputs that are not exhaustively digest-pinned. A pins-only invocation cannot honestly be called all-inputs pinned until these transitive inputs are frozen or replaced by a verified pristine base archive. No multi-GB guest/base image was hashed or rebuilt on this conversational turn.
-4. **84-row map now exists; not all rows ship.** `queue-mapping.json` identifies 59 source-carried rows, two superseded rows, one Android-only no-guest row and **22 not-fully-carried rows**. The latter are private/optional app recipes not selected, unproven legacy meeting-recorder equivalence, Service #64 absent from all three source allowlists, and image trust remediation. An explicit scoped exclusion is preferable to silently claiming a private app shipped. The mapping never converts ancestry to final guest acceptance.
-5. **Security and appearance admission remain open.** Queue security row 81 needs actual updated trust stores/base selections and revoked-chain/image execution evidence. UX #472 retains seven protected failures, with exact source/differential/screenshot analysis in ux-472-review.md. Neither live deployment nor a screenshot is owner baseline approval. Existing final guest and physical-device gates remain unrun.
+`package-image.py` has one parent-only light job per reconciled WAM/Service/UX image. It freezes external FROM manifests before building, records the rendered Dockerfile, updates trust stores, uses patched Node/Bun for WAM, runs real TLS checks, and pushes **by digest only** using an isolated ephemeral Docker config. It reads the exact digest back and pulls/inspects architecture/source labels before writing a receipt. It does not write `latest`, a version tag, a Git tag, an OS release or a feed. Existing GH package-write permission must actually work; a denied push is a failure, not a fake output.
 
-The guarded heavy descriptor remains available for the parent but is **not submitted and not rebuild-ready**: read-only audit must exit 2 with buildStarted=false. Making it exit 0 now would be a false positive. Signing stays unsigned/pluggable; no main merges, tags, feeds or release publication.
+Only the three missing reconciled output digests are `TODO_BUILD_OUTPUT_*`. Historical stable digests remain historical. `resolve-images.py` adopts actual image receipts into `pins.json` and the executable RC only after source/security receipts pass; it preserves pre-resolution metadata and refuses changed immutable source inputs. Parent must commit/read back the resulting manifest on the named branch before build approval.
 
-REUSE: proven clone/apply/seal flow, existing pin validator, guest updater, browser QA and unchanged appearance fixtures.
-EXTEND: frozen source/default selection, queue source evidence, and fail-closed checks for their identities.
-NEW: no replacement UI component; no fake assembly runner.
+`verify-sources-v5.py` runs the **full** Service/UX/WAM suites inside digest-pinned Linux arm64 Node, with `/work/t` and traversable temp permissions (GNU Bash, `/proc`, uid1000). Native Swift admission and source contracts still run on the Mac host. This replaces neither assertions nor failed v3 evidence with a green claim. The old v3 full-suite failure remains historical evidence; v5 has not been submitted.
+
+## Queue and appearance decisions
+
+All 84 original rows/text/line order are retained. Of the 22 previously uncarried rows:
+
+- **Carry 23**: accepted live UX orb/app-badge behavior. Corrected the prior erroneous recorder-related classification.
+- **Carry 80**: Service #64 (`d2aefaaf` cherry-picked as `15d501a`), all three CLI/TUI allowlists plus its regression test; exact-head CI green.
+- **Carry 81, mandatory security gate**: never deferred. Actual all-image remediation/verification is still required below.
+- **Defer 19** optional/private/legacy-unproven app scopes to next release, each with its own one-line reason in `queue-mapping.json`. The portable Recorder is not falsely treated as equivalent to every old local Meeting Recorder behavior. No device/capture grant is implied.
+
+Aggregate: 61 source-carried, 1 mandatory carried security gate, 19 deferred, 2 superseded, 1 Android/no-guest change. Source carriage is not final guest acceptance; the rebuild queue is not cleared.
+
+UX #472 accepts the explicit launch-owner decision that live `8fa9804` is the baseline. Five owner hashes and two dock assertions now guard that live baseline, including a full core CSS SHA-256; no product CSS/JS changed. Exact selected head `e1bc34fa` has green CI, including `shared-features` run `40120979667`. See `ux-472-review.md`, the PR body and the existing candidate/baseline/live screenshots. These remain targeted phone-dock evidence, not whole-release acceptance.
+
+## Remaining blockers — exact names
+
+1. **`IMAGE_DIGESTS_PENDING`** — WAM/Service/UX packaging jobs have not run. No new output digest is fabricated.
+2. **`SOURCE_VERIFICATION_V5`** — the new exact-pin Linux/Mac full-source job has not run.
+3. **`SECURITY_IMAGE_CLOSURE`** — substantive remaining engineering/execution, not just a flag: three patched core outputs alone do not remediate all inherited/default containers, stock/managed Hermes, Python/certifi/vendor copies and Node. Read-only offline Docker repositories and all pinned default compose recipes were collected into `evidence/build307-image-repositories.json` and `evidence/default-image-recipes.json`. `security-image-plan.json` records their real manifests/local-image gaps, but deliberately remains `complete=false`. Those remaining surfaces need immutable remediated selections (or proved safe retirement), application wiring and actual good/revoked/no-CT client tests before the security/resolve/rebuild tail can run. Do not turn this boolean on to bypass the work.
+
+Primary security source: <https://emudhra.we-have-a-problem.com/>. Patched minimums include Alpine CA `20261020-r0`, certifi `2026.10.19`, Node 22 `22.23.4`, Bun `1.4.4`; tool/runtime/vendor stores must be inventoried, not assumed covered by host curl.
+
+Admission currently exits **2**, with `buildStarted=false`, `publishing=false`. It requires actual source/image/security/UX-CI receipts and checks staged identities/recipe/installer/Service-64 file hashes. Contract tests exercise each missing receipt and a malicious bare-factory argv; no synthetic unit fixture is represented as real acceptance evidence.
+
+REUSE: retained clone/apply/seal flow, WAM release installer, existing product/runtime overlay, source/full test suites and owner/collaborator guards.
+EXTEND: exact immutable base adapter, split-Service runtime selection, explicit queue decisions, accepted guarded live baseline and fail-closed receipt checks.
+NEW: no UI component, no alternate brain, no main merge, no publisher.

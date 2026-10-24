@@ -8,7 +8,7 @@
     "signing": "ad-hoc (-); SIGN_IDENTITY remains pluggable",
     "heavyHost": "Thales only"
   },
-  "status": "blocked-not-final-freeze",
+  "status": "blocked-execution-evidence",
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
@@ -71,7 +71,7 @@
     "service-reconciled": {
       "repo": "humanitylabs-org/wizard-agent-service",
       "ref": "reconcile/mac-launch-service-20261027",
-      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "commit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "wam-reconciled": {
@@ -83,7 +83,7 @@
     "ux-reconciled": {
       "repo": "humanitylabs-org/wizard-ux",
       "ref": "reconcile/mac-launch-live-shell-20261027",
-      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "commit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "wam-mac-launch": {
@@ -245,16 +245,16 @@
   },
   "finalPins": {
     "native": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
-    "ux": "69cb20679e46477a0c1a74a006eec733dd99b284",
-    "service": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+    "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+    "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
     "wam": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
     "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
     "version": "0.5.0",
-    "flavor": "slim",
+    "flavor": "full-frozen-default-set",
     "diskGB": 48,
-    "runtimePayload": "must be built with final integrated pins, not legacy defaults"
+    "runtimePayload": "retained-build-307 factory clone; frozen release then Mac overlays, never fresh mutable base build"
   },
   "exclusions": [
     "Do not merge try-wizard #30 or #20 in this task; existing already-merged import code is not removed",
@@ -268,20 +268,20 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "96970844d71857c20b9876b8e7976c6254c284467c0da03e5c1bea852f4027e4",
-      "semantics": "source ancestry/file equivalence only; not final guest acceptance"
+      "sha256": "cf16a3f4acc36e786f95d7811ab18d8ac9b826ce151aaf6cd8d575edb7da3800",
+      "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
   "blockers": [
     {
       "id": "service-integration",
-      "status": "open",
-      "detail": "Candidate ee5229f carries #96 and #138; PR#156 draft, exact-head CI green. Thales:1311 Vitest pass/8 skipped;22 maintenance/lifecycle node tests pass;5 real-root recovery tests pass. Source reconciliation verified, review/merge not claimed."
+      "status": "resolved-source-ci",
+      "detail": "PR #156 now includes Service #64 exact three CLI/TUI allowlists and regression test as 15d501a; exact-head CI run40120655340 success. Full Thales v5 still pending; no merge claimed."
     },
     {
       "id": "wam-release",
-      "status": "open",
-      "detail": "Candidate7a1f0fdc contains custody+backup main and cd3d0593 Mac39. Prior backup run173 pass/13 skipped; exact-head projection/bootstrap reconciliation60 pass on Thales. Stable0.3.38 manager-image build inputs unchanged. PR#204 draft; full latest-head CI/review and backup rerun remain to read/execute."
+      "status": "resolved-source-ci",
+      "detail": "Exact reconciled WAM #204 7a1f0fdc retained. New candidate image packaging is required, including patched trust/Node/Bun; old stable image provenance remains historical, not attributed to new output."
     },
     {
       "id": "phone-source",
@@ -310,8 +310,8 @@
     },
     {
       "id": "pin-consumers",
-      "status": "open",
-      "detail": "Factory, runtime sources, managed Docker base and os.sh now consume pins.json; sha256 checked before os.sh execution, selected WAM_REF before initial bootstrap.12 fail-closed unit tests pass. Full guest-layer build unexecuted; factory bootstrap still lacks a reviewed immutable Wizard OS release/app set. No complete assembly recipe yet."
+      "status": "implemented-not-guest-executed",
+      "detail": "Hash-pinned retained build-307 clone/apply/seal/fsck/pack adapter exists. WIZARD_RELEASE/local immutable release selection replaces WAM_REF, os.sh hash verified before execution. Actual packaging/source/security/rebuild receipts remain pending."
     },
     {
       "id": "factory-admission",
@@ -327,17 +327,17 @@
     {
       "id": "security",
       "status": "open",
-      "detail": "Queue requires patched guest/container trust (eMudhra), certifi >=2026.10.19, Node >=22.23.4; stale runtime base b2f114e cannot be accepted without exact container verification/rebuild."
+      "detail": "MANDATORY carried queue81, not deferred. Primary advisory: Alpine ca-certificates>=20261020-r0, certifi>=2026.10.19, Node22>=22.23.4, Bun>=1.4.4; all inherited/default client/root bundles require real remediation and TLS evidence. See security-image-plan.json and discovered exact recipe refs."
     },
     {
       "id": "queue-coverage",
-      "status": "open",
-      "detail": "Every queued entry is retained in queue-inventory.json; verify portable app recipes/images plus current shell semantics. Do not copy owner-local data/credentials or silently omit private app entries. Queue remains uncleared until exact-guest acceptance."
+      "status": "decisions-resolved-acceptance-pending",
+      "detail": "All84 original rows preserved. Of22 formerly uncarried: carry23 accepted live UX, carry80 Service64, carry81 mandatory security;19 explicitly deferred-to-next-release with reasons. No queue clearing or final guest acceptance claimed."
     },
     {
       "id": "live-shell-parity",
-      "status": "open",
-      "detail": "69cb2067 contains exact live8fa9804 and current main. PR#472 draft. Thales769 pass/7 owner-skin protection assertions fail on carried live4defd354. Protection assertions NOT weakened; explicit baseline/visual review required."
+      "status": "resolved-baseline-and-ci",
+      "detail": "Launch owner explicitly accepts live8fa9804. UX #472 head e1bc34fa changes5 owner hashes+2 core dock assertions under exact full-CSS SHA-256; 40120979667 exact-head CI success. Targeted screenshots preserved; no CSS/JS implementation change, no whole-release or guest acceptance."
     }
   ],
   "postBuildAcceptance": [
@@ -351,10 +351,15 @@
     "Existing guest state-preserving software migration and rollback separately; native-only app does not deliver guest changes"
   ],
   "execution": {
-    "argv": null,
-    "recipe": null,
-    "sha256": null,
-    "reason": "Full bounded factory recompose/runtime build/apply/sanitize/package/fresh-feed recipe not yet implemented/reviewed. Retained run-factory.py nests lockf and hardcodes old source/payload; do not run as-is."
+    "recipe": "preparation/assemble.py",
+    "sha256": "a3d55d0b301ab87b0cb0b18cc069077b3a193158c1fb647e372e526e3cec439f",
+    "argv": [
+      "/opt/homebrew/bin/python3",
+      "preparation/assemble.py",
+      "--stage-root",
+      ".",
+      "--execute"
+    ]
   },
   "runtimeSelected": {
     "service": "service-reconciled",
@@ -385,7 +390,70 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "93e7aa0ea79ee184c599edb242c648e52ce6e64870c8f126775232b2a71bf81b",
+    "sha256": "21822227041aa650dd2c7e8ec3f88ab04c55277e26ff9b7e29a06054b487007c",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
+  },
+  "assembly": {
+    "mode": "retained-build-307-factory-adapter",
+    "base": {
+      "path": "${THALES_MEDIA}/Projects/wizard-desktop/mac-release-20261015/final-package/factory-publish-source/rootfs.img",
+      "sha256": "64ddc2b8123b3185668aab666cd93843a228d769a2ab55c68e64e00a4c1f1366",
+      "bytes": 17179869184,
+      "hashVerifiedOnThales": true,
+      "boot": {
+        "vmlinux": {
+          "path": "${THALES_MEDIA}/Projects/wizard-desktop/mac-release-20261015/final-package/factory-publish-source/boot/vmlinux",
+          "sha256": "5028c424ee9fd0f4d18c38269122e30e3d084deb1b13404ab070a3f478ddd30a"
+        },
+        "initrd": {
+          "path": "${THALES_MEDIA}/Projects/wizard-desktop/mac-release-20261015/final-package/factory-publish-source/boot/initrd",
+          "sha256": "b32a28fd79ea7cedea49520befe694f513fb35af53203074006a016128c3c06b"
+        }
+      }
+    },
+    "host": {
+      "path": "${THALES_MEDIA}/Projects/wizard-desktop/mac-release-20261015/native-build-303/Wizard.app/Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host",
+      "sha256": "799b1618496aaa0aa7040c87913c0870662ecfde3a0a5a588f874015bf861bb0",
+      "role": "retained disposable factory dev-shell transport, NOT new native candidate"
+    },
+    "images": {
+      "wam": {
+        "ref": "ghcr.io/humanitylabs-org/wizard-app-manager",
+        "sourceCommit": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
+        "digest": "TODO_BUILD_OUTPUT_WAM"
+      },
+      "service": {
+        "ref": "ghcr.io/humanitylabs-org/wizard-agent-service",
+        "sourceCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+        "digest": "TODO_BUILD_OUTPUT_SERVICE"
+      },
+      "ux": {
+        "ref": "ghcr.io/humanitylabs-org/wizard-ux",
+        "sourceCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+        "digest": "TODO_BUILD_OUTPUT_UX"
+      }
+    },
+    "signing": "unsigned/pluggable",
+    "publish": false
+  },
+  "sourceVerification": {
+    "version": 5,
+    "linuxImage": "node@sha256:1684026b8229e224f54c790fd2c567415fda3f919e5da616155af700e36cf301",
+    "receipt": "source-checks-v5/result.json"
+  },
+  "service64Proof": {
+    "server/service.mjs": "c0ddbc890a0cbc6255d5411280fbe3f13b55e5d2513fcd9c86bfe88336b68ff6",
+    "server/hermes-http-readers.mjs": "6fb448d5d66e0880e4d800a6580dc483fa56e60bcd38e031f801173a0e961910",
+    "server/read-human-sessions.py": "8a6fcee9933f4f7c52f48b2b20ebd175fb92f09af214a5721f5cdd667614d99c",
+    "tests/imported-hermes-chats.test.ts": "4f5b35a2b4a984470e8d029399be16c8ce89eec0faacd36ff01b4bc1b89f04c8"
+  },
+  "appearanceApproval": {
+    "acceptedLiveCommit": "8fa98040195db2f8f86a1f0dffc6c3292b67679c",
+    "selectedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+    "authority": "Archimedes explicit launch instruction, 2026-10-24",
+    "review": "ux-472-review.md",
+    "ciRun": "40120979667",
+    "status": "accepted-baseline-exact-head-ci-green",
+    "scope": "five owner skin fixture hashes + two SHA-256 guarded core dock assertions; no CSS/JS product changes"
   }
 }

@@ -43,8 +43,10 @@ docker export "$cid" > "$WORK/base.tar"; docker rm "$cid" >/dev/null
 rm -rf "$WORK/g"; mkdir -p "$WORK/g"; cp -R "$HERE/overlay" "$WORK/g/overlay"; cp "$HERE/check-image.sh" "$WORK/g/"
 # A locally built engine image (docker save) rides into the build disk and is loaded during provisioning.
 if [ -n "${HERMES_IMAGE_TAR:-}" ]; then cp "$HERMES_IMAGE_TAR" "$WORK/g/hermes-image.tar"; fi
-printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\nHERMES_IMAGE=%s\nFACTORY=%s\nOS_SH_URL=%s\nOS_SH_SHA256=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" "$HERMES_IMAGE" "$FACTORY" "$OS_SH_URL" "$OS_SH_SHA256" > "$WORK/g/provision.env"
-docker run --rm --privileged -e GB=$BUILD_DISK_GB -v "$WORK:/w" alpine:3.21 sh -eu -c '
+: "${WIZARD_RUNTIME_RELEASE:?Use the retained-factory adapter, or explicitly provide a validated runtime release file}"
+cp "$WIZARD_RUNTIME_RELEASE" "$WORK/g/frozen-release.json"
+printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\nHERMES_IMAGE=%s\nFACTORY=%s\nOS_SH_URL=%s\nOS_SH_SHA256=%s\nWIZARD_RELEASE=%s\nWIZARD_RELEASE_BASE=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" "$HERMES_IMAGE" "$FACTORY" "$OS_SH_URL" "$OS_SH_SHA256" "$WIZARD_RELEASE" "$WIZARD_RELEASE_BASE" > "$WORK/g/provision.env"
+docker run --rm --privileged -e GB=$BUILD_DISK_GB -e RELEASE="$WIZARD_RELEASE" -v "$WORK:/w" alpine:3.21 sh -eu -c '
 apk add -q e2fsprogs tar coreutils shadow file >/dev/null
 R=/r; rm -rf $R; mkdir -p $R
 tar -xpf /w/base.tar -C $R
@@ -62,6 +64,8 @@ chroot $R /usr/bin/passwd -l root >/dev/null
 install -d -m 0750 -o 1000 -g 1000 $R/var/lib/wizard
 chmod 0644 $R/etc/docker/daemon.json
 install -m 0644 /w/g/provision.env $R/var/lib/wizard/provision.env
+install -d -m 0755 $R/var/lib/wizard/frozen-release
+install -m 0644 /w/g/frozen-release.json $R/var/lib/wizard/frozen-release/$RELEASE.json
 if [ -f /w/g/hermes-image.tar ]; then install -d -m 0755 $R/var/lib/wizard/images; mv /w/g/hermes-image.tar $R/var/lib/wizard/images/hermes.tar; fi
 mkdir -p $R/home/wizard/runtipi/media && chown -R 1000:1000 $R/home/wizard
 for m in vmw_vsock_virtio_transport virtio_blk virtio_net virtiofs; do echo $m >> $R/etc/initramfs-tools/modules; done

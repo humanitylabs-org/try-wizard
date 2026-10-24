@@ -33,9 +33,8 @@ def freeze(pins,stable,stable_bytes,origin):
             'components':components,'default_apps':defaults,'hermes':copy.deepcopy(stable['hermes']),
             'bootstrapImages':copy.deepcopy(stable['images']),
             'candidateImagePolicy':{
-                'wizard-app-manager':{'mode':'reuse-stable-image-only-if-image-inputs-identical',
-                    'sourceCommit':pins['finalPins']['wam'],'imageSourceCommit':stable['images']['wizard-app-manager']['source_commit'],
-                    'imageInputs':stable['images']['wizard-app-manager']['image_inputs']},
+                'wizard-app-manager':{'mode':'build-from-pinned-source-with-trust-remediation',
+                    'sourceCommit':pins['finalPins']['wam'],'digest':None},
                 'wizard-agent-service':{'mode':'build-from-pinned-source','sourceCommit':pins['finalPins']['service'],'digest':None},
                 'wizard-ux':{'mode':'build-from-pinned-source','sourceCommit':pins['finalPins']['ux'],'digest':None}},
             'factoryPolicy':{'noMutableStablePointer':True,'noMutableMain':True,

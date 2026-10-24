@@ -62,8 +62,14 @@ class PreparationTests(unittest.TestCase):
 
     def test_source_rc_not_admitted_as_bootstrap(self):
         errors=audit.inspect_preparation(self.pins,self.queue)
-        self.assertIn('Wizard OS source RC is not yet an executable factory bootstrap release',errors)
-        self.assertIn('queue has explicitly uncarried or unproven requirements; see queue-mapping.json',errors)
+        self.assertTrue(any(e.startswith('IMAGE_DIGESTS_PENDING') for e in errors))
+        self.assertFalse(any('queue undecided' in e for e in errors))
+        m=json.loads((HERE/'queue-mapping.json').read_text())
+        decisions={r['id']:r for r in m['entries']}
+        self.assertEqual(sum(r.get('decision')=='defer' for r in m['entries']),19)
+        self.assertEqual(decisions[80]['decision'],'carry')
+        self.assertEqual(decisions[81]['decision'],'carry')
+        self.assertEqual(decisions[23]['decision'],'carry')
         self.assertFalse(any('digest mismatch' in e for e in errors))
 
     def test_freeze_does_not_relabel_stable_images(self):
