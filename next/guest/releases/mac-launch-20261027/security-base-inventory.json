@@ -1,0 +1,102 @@
+[
+  {
+    "key": "helper-python",
+    "ref": "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+    "presentLocally": true,
+    "imageId": "sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+    "user": null,
+    "entrypoint": null,
+    "rc": 0,
+    "inventory": "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.24.2\nPRETTY_NAME=\"Alpine Linux v3.24\"\nHOME_URL=\"https://alpinelinux.org/\"\nBUG_REPORT_URL=\"https://gitlab.alpinelinux.org/alpine/aports/-/issues\"\nPython 3.12.15\npip 25.0.1 from /usr/local/lib/python3.12/site-packages/pip (python 3.12)\n",
+    "stderr": ""
+  },
+  {
+    "key": "hermes-app",
+    "ref": "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+    "presentLocally": false
+  },
+  {
+    "key": "chatgpt",
+    "ref": "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+    "presentLocally": false
+  },
+  {
+    "key": "claude",
+    "ref": "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+    "presentLocally": false
+  },
+  {
+    "key": "files",
+    "ref": "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "presentLocally": true,
+    "imageId": "sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "user": "user",
+    "entrypoint": [
+      "tini",
+      "--",
+      "/init.sh"
+    ],
+    "rc": 0,
+    "inventory": "",
+    "stderr": "cat: can't open '/etc/os-release': No such file or directory\n"
+  },
+  {
+    "key": "transcriber",
+    "ref": "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+    "presentLocally": true,
+    "imageId": "sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+    "user": "ubuntu",
+    "entrypoint": null,
+    "rc": 0,
+    "inventory": "PRETTY_NAME=\"Ubuntu 24.04.3 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.3 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\nPython 3.12.11\nuv 0.8.22\n",
+    "stderr": ""
+  },
+  {
+    "key": "browser",
+    "ref": "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+    "presentLocally": true,
+    "imageId": "sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+    "user": null,
+    "entrypoint": [
+      "/headless-shell/run.sh"
+    ],
+    "rc": 0,
+    "inventory": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.7\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+    "stderr": ""
+  },
+  {
+    "key": "secrets",
+    "ref": "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+    "presentLocally": false
+  },
+  {
+    "key": "notifications",
+    "ref": "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+    "presentLocally": false
+  },
+  {
+    "key": "recorder",
+    "ref": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
+    "presentLocally": false
+  },
+  {
+    "key": "stock",
+    "ref": "docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+    "presentLocally": false
+  },
+  {
+    "key": "postgres",
+    "ref": "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+    "presentLocally": false
+  },
+  {
+    "key": "rabbitmq",
+    "ref": "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+    "presentLocally": false
+  },
+  {
+    "key": "traefik",
+    "ref": "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+    "presentLocally": false
+  }
+]

@@ -59,10 +59,10 @@ class AdmissionTests(unittest.TestCase):
         plan=json.loads((ROOT/'security-image-plan.json').read_text());self.assertFalse(plan['complete'])
         self.assertEqual(plan['mandatoryQueueId'],81)
     def test_security_does_not_count_dns_failure_as_tls_rejection(self):
-        text=(ROOT/'security-closure.py').read_text()
-        self.assertIn('test "$rc" = 60',text);self.assertIn('SSLCertVerificationError',text)
-        self.assertIn('https://example.com/',text);self.assertIn('certifi/cacert.pem',text)
-        self.assertIn("v[1]<23",text)
+        text=(ROOT/'security-closure.py').read_text();python=(ROOT/'security-probe.py').read_text()
+        self.assertIn('test "$rc" = 60',text);self.assertIn('SSLCertVerificationError',python)
+        self.assertIn('https://example.com/',text);self.assertIn("'cacert.pem' in names",python)
+        self.assertIn('24:(24,22,1)',python);self.assertIn('26:(26,12,1)',python)
     def test_direct_execution_cannot_bypass_admission(self):
         text=(ROOT/'assemble.py').read_text()
         self.assertLess(text.index('errors=audit.inspect(pins,root)'),text.index("work=root/'assembly-work'"))
@@ -89,9 +89,20 @@ class AdmissionTests(unittest.TestCase):
         for key in ['wam','service','ux']:
             emit(root/'image-packaging'/key/'result.json',{'sourceCommit':m['finalPins'][key],'pullVerified':True,**m['assembly']['images'][key]})
         emit(root/'source-checks-v5/result.json',{'version':5,'passed':True,'finalPins':m['finalPins'],'commands':[{'key':k,'returncode':0} for k in ['linux-create','linux-full','linux-logs','factory-pins','phone','stock-builder','factory-admission']]})
-        image='unit.invalid/test@sha256:'+'f'*64
-        emit(prep/'security-image-plan.json',{'complete':True,'images':[image]})
-        emit(root/'security-preflight.json',{'passed':True,'allGuestImagesEnumerated':True,'images':[image],'checks':[{'target':image,'returncode':0}]})
+        # Synthetic schema2 fixtures test admission logic only; never copied into real staging evidence.
+        closure_spec=importlib.util.spec_from_file_location('closure_fixture',prep/'security-closure.py');assert closure_spec and closure_spec.loader
+        closure=importlib.util.module_from_spec(closure_spec);closure_spec.loader.exec_module(closure)
+        security_plan=json.loads((prep/'security-image-plan.json').read_text())
+        for index,target in enumerate(security_plan['targets']):
+            if target['resolution']=='selected-core-image':
+                key=target['key'];row={'sourceCommit':m['finalPins'][key],'pullVerified':True,'tagsPublished':False,'imageId':'sha256:'+str(index).zfill(64),**m['assembly']['images'][key]}
+            else:
+                row={'key':target['key'],'base':target['base'],'ref':'ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key'],'digest':'sha256:'+format(index+1,'064x'),'imageId':'sha256:'+format(index+101,'064x'),'pullVerified':True,'tagsPublished':False,'unitFixtureOnly':True}
+            emit(root/target['receipt'],row)
+        images,resolutions=closure.resolve_plan(security_plan,root,m)
+        security_plan.update(complete=True,images=images,resolutions=resolutions)
+        emit(prep/'security-image-plan.json',security_plan)
+        emit(root/'security-preflight.json',{'schema':2,'planSha256':hashlib.sha256((prep/'security-image-plan.json').read_bytes()).hexdigest(),'resolutions':resolutions,'passed':True,'allGuestImagesEnumerated':True,'images':images,'checks':[{'target':image,'returncode':0} for image in images],'unitFixtureOnly':True})
         emit(root/'evidence/ux-final-ci.json',{'headSha':m['finalPins']['ux'],'conclusion':'success'})
         recipe=root/'preparation/assemble.py';recipe.parent.mkdir(exist_ok=True);recipe.write_bytes((ROOT/'assemble.py').read_bytes())
         m['execution']['sha256']=hashlib.sha256(recipe.read_bytes()).hexdigest()

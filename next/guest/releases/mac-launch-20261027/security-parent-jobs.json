@@ -1,0 +1,311 @@
+{
+  "executionOrder": [
+    {
+      "file": "04r-activate-security.json",
+      "key": "wizard-mac-launch-20261027-security-v1-activate",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "security-preparation-v1/activate-security-preparation.py",
+        "--stage-root",
+        "."
+      ],
+      "timeout_seconds": 300,
+      "lane": "light"
+    },
+    {
+      "file": "04s-01-helper-python.json",
+      "key": "wizard-mac-launch-20261027-security-v1-helper-python",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "helper-python"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-02-hermes-app.json",
+      "key": "wizard-mac-launch-20261027-security-v1-hermes-app",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "hermes-app"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-03-chatgpt.json",
+      "key": "wizard-mac-launch-20261027-security-v1-chatgpt",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "chatgpt"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-04-claude.json",
+      "key": "wizard-mac-launch-20261027-security-v1-claude",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "claude"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-05-files.json",
+      "key": "wizard-mac-launch-20261027-security-v1-files",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "files"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-06-transcriber.json",
+      "key": "wizard-mac-launch-20261027-security-v1-transcriber",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "transcriber"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-07-browser.json",
+      "key": "wizard-mac-launch-20261027-security-v1-browser",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "browser"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-08-secrets.json",
+      "key": "wizard-mac-launch-20261027-security-v1-secrets",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "secrets"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-09-notifications.json",
+      "key": "wizard-mac-launch-20261027-security-v1-notifications",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "notifications"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-10-recorder.json",
+      "key": "wizard-mac-launch-20261027-security-v1-recorder",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "recorder"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-11-stock.json",
+      "key": "wizard-mac-launch-20261027-security-v1-stock",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "stock"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-12-postgres.json",
+      "key": "wizard-mac-launch-20261027-security-v1-postgres",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "postgres"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-13-rabbitmq.json",
+      "key": "wizard-mac-launch-20261027-security-v1-rabbitmq",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "rabbitmq"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "04s-14-traefik.json",
+      "key": "wizard-mac-launch-20261027-security-v1-traefik",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/package-security-image.py",
+        "--stage-root",
+        ".",
+        "--target",
+        "traefik"
+      ],
+      "timeout_seconds": 2400,
+      "lane": "heavy"
+    },
+    {
+      "file": "05-security.json",
+      "key": "wizard-mac-launch-20261027-security-v1-preflight",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/security-closure.py",
+        "--stage-root",
+        "."
+      ],
+      "timeout_seconds": 7200,
+      "lane": "heavy"
+    },
+    {
+      "file": "06-resolve-images.json",
+      "key": "wizard-mac-launch-20261027-v5-74d5794-resolve-images",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/resolve-images.py",
+        "--stage-root",
+        "."
+      ],
+      "timeout_seconds": 900,
+      "lane": "light"
+    },
+    {
+      "file": "07-guest-rebuild.json",
+      "key": "wizard-mac-launch-20261027-v5-74d5794-guest-rebuild",
+      "cwd": "/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-freeze-v5-retained307",
+      "argv": [
+        "/usr/bin/env",
+        "THALES_MEDIA=/Volumes/ThalesMedia",
+        "/opt/homebrew/bin/python3",
+        "preparation/audit.py",
+        "--stage-root",
+        ".",
+        "--admit-and-build"
+      ],
+      "timeout_seconds": 21600,
+      "lane": "heavy"
+    }
+  ],
+  "doNotResubmit": [
+    "01-sources.json",
+    "02-package-wam.json",
+    "03-package-service.json",
+    "04-package-ux.json"
+  ],
+  "conditional": true,
+  "submittedByThisChange": false
+}

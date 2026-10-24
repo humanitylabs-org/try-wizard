@@ -32,7 +32,18 @@ def main():
     for name in ['pins.json','wizard-os-release-candidate.json','staged-files.json']:
         src=root/name if name=='staged-files.json' else prep/name
         (before/name).write_bytes(src.read_bytes())
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('security_closure',prep/'security-closure.py');assert spec and spec.loader
+    closure=importlib.util.module_from_spec(spec);spec.loader.exec_module(closure)
+    actual,resolutions=closure.resolve_plan(plan,root,pins)
+    assert actual==plan['images'] and resolutions==plan['resolutions']
+    assert security.get('schema')==2 and security.get('planSha256')==sha(prep/'security-image-plan.json')
+    images=closure.security_release_images(plan,images)
     rc['images']=images;rc['status']='factory-bootstrap-ready'
+    rc['hermes']['image']={'ref':plan['resolutions']['stock']['image'].split('@')[0],'digest':plan['resolutions']['stock']['image'].split('@')[1]}
+    rc['default_apps']['recorder']['image']=plan['resolutions']['recorder']['image']
+    pins['runtimeBuild']['hermesImage']=plan['resolutions']['stock']['image']
+    pins['runtimeBuild']['baseStatus']='all selected image trust clients verified by security-preflight.json; guest host/runtime repeat mandatory'
     runtime={k:rc[k] for k in ['version','components','default_apps','hermes','images']}
     (root/'runtime-release.json').write_text(json.dumps(runtime,indent=2)+'\n')
     (prep/'wizard-os-release-candidate.json').write_text(json.dumps(rc,indent=2)+'\n')

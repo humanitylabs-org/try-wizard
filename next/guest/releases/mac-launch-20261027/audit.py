@@ -73,6 +73,18 @@ def inspect(manifest,root):
     if not checks or checks.get('version')!=5 or checks.get('passed') is not True or checks.get('finalPins')!=manifest['finalPins'] or not required.issubset({r.get('key') for r in checks.get('commands',[])}) or any(r.get('returncode')!=0 for r in checks.get('commands',[])):errors.append('SOURCE_VERIFICATION_V5: exact final-pin full source checks have not passed')
     security=record('security-preflight.json');plan=json.loads((HERE/'security-image-plan.json').read_text())
     if plan.get('complete') is not True or not plan.get('images') or not security or security.get('passed') is not True or security.get('allGuestImagesEnumerated') is not True or set(security.get('images',[]))!=set(plan.get('images',[])) or not security.get('checks') or any(r.get('returncode')!=0 for r in security.get('checks',[])):errors.append('SECURITY_IMAGE_CLOSURE: host/default/inherited CA, certifi and Node remediation not proven')
+    # Schema2 binds exact real output receipts, image identities and this immutable plan, not only a set of names.
+    if plan.get('schema')==2:
+        try:
+            import importlib.util
+            spec=importlib.util.spec_from_file_location('security_closure_admission',HERE/'security-closure.py');assert spec and spec.loader
+            closure=importlib.util.module_from_spec(spec);spec.loader.exec_module(closure)
+            actual,resolutions=closure.resolve_plan(plan,root,manifest)
+            assert security and security.get('schema')==2 and security.get('planSha256')==digest(HERE/'security-image-plan.json')
+            assert actual==plan['images'] and resolutions==plan['resolutions'] and security.get('resolutions')==resolutions
+            assert sorted(r['target'] for r in security['checks'])==actual
+        except (AssertionError,KeyError,OSError,ValueError,StopIteration):errors.append('SECURITY_IMAGE_CLOSURE: exact per-target receipts/plan hash/probe coverage mismatch')
+    else:errors.append('SECURITY_IMAGE_CLOSURE: concrete schema2 image resolution plan required')
     ci=record('evidence/ux-final-ci.json')
     if not ci or ci.get('headSha')!=manifest['finalPins']['ux'] or ci.get('conclusion')!='success':errors.append('UX_FINAL_HEAD_CI: accepted baseline must have exact-head green CI')
     for key in ['wam','service','ux']:

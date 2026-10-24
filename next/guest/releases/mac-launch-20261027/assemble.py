@@ -38,7 +38,9 @@ def runtime_release(pins,root):
         assert receipt['digest']==selected['digest'] and receipt['ref']==selected['ref']
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',receipt['digest'])
         images[name]={'ref':receipt['ref'],'digest':receipt['digest'],'source_commit':receipt['sourceCommit']}
-    return {'version':rc['version'],'components':rc['components'],'default_apps':rc['default_apps'],'hermes':rc['hermes'],'images':images}
+    assert all(rc['images'][name]==row for name,row in images.items())
+    assert json.loads((HERE/'security-image-plan.json').read_text())['complete'] is True
+    return {'version':rc['version'],'components':rc['components'],'default_apps':rc['default_apps'],'hermes':rc['hermes'],'images':rc['images']}
 
 def pack(work,pins):
     disk=work/'data/os/disk.img';out=work/'package';(out/'boot').mkdir(parents=True)

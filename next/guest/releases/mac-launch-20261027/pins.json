@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "58aa1219a4f5e5c6cec416d15683f88be753922ea9ce2b2083e605ba1e560b43",
+      "sha256": "26b06e628849bb551a902dfb28d51d82cb44cf5b4ad8b3e0dbcb3f0c2e213d66",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
@@ -352,7 +352,7 @@
   ],
   "execution": {
     "recipe": "preparation/assemble.py",
-    "sha256": "bed1c1c61bfe13f7c4d335985668c1899ee7eea3fa0e261c3e3f72f0d26553a2",
+    "sha256": "083caf0265dd11249ecf76ebdbe7a33a30e50934c23c32c67cca624f3b7e37ce",
     "argv": [
       "/opt/homebrew/bin/python3",
       "preparation/assemble.py",
@@ -455,5 +455,13 @@
     "ciRun": "40120979667",
     "status": "accepted-baseline-exact-head-ci-green",
     "scope": "five owner skin fixture hashes + two SHA-256 guarded core dock assertions; no CSS/JS product changes"
+  },
+  "securityClosure": {
+    "schema": 2,
+    "plan": "security-image-plan.json",
+    "selectedTargets": 17,
+    "derivedPackagingJobs": 14,
+    "allMandatory": true,
+    "acceptance": "05 actual pull-readback/image probes, then final guest host/configured runtime probes; no security deferrals"
   }
 }

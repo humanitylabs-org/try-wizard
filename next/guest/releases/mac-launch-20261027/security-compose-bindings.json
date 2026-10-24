@@ -1,0 +1,158 @@
+{
+  "bindings": [
+    {
+      "app": "hermes-agent",
+      "service": "hermes-agent",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/hermes-agent",
+      "sourceCommit": "e8ae558f26bf4b981e0cad60e387386a1ad7b869",
+      "sourceBlob": "12427beeea69b122fb0414b4d63520774924a1ce",
+      "recipeSha256": "3d44a618653709a683922cb4725042f2c0a242b89cb6295613c78b2b5ecb2e4c"
+    },
+    {
+      "app": "hermes-agent",
+      "service": "hermes-agent-engine",
+      "target": "hermes-app",
+      "sourceRepo": "oscarhenrycollins/hermes-agent",
+      "sourceCommit": "e8ae558f26bf4b981e0cad60e387386a1ad7b869",
+      "sourceBlob": "12427beeea69b122fb0414b4d63520774924a1ce",
+      "recipeSha256": "3d44a618653709a683922cb4725042f2c0a242b89cb6295613c78b2b5ecb2e4c"
+    },
+    {
+      "app": "wizard-chatgpt",
+      "service": "wizard-chatgpt",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/chatgpt-connection",
+      "sourceCommit": "f87d5ddc449535418ee92ebeb24aaec36cc58058",
+      "sourceBlob": "e05cac19edb16a78438b51eefd8196be454ef814",
+      "recipeSha256": "88e351b75a45f241acb6b328b4583938de3a5f9439edcabcbb332d0957e93b0f"
+    },
+    {
+      "app": "wizard-chatgpt",
+      "service": "wizard-chatgpt-engine",
+      "target": "chatgpt",
+      "sourceRepo": "oscarhenrycollins/chatgpt-connection",
+      "sourceCommit": "f87d5ddc449535418ee92ebeb24aaec36cc58058",
+      "sourceBlob": "e05cac19edb16a78438b51eefd8196be454ef814",
+      "recipeSha256": "88e351b75a45f241acb6b328b4583938de3a5f9439edcabcbb332d0957e93b0f"
+    },
+    {
+      "app": "wizard-claude",
+      "service": "wizard-claude",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/claude-connection",
+      "sourceCommit": "3b2d6186b86a896f254150ad056b9eaa495e738e",
+      "sourceBlob": "13166c2fbf217d65b16b0818edccad7602b94ece",
+      "recipeSha256": "a3c756ea421467d69261f0293d560128c1b099a05b27a594776dfa874f2eb2ca"
+    },
+    {
+      "app": "wizard-claude",
+      "service": "wizard-claude-engine",
+      "target": "claude",
+      "sourceRepo": "oscarhenrycollins/claude-connection",
+      "sourceCommit": "3b2d6186b86a896f254150ad056b9eaa495e738e",
+      "sourceBlob": "13166c2fbf217d65b16b0818edccad7602b94ece",
+      "recipeSha256": "a3c756ea421467d69261f0293d560128c1b099a05b27a594776dfa874f2eb2ca"
+    },
+    {
+      "app": "files",
+      "service": "files",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/files",
+      "sourceCommit": "8a4dd8ac5189d7d9d8af2bb8a2416936668e90df",
+      "sourceBlob": "601f0864c35d59e2b68b7fd92b9e982062843ae1",
+      "recipeSha256": "27a05b7c6c89df91aa5f8015d6f997d1bf5b16124fcc9d6e03c73c276a940d20"
+    },
+    {
+      "app": "files",
+      "service": "files-engine",
+      "target": "files",
+      "sourceRepo": "oscarhenrycollins/files",
+      "sourceCommit": "8a4dd8ac5189d7d9d8af2bb8a2416936668e90df",
+      "sourceBlob": "601f0864c35d59e2b68b7fd92b9e982062843ae1",
+      "recipeSha256": "27a05b7c6c89df91aa5f8015d6f997d1bf5b16124fcc9d6e03c73c276a940d20"
+    },
+    {
+      "app": "transcriber",
+      "service": "transcriber",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/transcriber",
+      "sourceCommit": "b8d1170a3f97e1d6eed8abc874bdebdf7e9f21dc",
+      "sourceBlob": "426919a61f00c75f1da961f611276d62f9715f93",
+      "recipeSha256": "143714bb75947f8c9b89e6242dbd7f17e049a051b57e12112d951b521aa43024"
+    },
+    {
+      "app": "transcriber",
+      "service": "transcriber-engine",
+      "target": "transcriber",
+      "sourceRepo": "oscarhenrycollins/transcriber",
+      "sourceCommit": "b8d1170a3f97e1d6eed8abc874bdebdf7e9f21dc",
+      "sourceBlob": "426919a61f00c75f1da961f611276d62f9715f93",
+      "recipeSha256": "143714bb75947f8c9b89e6242dbd7f17e049a051b57e12112d951b521aa43024"
+    },
+    {
+      "app": "browser",
+      "service": "browser",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/browser",
+      "sourceCommit": "4c313284bc73e0af20b7faba7a2554bff1b63513",
+      "sourceBlob": "328b6be37dae00b7c184ca088776be895975d9a2",
+      "recipeSha256": "3c88d287f94a616c8099d0fec39db7ee60b677199851aeb0c96c2b2530399d3c"
+    },
+    {
+      "app": "browser",
+      "service": "browser-engine",
+      "target": "browser",
+      "sourceRepo": "oscarhenrycollins/browser",
+      "sourceCommit": "4c313284bc73e0af20b7faba7a2554bff1b63513",
+      "sourceBlob": "328b6be37dae00b7c184ca088776be895975d9a2",
+      "recipeSha256": "3c88d287f94a616c8099d0fec39db7ee60b677199851aeb0c96c2b2530399d3c"
+    },
+    {
+      "app": "secret-drop",
+      "service": "secret-drop",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/secret-drop",
+      "sourceCommit": "690b277619847405cffc711917abafd85223f10b",
+      "sourceBlob": "5bf874957972d7c521fbbc2008c59dd3ec14b751",
+      "recipeSha256": "8308b2ebb7ecf15f7ad538148c4dd8f17976a38509d035311abfaabf53360673"
+    },
+    {
+      "app": "secret-drop",
+      "service": "secret-drop-engine",
+      "target": "secrets",
+      "sourceRepo": "oscarhenrycollins/secret-drop",
+      "sourceCommit": "690b277619847405cffc711917abafd85223f10b",
+      "sourceBlob": "5bf874957972d7c521fbbc2008c59dd3ec14b751",
+      "recipeSha256": "8308b2ebb7ecf15f7ad538148c4dd8f17976a38509d035311abfaabf53360673"
+    },
+    {
+      "app": "notifications",
+      "service": "notifications",
+      "target": "helper-python",
+      "sourceRepo": "oscarhenrycollins/notifications",
+      "sourceCommit": "0428e7c73a4ac9cb0f7a21d40c7c7a5fda16af55",
+      "sourceBlob": "c73e1dcbedaba3ac3eb5ed1fd9b027efc97cb69b",
+      "recipeSha256": "91bd26ee9767162869fde5ac124ec92fd24de42fadcfd3b9d408fa6a37e4eb04"
+    },
+    {
+      "app": "notifications",
+      "service": "notifications-engine",
+      "target": "notifications",
+      "sourceRepo": "oscarhenrycollins/notifications",
+      "sourceCommit": "0428e7c73a4ac9cb0f7a21d40c7c7a5fda16af55",
+      "sourceBlob": "c73e1dcbedaba3ac3eb5ed1fd9b027efc97cb69b",
+      "recipeSha256": "91bd26ee9767162869fde5ac124ec92fd24de42fadcfd3b9d408fa6a37e4eb04"
+    },
+    {
+      "app": "wizard-recorder",
+      "service": "wizard-recorder",
+      "target": "recorder",
+      "sourceRepo": "humanitylabs-org/wizard-recorder",
+      "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+      "sourceBlob": "298e0e5f8cafe27a1253e25447b7f5e8cd30ddde",
+      "recipeSha256": "d86020f70639ba5a4a5b57ee2e051ae2d42df6539337dd3f6da95b5c42927cb2"
+    }
+  ],
+  "infrastructureByDigest": true
+}
