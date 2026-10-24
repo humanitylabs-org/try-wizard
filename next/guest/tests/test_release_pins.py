@@ -85,6 +85,15 @@ class ReleasePins(unittest.TestCase):
         self.assertIn("assert pins==expected", s)
         self.assertNotIn('31bdc3ecb0586f61323b72227ab70506d2627e5d', s)
 
+    def test_managed_runtime_has_no_mutable_base(self):
+        source = (ROOT / 'managed-launch/Dockerfile').read_text()
+        self.assertIn('ARG HERMES_IMAGE', source)
+        self.assertEqual(source.count('FROM ${HERMES_IMAGE}'), 2)
+        self.assertNotIn('v2026.9.24-wizard-slim1', source)
+        runtime = (ROOT / 'build-runtime-payload.py').read_text()
+        self.assertIn("'HERMES_IMAGE='+hermes_ref", runtime)
+        self.assertIn("'image_id':stock['Id']", runtime)
+
 
 if __name__ == '__main__':
     unittest.main()
