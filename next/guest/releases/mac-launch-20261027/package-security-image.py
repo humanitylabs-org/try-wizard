@@ -51,7 +51,7 @@ def recipe(base,config,inventory,plan):
     # Claude's native executable carries an independent runtime; OS/certifi upgrades cannot repair it.
     if inventory['claude']:
         assert major, 'Claude Code upgrade requires Node/npm'
-        lines+=['RUN npm install --global @anthropic-ai/claude-code@2.1.303 && claude --version','ENV CLAUDE_CODE_VERSION=2.1.303']
+        lines+=['RUN rm -f /usr/local/bin/claude && npm install --global @anthropic-ai/claude-code@2.1.303 && claude --version | grep -F 2.1.303','ENV CLAUDE_CODE_VERSION=2.1.303']
     lines+=['RUN rm /opt/wizard-security/certifi.whl /opt/wizard-security/pip.whl','USER '+user]
     return '\n'.join(lines)+'\n'
 
