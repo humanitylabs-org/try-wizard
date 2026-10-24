@@ -114,7 +114,8 @@ def main():
             proc=subprocess.run(argv,input=PROBE,text=True,capture_output=True,timeout=1200,env=env)
             return {'target':image,'container':identity if a.guest else None,'returncode':proc.returncode,'log':proc.stdout+proc.stderr}
         except subprocess.TimeoutExpired:return {'target':image,'container':identity if a.guest else None,'returncode':124,'log':'inconclusive: timeout, never counted as certificate rejection'}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:result['checks']+=list(pool.map(check,running))
+    # Serial images: >4 concurrent TLS handshakes through Colima corrupt records (curl 35 / bad record mac) and make rejection inconclusive.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:result['checks']+=list(pool.map(check,running))
     result['passed']=bool(result['checks']) and all(x['returncode']==0 for x in result['checks'])
     result['allGuestImagesEnumerated']=result['passed'] and (a.guest or len(images)==len(plan['targets']))
     if not a.guest and result['passed']:

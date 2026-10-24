@@ -43,7 +43,8 @@ def python_checks():
             assert bad and isinstance(e.reason,ssl.SSLCertVerificationError),(name,url,str(e))
         return {'context':name,'url':url,'certificateRejected':bad}
     tasks=[(n,c,u,False) for n,c in ctxs for u in GOOD]+[(n,c,'https://'+h+'.we-have-a-problem.com/',True) for n,c in ctxs for h in BAD]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:checks=list(pool.map(request,tasks))
+    # 4 concurrent handshakes measured clean on Thales/Colima; 8 corrupted 14/64.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:checks=list(pool.map(request,tasks))
     # Python's incident release only upgrades bundled pip/certifi. Every ensurepip bootstrap
     # wheel must carry that real fix too; old wheels could recreate a vulnerable environment later.
     import zipfile
