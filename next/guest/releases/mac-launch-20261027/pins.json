@@ -12,7 +12,7 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+      "commit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
       "ref": "release/mac-guest-launch-20261027"
     },
     "ux": {
@@ -244,7 +244,7 @@
     }
   },
   "finalPins": {
-    "native": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+    "native": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
     "wam": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "cf16a3f4acc36e786f95d7811ab18d8ac9b826ce151aaf6cd8d575edb7da3800",
+      "sha256": "58aa1219a4f5e5c6cec416d15683f88be753922ea9ce2b2083e605ba1e560b43",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },

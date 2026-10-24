@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "queueSha256": "d8d4f8aab1bcf9a26238a27f4892560ddb2f8d2709bac1a3f0c76bf08d90a53b",
-  "sourceSelectionSha256": "0c570255cd48c062156c57ee088061e33585eaffb47bfc2a61b7cb6088445699",
+  "sourceSelectionSha256": "cde67f2581eae067ba78a80e1da60427d4f5f731d4eaf09a9f48f96f2768c753",
   "entryCount": 84,
   "counts": {
     "source-carried": 61,
@@ -99,7 +99,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "02f9a00",
@@ -135,7 +135,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "dab55ba",
@@ -302,7 +302,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "02f9a00",
@@ -1313,7 +1313,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "d786206",
@@ -1572,7 +1572,7 @@
         },
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [],
           "equivalentFiles": [
             {
@@ -1756,7 +1756,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "02f9a00",
@@ -1872,7 +1872,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "75c1f19f",
@@ -1923,7 +1923,8 @@
       "decision": "carry",
       "decisionAuthority": "Archimedes launch instruction 2026-10-24",
       "securityRecipe": "security-closure.py",
-      "securityStatus": "pending-execution-not-deferred"
+      "securityStatus": "pending-execution-not-deferred",
+      "securityRecipeCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f"
     },
     {
       "id": 82,
@@ -1933,7 +1934,7 @@
       "components": [
         {
           "component": "native",
-          "pinnedCommit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
           "ancestry": [
             {
               "queueReference": "75c1f19f",
