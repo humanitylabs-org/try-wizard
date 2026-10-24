@@ -7,6 +7,8 @@ RUN /usr/bin/python3 /opt/wizard-managed/install.py
 FROM ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard-slim1
 COPY --from=compiler /opt/wizard-managed/ /opt/wizard-managed/
 COPY control.py entrypoint.sh /opt/wizard-managed/
+# Stock managed-install config applies to all current and future agent profiles.
+ENV HERMES_MANAGED=host-payload
 ENTRYPOINT ["/bin/sh", "/opt/wizard-managed/entrypoint.sh"]
 COPY --from=compiler /usr/bin/python3.13 /usr/bin/python3.13
 COPY --from=compiler /opt/uv-python/cpython-3.13.13-linux-aarch64-gnu/bin/python3.13 /opt/uv-python/cpython-3.13.13-linux-aarch64-gnu/bin/python3.13

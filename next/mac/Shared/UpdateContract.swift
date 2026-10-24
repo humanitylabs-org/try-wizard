@@ -105,7 +105,7 @@ enum WizardGuestABI {
     }
     static func payload(_ url: URL, abi: Int) throws {
         let bom = WizardUpdate.json(url.appendingPathComponent("runtime-bom.json"))
-        guard let object = bom["guestABI"], let data = try? JSONSerialization.data(withJSONObject: object),
+        guard let object = bom["guestABI"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: object),
               let range = try? JSONDecoder().decode(Range.self, from: data),
               range.max <= supportedGuestABI.max, range.contains(abi) else {
             throw WizardUpdate.error("Payload guestABI range does not admit this disk")

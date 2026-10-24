@@ -9,7 +9,7 @@ if spec is None or spec.loader is None: raise SystemExit('Missing preservation h
 guard=importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
 p=argparse.ArgumentParser(); p.add_argument('payload',type=Path); p.add_argument('--apply',action='store_true'); p.add_argument('--cold-bootstrap',action='store_true'); p.add_argument('--guest-abi',type=int,required=True); a=p.parse_args()
 if os.geteuid()!=0: raise SystemExit('Run as root inside the Wizard guest')
-root=Path('/home/wizard/runtipi'); app_store_before=app_guard.store_state(root); data=root/'app-data/wizardapps/hermes-agent/data'
+root=Path('/home/wizard/runtipi'); data=root/'app-data/wizardapps/hermes-agent/data'
 if not (data/'config.yaml').is_file(): raise SystemExit('Existing MVP Hermes config not found; refusing unknown layout')
 for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wizard/local-proxy.conf','overlay/opt/wizard/bin/wizard-product-configure','overlay/opt/wizard/bin/wizard-runtime-configure','agent-runtime/agent_runtime.py','runtime-bom.json','wizard-shell.tar'):
  if not (a.payload/required).is_file(): raise SystemExit('Incomplete payload: '+required)
@@ -25,6 +25,7 @@ if not a.cold_bootstrap: raise SystemExit('System payload requires an apps-stopp
 guard_spec=importlib.util.spec_from_file_location('app_guard',Path(__file__).with_name('app-update-guard.py'))
 app_guard=importlib.util.module_from_spec(guard_spec); guard_spec.loader.exec_module(app_guard)
 apps_before=app_guard.inventory(); app_guard.assert_stopped(apps_before)
+app_store_before=app_guard.store_state(root)
 with (a.payload/'wizard-shell.tar').open('rb') as f: payload_sha256=hashlib.file_digest(f,'sha256').hexdigest()
 if payload_sha256!=bom['payload_sha256']: raise SystemExit('Payload digest mismatch')
 managed=bom.get('managed_runtime')

@@ -10,12 +10,12 @@ Base commit: `84720ac1230456e99feffe324ce7beaa3d49c5ce`.
 
 ## Source checks exercised
 
-- Required Mac Python discovery after all source changes: **43 tests, OK, 1 intentional Mac-only skip** (42 executed passes).
+- Required Mac Python discovery after all source changes: **44 tests, OK, 1 intentional Mac-only skip** (43 executed passes).
 - Cold maintenance/config tests with an existing PyYAML-capable interpreter: **15 tests, OK**. The cleanup-policy test was deliberately tightened to reject unnamed/third-party volumes/networks.
 - New ABI cases: exact legacy inference 0.3.0 -> 0, 0.4.0/0.4.1 -> 1; explicit ABI with arbitrary display version; unknown, boolean, string, float and negative ABI refusal; payload ABI range refusal; unchanged installer integrity loop compared byte-for-byte to the base.
 - New fresh cases: equal payloadID skips, missing/different IDs apply, journal before clone, clone before compare, reuse of activation/rollback, visible installer failure path, payload identity included in release metadata.
 - New feed cases: numeric newest-compatible selection, unknown-only index refusal, required immutable absolute HTTPS parts/sizes/digests, absent-only fallback, shared resolution for size/download/manual browser paths.
-- New ownership/app cases: foreign owner refusal, downgrade refusal source gate, app container/image/config/mount invariants, stopped-app refusal, running-app resumption, restricted cold authorization, persistent App Manager/Runtipi state fingerprints, stock Hermes managed-install configuration marker.
+- New ownership/app cases: foreign owner refusal, downgrade refusal source gate, app container/image/config/mount invariants, stopped-app refusal, running-app resumption, restricted cold authorization, persistent App Manager/Runtipi state fingerprints, stock Hermes managed-install configuration marker/environment (including future profiles). The real applier preflight prefix is executed against disposable fixture paths and an empty read-only Docker inventory; this caught and fixed guard-initialization ordering before VM execution.
 - Matrix planning/guards: four N-1/N app x image combinations, every supplied published DMG, aged disk, interruption and rollback; nine planned rows with the two legacy DMGs. Actual execution requires a worker-locked disposable Mac rig and concrete retained drivers/checkpoints.
 - `bash -n` for modified packaging scripts; Python compile checks for changed guest policy/applier helpers; `git diff --check`: passed.
 - Tree-sitter Swift parsing of all ten changed Swift source/fixture files: no syntax errors (same parser had none on their base versions). **This is not Swift compilation or typechecking.**

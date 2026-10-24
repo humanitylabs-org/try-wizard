@@ -89,10 +89,47 @@ class SystemOwnershipContract(unittest.TestCase):
             self.assertFalse(cold.authorize(request(method, path), p, find=lambda _: app), path)
         self.assertFalse(cold.authorize(request('POST', '/volumes/create', {'Name': 'user-data'}), p))
 
+    def test_guard_is_loaded_before_store_inventory(self):
+        source = (MAC.parent / 'guest/upgrade-mvp-stack.py').read_text()
+        self.assertLess(source.index('app_guard=importlib.util.module_from_spec'), source.index('app_store_before=app_guard.store_state(root)'))
+        self.assertIn('bom["guestABI"] as? [String: Any]', (MAC / 'Shared/UpdateContract.swift').read_text())
+        # Execute the real preflight prefix with disposable fixture paths and a
+        # read-only empty Docker inventory. No guest, daemon or owner state touched.
+        import ast, json, sys, tempfile, types
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory); payload = work / 'payload'; root = work / 'runtipi'
+            for relative in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wizard/local-proxy.conf',
+                             'overlay/opt/wizard/bin/wizard-product-configure','overlay/opt/wizard/bin/wizard-runtime-configure',
+                             'agent-runtime/agent_runtime.py','wizard-shell.tar'):
+                file = payload / relative; file.parent.mkdir(parents=True, exist_ok=True); file.write_text('fixture')
+            (payload / 'runtime-bom.json').write_text(json.dumps({'guestABI': {'min':0,'max':1}}))
+            config = root / 'app-data/wizardapps/hermes-agent/data/config.yaml'
+            config.parent.mkdir(parents=True); config.write_text('{}')
+            paths = {'/home/wizard/runtipi':str(root), '/etc/wizard-platform.json':str(work/'platform.json'),
+                     '/var/lib/wizard/system-owner.json':str(work/'owner.json')}
+            class FixturePaths(ast.NodeTransformer):
+                def visit_Constant(self, node):
+                    if isinstance(node.value, str) and node.value in paths:
+                        return ast.copy_location(ast.Constant(paths[node.value]), node)
+                    return node
+            tree = ast.parse(source[:source.index("with (a.payload/'wizard-shell.tar')")])
+            tree = ast.fix_missing_locations(FixturePaths().visit(tree))
+            namespace = {'__file__':str(MAC.parent/'guest/upgrade-mvp-stack.py')}
+            with patch.object(sys, 'argv', ['upgrade',str(payload),'--apply','--cold-bootstrap','--guest-abi','1']), \
+                 patch.dict(sys.modules, {'yaml':types.ModuleType('yaml')}), \
+                 patch('os.geteuid', return_value=0), patch('subprocess.check_output', return_value='') as docker:
+                exec(compile(tree, '<real-applier-preflight-fixture>', 'exec'), namespace)
+                self.assertEqual(namespace['apps_before'], {})
+                self.assertEqual(namespace['app_store_before'], {})
+                docker.assert_called_once_with(['docker','ps','-aq'], text=True)
+
     def test_payload_writes_supported_hermes_managed_config_only(self):
         source = (MAC.parent / 'guest/upgrade-mvp-stack.py').read_text()
         self.assertIn("(data/'.managed').write_text('host-payload\\n')", source)
         self.assertIn("for home in (data/'profiles').glob('*')", source)
+        self.assertIn('ENV HERMES_MANAGED=host-payload', (MAC.parent / 'guest/managed-launch/Dockerfile').read_text())
         self.assertIn('app_guard.assert_unchanged(apps_before,app_guard.inventory())', source)
         self.assertIn('System payload requires an apps-stopped maintenance boot', source)
         self.assertNotIn("'restart','wizard-app-manager-api'", source)
