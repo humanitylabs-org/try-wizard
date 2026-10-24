@@ -32,6 +32,8 @@ export TMPDIR=/work/t
 apt-get update -qq && apt-get install -y -qq python3-venv python3-pip sudo
 python3 -m venv /work/venv
 /work/venv/bin/pip install pytest==9.1.1 pyyaml==6.0.3 pyjwt==2.15.1
+# Copied trees are owned by another uid inside the throwaway verifier; mark only these paths safe.
+for n in service ux wam; do git config --global --add safe.directory /work/src/$n; done
 for n in service ux wam; do cp -a /src/final/$n /work/src/$n; cd /work/src/$n; git init -q; git add -A; done
 rc=0
 cd /work/src/service
