@@ -22,6 +22,8 @@ final class NoticeBarView: NSView {
     private var updater: SPUUpdater!
     private var ready: ((SPUUserUpdateChoice) -> Void)?
     private var cancel: (() -> Void)?
+    private var artifact: UpdateArtifact?
+    private var verifiedArchiveURL: URL?
     private var phase = "idle"
     private var message = ""
     private var version = ""
@@ -31,6 +33,7 @@ final class NoticeBarView: NSView {
     private(set) var restartAuthorized = false
     private var preparing = false
     private var ordinaryQuitPending = false
+    private var cancelledRelease: String?
     var isRecording: () -> Bool = { false }
     // The main page owns manual mic/Right Command takes. Unknown activity
     // defers installation; the trusted page freezes new starts atomically.
@@ -80,6 +83,9 @@ final class NoticeBarView: NSView {
             try WizardRelease.read(Bundle.main.bundleURL).validate(Bundle.main.bundleURL, verifyGuestFiles: false)
             updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
             try updater.start()
+            // Every archive must traverse our checksum/user-driver path. Never
+            // let Sparkle's silent-download driver stage an unchecked archive.
+            updater.automaticallyDownloadsUpdates = false
             if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
             recoverActivation()
         } catch { show("failed", "Updates unavailable — \(error.localizedDescription)", retry: true) }
@@ -190,7 +196,7 @@ final class NoticeBarView: NSView {
         // Sparkle otherwise installs a prepared update on an ordinary quit, outside the Host lease.
         // Cancel the pending installation first; never treat Later as permission to install on quit.
         if preparing { return .terminateCancel }
-        if let reply = ready { ordinaryQuitPending = true; ready = nil; reply(.skip); return .terminateCancel }
+        if let reply = ready { ordinaryQuitPending = true; ready = nil; discardStagedUpdate(reply); return .terminateCancel }
         if let cancel { ordinaryQuitPending = true; self.cancel = nil; cancel(); return .terminateCancel }
         return .terminateNow
     }
@@ -352,7 +358,13 @@ final class NoticeBarView: NSView {
         catch { show("failed", "Installed Host verified; activation receipt could not be saved") }
     }
     func updater(_ updater: SPUUpdater, shouldProceedWithUpdate item: SUAppcastItem, updateCheck: SPUUpdateCheck) throws {
+        artifact?.cancel(); artifact = nil; verifiedArchiveURL = nil
         let properties = item.propertiesDictionary
+        guard let hash = properties["wizard:sha256"] as? String,
+              hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+              let url = item.fileURL, UpdateArtifact.allowed(url), item.contentLength > 0 else {
+            throw WizardUpdate.error("Update feed is missing archive SHA-256, size or a secure URL")
+        }
         guard let text = properties["wizard:contract"] as? String, let data = text.data(using: .utf8),
               let contract = try? JSONDecoder().decode(WizardRelease.self, from: data),
               contract.schema == 1, contract.arch == "arm64", contract.minimumPeer <= WizardRelease.peer,
@@ -362,15 +374,52 @@ final class NoticeBarView: NSView {
         incomingGuest = contract.guestPatch != nil
         incomingReleaseID = contract.releaseID
     }
-    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) { if (error as NSError).code != 1001 { show("failed", "Update access unavailable or validation failed — \(error.localizedDescription)", retry: true) } }
+    func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        // A new cycle must never fall back to an unverified network download.
+        request.url = verifiedArchiveURL ?? URL(string: "http://127.0.0.1:1/unverified-update-refused")!
+    }
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        artifact?.cancel(); artifact = nil; verifiedArchiveURL = nil
+    }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        artifact?.cancel(); artifact = nil; verifiedArchiveURL = nil
+        if (error as NSError).code != 1001 { show("failed", "Update access unavailable or validation failed — \(error.localizedDescription)", retry: true) }
+    }
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) { reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false)) }
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { cancel = cancellation; show("checking", "Checking for updates…") }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         version = item.versionString
+        guard state.stage == .notDownloaded else {
+            // Sparkle may restore a download/installer from a previous process.
+            // Its bytes were not verified by this session, and .install here can
+            // skip showReady entirely. Purge it, never authorize restart here.
+            show("failed", "Previously staged update discarded — Check for updates again to verify a fresh download", retry: true)
+            discardStagedUpdate(reply); return
+        }
         if item.isInformationOnlyUpdate { show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss); return }
         show("available", "Update \(item.displayVersionString) available — downloading…")
-        // Automatic download; the ready callback below keeps restart under deliberate user control.
-        reply(.install)
+        // Keep the authenticated item unchanged. Only Sparkle's download request is
+        // redirected to the verified bytes; its Ed25519 and bundle checks still run.
+        let download = UpdateArtifact(); artifact = download
+        cancel = { [weak self] in
+            download.cancel(); self?.artifact = nil; self?.verifiedArchiveURL = nil; reply(.dismiss)
+        }
+        do {
+            guard let url = item.fileURL, let hash = item.propertiesDictionary["wizard:sha256"] as? String else {
+                throw WizardUpdate.error("Missing archive digest")
+            }
+            try download.fetch(url, hash: hash, bytes: item.contentLength, progress: { [weak self] received, expected in
+                guard let self, self.artifact === download else { return }
+                self.show("downloading", "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%")
+            }, completion: { [weak self] result in
+                guard let self, self.artifact === download else { return }
+                self.cancel = nil
+                switch result {
+                case .success(let url): self.verifiedArchiveURL = url; reply(.install)
+                case .failure(let error): self.artifact = nil; self.show("failed", error.localizedDescription, retry: true); reply(.dismiss)
+                }
+            })
+        } catch { artifact = nil; cancel = nil; download.cancel(); show("failed", error.localizedDescription, retry: true); reply(.dismiss) }
     }
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
@@ -389,7 +438,26 @@ final class NoticeBarView: NSView {
         if restartAuthorized && !applicationTerminated { DispatchQueue.main.async { NSApp.terminate(nil) } }
     }
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) { acknowledgement() }
+    private func discardStagedUpdate(_ reply: (SPUUserUpdateChoice) -> Void) {
+        // Sparkle 2.10 requires Skip, not Dismiss, to tear down an installing
+        // update. This is cancellation, never the user's "skip this release".
+        cancelledRelease = version; reply(.skip)
+    }
+    private func restoreCancelledRelease() {
+        guard let cancelledRelease else { return }
+        let defaults = UserDefaults.standard
+        // Pinned Sparkle 2.10's documented source keys (SPUSkippedUpdate.m /
+        // SUConstants.m). Clear only our cancellation, never another skip.
+        if defaults.string(forKey: "SUSkippedVersion") == cancelledRelease { defaults.removeObject(forKey: "SUSkippedVersion") }
+        if defaults.string(forKey: "SUSkippedMajorSubreleaseVersion") == cancelledRelease {
+            defaults.removeObject(forKey: "SUSkippedMajorVersion")
+            defaults.removeObject(forKey: "SUSkippedMajorSubreleaseVersion")
+        }
+        self.cancelledRelease = nil
+    }
     func dismissUpdateInstallation() {
+        restoreCancelledRelease()
+        artifact?.cancel(); artifact = nil; verifiedArchiveURL = nil
         cancel = nil; ready = nil
         if !restartAuthorized { releaseLease() }
         if ordinaryQuitPending { ordinaryQuitPending = false; DispatchQueue.main.async { NSApp.terminate(nil) } }
