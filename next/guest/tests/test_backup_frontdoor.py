@@ -348,6 +348,25 @@ class BackupHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.door.processes)
         self.assertFalse(list(self.door.root.rglob("key-*")))
 
+    async def test_transactions_are_never_killed_by_a_deadline(self):
+        seen = {}
+        real = self.door.run
+
+        async def spy(args, secret=None, job=None, timeout=door_module.ENGINE_TIMEOUT):
+            seen[args[0]] = timeout
+            return await real(args, secret=secret, job=job, timeout=timeout)
+        with patch.object(self.door, "run", new=spy):
+            j = await self.upload()
+            await self.finish(await self.post(f"jobs/{j['id']}/verify", {"secret": SECRET}))
+            await self.finish(await self.post(f"jobs/{j['id']}/import", {"secret": SECRET, "confirm": True}))
+            await self.finish(await self.post("undo", {"confirm": True}))
+            await self.finish(await self.post("activate", {"old_is_off": True}))
+            await self.finish(await self.post("export", {}))
+        self.assertEqual({op: seen[op] for op in ("import", "undo", "activate")},
+                         {"import": None, "undo": None, "activate": None})
+        self.assertEqual(seen["verify"], door_module.ENGINE_TIMEOUT)
+        self.assertEqual(seen["export"], door_module.ENGINE_TIMEOUT)
+
     async def test_undo_digest_mismatch_is_not_success(self):
         from unittest.mock import AsyncMock
         with patch.object(self.door, "run", new=AsyncMock(return_value={"ok": True, "digest_match": False})):

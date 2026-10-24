@@ -1684,7 +1684,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        WizardUpdater.shared.shouldTerminate()
+        // An ordinary quit must not silently interrupt a backup, restore, undo or switch-over.
+        let keepOpen = MainActor.assumeIsolated { backup?.isBusy == true && backup?.confirmQuitWhileBusy() != true }
+        if keepOpen { return .terminateCancel }
+        return WizardUpdater.shared.shouldTerminate()
     }
     func applicationWillTerminate(_ notification: Notification) {
         // Leave the keyboard as we found it when Wizard isn't running.

@@ -35,6 +35,9 @@ ERRORS = {
     "undo": "Undo did not finish. Keep this Wizard paused and check its restore status before retrying.",
     "activate": "Switch-over did not finish. Check the restore status; do not start the old machine.",
 }
+# The engine owns these transactions; killing it mid-swap would leave a half-restored box. No deadline.
+TRANSACTIONAL = ("import", "undo", "activate")
+ENGINE_TIMEOUT = 7200
 
 
 def reply(obj, status=200):
@@ -167,7 +170,7 @@ class BackupDoor:
         self.save(job)
         return job
 
-    async def run(self, args, secret=None, job=None, timeout=7200):
+    async def run(self, args, secret=None, job=None, timeout=ENGINE_TIMEOUT):
         key = None
         try:
             if secret is not None:
@@ -335,7 +338,7 @@ class BackupDoor:
                     args += ["--yes"]
             elif op == "activate":
                 args += ["--old-is-off"]
-            raw = await self.run(args, secret=secret, job=j)
+            raw = await self.run(args, secret=secret, job=j, timeout=None if op in TRANSACTIONAL else ENGINE_TIMEOUT)
             result = public_result(op, raw)
             if secret:
                 # Defensive: even a malicious fixture/engine must not echo the submitted secret in a receipt.

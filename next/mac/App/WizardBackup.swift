@@ -23,8 +23,12 @@ final class WizardBackupClient: NSObject, URLSessionTaskDelegate {
         return try decode(data, response)
     }
     private func decode(_ data: Data, _ response: URLResponse) throws -> [String: Any] {
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let result = object else {
+            // The front door only sends curated, owner-safe `error` strings (never engine prose or request data).
+            if let message = object?["error"] as? String, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw BackupFailure(String(message.prefix(300)))
+            }
             throw BackupFailure("Wizard could not complete the backup request. Check that Wizard OS is running and up to date.")
         }
         return result
@@ -128,8 +132,21 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
         buttons.forEach { a.addButton(withTitle: $0) }
         return a
     }
+    /// Return/Enter must never start an irreversible step: Cancel is the default, the action is marked destructive.
     private func confirm(_ title: String, _ message: String, action: String) -> Bool {
-        alert(title, message, buttons: [action, "Cancel"]).runModal() == .alertFirstButtonReturn
+        let a = alert(title, message, buttons: [action, "Cancel"])
+        a.buttons[0].hasDestructiveAction = true
+        a.buttons[0].keyEquivalent = ""
+        a.buttons[1].keyEquivalent = "\r"
+        return a.runModal() == .alertFirstButtonReturn
+    }
+    var isBusy: Bool { busy }
+    /// True when the owner still wants to quit while a backup, restore, undo or switch-over is running.
+    func confirmQuitWhileBusy() -> Bool {
+        let a = alert("A backup or restore is still running", "Quitting now can interrupt it and leave this Wizard needing attention. Keep Wizard open until it finishes.",
+                      buttons: ["Keep Wizard Open", "Quit Anyway"])
+        a.buttons[1].hasDestructiveAction = true
+        return a.runModal() == .alertSecondButtonReturn
     }
     private func showProgress(_ text: String) {
         if progress == nil {
@@ -202,7 +219,16 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
         let save = NSButton(checkboxWithTitle: "Also save in this Mac's Keychain (optional)", target: nil, action: nil)
         save.frame = NSRect(x: 0, y: 4, width: 460, height: 26); view.addSubview(field); view.addSubview(save); a.accessoryView = view
         while a.runModal() == .alertSecondButtonReturn {
-            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(key, forType: .string)
+            // Concealed: clipboard managers that honor nspasteboard.org skip it. Cleared after 90s unless replaced.
+            let board = NSPasteboard.general
+            let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+            board.declareTypes([.string, concealed], owner: nil)
+            board.setString(key, forType: .string)
+            board.setData(Data(), forType: concealed)
+            let copied = board.changeCount
+            DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+                if NSPasteboard.general.changeCount == copied { NSPasteboard.general.clearContents() }
+            }
         }
         field.stringValue = ""
         if save.state == .on { try WizardBackupKeychain.save(key) }
@@ -247,7 +273,9 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
             showProgress("Sending the encrypted backup into Wizard…\nIt is not stored in shared Files.")
             let uploaded = try await client.upload(source)
             guard let id = uploaded["id"] as? String else { throw BackupFailure("Wizard did not receive the backup.") }
-            let verified = try await wait(client.call("jobs/\(id)/verify", method: "POST", body: ["secret": secret]))
+            let verified: [String: Any]
+            do { verified = try await wait(client.call("jobs/\(id)/verify", method: "POST", body: ["secret": secret])) }
+            catch { _ = try? await client.call("jobs/\(id)", method: "DELETE"); throw error }  // Do not leave the upload staged.
             hideProgress()
             if save { try WizardBackupKeychain.save(secret) }
             guard confirm("Restore this Wizard backup?", WizardBackupContract.summary(verified["result"] as? [String: Any] ?? [:]), action: "Restore Here") else {
