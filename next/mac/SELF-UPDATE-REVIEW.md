@@ -13,7 +13,7 @@ A separate GPT-6.1 reviewer inspected supplied source read-only. Initial finding
 - **P2: negative-feed mutations can change namespace prefixes and reject for an unrelated reason.** Register both namespaces in the QA process, wait for a fresh feed/archive request, and assert the intended SHA/validation failure message.
 - Review requested explicit signing/feed configuration inspection: QA now runs `codesign --verify --deep --strict`, records `Signature=adhoc`, and asserts the pinned public key, required signed feed, and verification-before-extraction settings on all three apps.
 
-A follow-up independent review is pending. Initial review alone is not approval.
+Follow-up review confirmed those initial fixes and identified two further P2 issues: the extraction/setup window lacked a cancellation closure, and cancelling a new release could erase an older skip preference. Both are now addressed in source: an active-cycle flag defers Quit until the installer can be torn down; skip preferences are snapshotted and conditionally restored rather than blindly removed. Native QA now forces ordinary Quit at the real extraction callback and starts with a pre-existing older skipped version. Sparkle has no simple public "deny install-on-quit" Boolean; the app must not terminate during an un-torn-down installation cycle. A final review and runtime proof remain pending. Initial/follow-up findings alone are not approval.
 
 ## Verified so far
 

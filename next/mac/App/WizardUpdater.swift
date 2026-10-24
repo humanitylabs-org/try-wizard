@@ -34,6 +34,8 @@ final class NoticeBarView: NSView {
     private var preparing = false
     private var ordinaryQuitPending = false
     private var cancelledRelease: String?
+    private var skipBeforeCancellation: [String: Any] = [:]
+    private var installCycleActive = false
     var isRecording: () -> Bool = { false }
     // The main page owns manual mic/Right Command takes. Unknown activity
     // defers installation; the trusted page freezes new starts atomically.
@@ -198,6 +200,9 @@ final class NoticeBarView: NSView {
         if preparing { return .terminateCancel }
         if let reply = ready { ordinaryQuitPending = true; ready = nil; discardStagedUpdate(reply); return .terminateCancel }
         if let cancel { ordinaryQuitPending = true; self.cancel = nil; cancel(); return .terminateCancel }
+        // There is no Sparkle cancellation callback during extraction/installer
+        // setup. Defer ordinary Quit until showReady can tear that installer down.
+        if installCycleActive { ordinaryQuitPending = true; return .terminateCancel }
         return .terminateNow
     }
     @objc func updateAndRestart() {
@@ -388,7 +393,7 @@ final class NoticeBarView: NSView {
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) { reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false)) }
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { cancel = cancellation; show("checking", "Checking for updates…") }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        version = item.versionString
+        version = item.versionString; installCycleActive = true
         guard state.stage == .notDownloaded else {
             // Sparkle may restore a download/installer from a previous process.
             // Its bytes were not verified by this session, and .install here can
@@ -428,9 +433,20 @@ final class NoticeBarView: NSView {
     func showDownloadInitiated(cancellation: @escaping () -> Void) { cancel = cancellation; expected = 0; received = 0; show("downloading", "Update available — downloading…") }
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) { expected = expectedContentLength }
     func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
-    func showDownloadDidStartExtractingUpdate() { cancel = nil; show("verifying", "Verifying and preparing update…") }
+    func showDownloadDidStartExtractingUpdate() {
+        cancel = nil; show("verifying", "Verifying complete App + Host update…")
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "QAHooks") && defaults.bool(forKey: "QAQuitDuringUpdateExtraction") {
+            defaults.removeObject(forKey: "QAQuitDuringUpdateExtraction")
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
     func showExtractionReceivedProgress(_ progress: Double) { show("verifying", "Preparing update \(Int(progress * 100))%") }
-    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; show("ready", "Update \(version) available — ready to restart") }
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        cancel = nil
+        if ordinaryQuitPending { discardStagedUpdate(reply); return }
+        ready = reply; show("ready", "Update \(version) available — ready to restart")
+    }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
         show("installing", "Installing update and restarting…")
         // Installation handoff is confirmed. Quit ourselves after the deliberate
@@ -441,22 +457,31 @@ final class NoticeBarView: NSView {
     private func discardStagedUpdate(_ reply: (SPUUserUpdateChoice) -> Void) {
         // Sparkle 2.10 requires Skip, not Dismiss, to tear down an installing
         // update. This is cancellation, never the user's "skip this release".
-        cancelledRelease = version; reply(.skip)
+        cancelledRelease = version
+        let defaults = UserDefaults.standard
+        skipBeforeCancellation = [:]
+        for key in ["SUSkippedVersion", "SUSkippedMajorVersion", "SUSkippedMajorSubreleaseVersion"] {
+            if let value = defaults.object(forKey: key) { skipBeforeCancellation[key] = value }
+        }
+        reply(.skip)
     }
     private func restoreCancelledRelease() {
         guard let cancelledRelease else { return }
         let defaults = UserDefaults.standard
-        // Pinned Sparkle 2.10's documented source keys (SPUSkippedUpdate.m /
+        // Pinned Sparkle 2.10's internal source keys (SPUSkippedUpdate.m /
         // SUConstants.m). Clear only our cancellation, never another skip.
-        if defaults.string(forKey: "SUSkippedVersion") == cancelledRelease { defaults.removeObject(forKey: "SUSkippedVersion") }
-        if defaults.string(forKey: "SUSkippedMajorSubreleaseVersion") == cancelledRelease {
-            defaults.removeObject(forKey: "SUSkippedMajorVersion")
-            defaults.removeObject(forKey: "SUSkippedMajorSubreleaseVersion")
+        func restore(_ key: String) {
+            if let previous = skipBeforeCancellation[key] { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
         }
-        self.cancelledRelease = nil
+        if defaults.string(forKey: "SUSkippedVersion") == cancelledRelease { restore("SUSkippedVersion") }
+        if defaults.string(forKey: "SUSkippedMajorSubreleaseVersion") == cancelledRelease {
+            restore("SUSkippedMajorVersion"); restore("SUSkippedMajorSubreleaseVersion")
+        }
+        self.cancelledRelease = nil; skipBeforeCancellation = [:]
     }
     func dismissUpdateInstallation() {
-        restoreCancelledRelease()
+        restoreCancelledRelease(); installCycleActive = false
         artifact?.cancel(); artifact = nil; verifiedArchiveURL = nil
         cancel = nil; ready = nil
         if !restartAuthorized { releaseLease() }

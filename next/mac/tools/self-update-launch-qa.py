@@ -125,11 +125,22 @@ try:
     prefs={'QAHooks':True,'QAWebStorage':True,'wizardDataHome':str(data),'SUFeedURL':base+'/appcast.xml',
            'SUEnableAutomaticChecks':True,'SUAutomaticallyUpdate':False,'SUHasLaunchedBefore':True,
            'SUValidateBeforeExtraction':True,'backends':b'[]','activeBackend':0,'filesFolder':str(root/'files'),
-           'SUEnableSystemProfiling':False,'wizardKeyEnabled':False,'MeetingPrompts':False,'VoiceKeys':False}
+           'SUEnableSystemProfiling':False,'wizardKeyEnabled':False,'MeetingPrompts':False,'VoiceKeys':False,
+           'SUSkippedVersion':str(a.first_build-2),'QAQuitDuringUpdateExtraction':True}
     pref=root/'preferences.plist'; pref.write_bytes(plistlib.dumps(prefs)); run(['defaults','import',domain,pref])
     first=a.first_build
     stage(first+1)
     run(['ditto',root/f'build-{first}/Wizard.app',installed])
+    run(['open','-n','-a',installed,'--args','--wizard-data-home',data])
+    end=time.time()+20
+    while not live() and time.time()<end: time.sleep(.1)
+    assert live(), 'Extraction-quit probe app never started'
+    end=time.time()+180
+    while live() and time.time()<end: time.sleep(.25)
+    assert not live() and version()==str(first), 'Quit during extraction replaced app or failed to terminate'
+    saved=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
+    assert not saved.get('QAQuitDuringUpdateExtraction') and saved.get('SUSkippedVersion')==str(first-2)
+    record('ordinary-quit-during-extraction-defers-tears-down-preserves-previous-skip')
     launch(); initial=ready(); record('real-Sparkle-signed-feed-SHA256-download-ready',initial)
     notify('update-later'); time.sleep(1); assert version()==str(first); record('later-does-not-install')
     notify('update-check'); wait_state(lambda s:s.get('phase')=='ready' and s.get('visible'))
@@ -138,7 +149,7 @@ try:
     assert version()==str(first) and live(); record('busy-defers-restart',blocked)
     notify('update-busy off'); quit_app(); assert version()==str(first); record('ordinary-quit-does-not-install')
     saved=plistlib.loads(subprocess.check_output(['defaults','export',domain,'-']))
-    assert saved.get('SUSkippedVersion') != str(first+1)
+    assert saved.get('SUSkippedVersion') == str(first-2)
     launch(); wait_state(lambda s:s.get('phase')=='ready' and s.get('ready'),180)
     record('automatic-reoffer-after-ordinary-quit')
     notify('update-restart')
