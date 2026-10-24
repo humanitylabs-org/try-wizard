@@ -263,7 +263,7 @@
     {
       "id": "builder-source",
       "status": "open",
-      "detail": "try-wizard #21 refreshed to current main with focused 3/3. Exact-head Thales CI and non-author admin approval/merge required; runtime factory/SSH proof remains a release acceptance gate."
+      "detail": "try-wizard #21 refreshed to current main with focused 3/3. Exact-head native Build/review passed; Tests failed in existing PortForwardSocketTests.swift closing-connection case (one issue across 425 Swift tests), failed-job rerun requested. Green tests and non-author admin approval/merge required; runtime factory/SSH proof remains a release acceptance gate."
     },
     {
       "id": "recorder",

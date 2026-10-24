@@ -28,8 +28,11 @@ old compatibility pins, or set the status to admitted to get past a gate.
   live-shell comparison; a main-only freeze is not proof of live feature parity.
 - `try-wizard#21` was refreshed onto current main. Its factory fixture now mocks
   the product connection required by current main: focused tests **3/3 pass**.
-  Exact head `d786206c68c86d3e17d663c293114e1328fb5622`; full Thales CI and a
-  non-author admin's approval/merge remain required.
+  Exact head `d786206c68c86d3e17d663c293114e1328fb5622`; Thales native Build and
+  agent review passed. Full Tests failed in the existing closing-connection
+  `PortForwardSocketTests.swift` case (one issue across 425 Swift tests); one
+  failed-job rerun was requested. Green exact-head tests and non-author admin
+  approval/merge remain required.
 - Recorder source exists, but its product rename is not fully on UX main and no
   approved immutable arm64 Recorder image is selected. Use `wizard-recorder`,
   display `Recorder`, and do not migrate owner content as a packaging side effect.
