@@ -55,6 +55,13 @@ import Darwin
         }
         do {
             var journal = WizardUpdate.json(WizardUpdate.journal)
+            let release = try WizardRelease.read(Bundle.main.bundleURL)
+            try WizardGuestABI.requireSystemOwner(WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json")),
+                diskIdentity: WizardShared.diskIdentity, incomingBuild: release.build)
+            journal["maintenanceCold"] = true
+            let token = journal["nonce"] as? String ?? ""
+            guard UUID(uuidString: token) != nil else { throw WizardUpdate.error("Missing maintenance transaction token") }
+            try WizardUpdate.write(["token": token, "admission": "cold-pid1"], WizardUpdate.maintenanceJournal)
             journal["phase"] = "guest-activating"
             try WizardUpdate.write(journal, WizardUpdate.journal)
             guard WizardShared.guestUpdatePayload != nil else { throw WizardUpdate.error("Guest payload validation failed") }
@@ -229,6 +236,13 @@ import Darwin
         guard running, !held else { retry(); return }
         WizardUpdate.idle { reason in
             guard reason == nil else { retry(); return }
+            if migrationError == nil {
+                let journal = WizardUpdate.json(WizardUpdate.journal)
+                let health = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("apps-health.json"))
+                guard health["nonce"] as? String == journal["nonce"] as? String, health["ok"] as? Bool == true else {
+                    HostControl.send("verify-apps-after-update"); retry(); return
+                }
+            }
             self.onDone(migrationError.map { "Prior guest restored — \($0)" })
         }
     }

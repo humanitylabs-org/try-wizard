@@ -27,4 +27,15 @@ enum WizardGuestPatchCommand {
     PY
     exit
     """
+    static let appInventory = """
+    python3 - <<'PY'
+    import json,subprocess
+    ids=subprocess.check_output(['docker','ps','-aq'],text=True).split()
+    rows=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)) if ids else []
+    system={'hermes-agent-engine','hermes-agent','wizard-shell','transcriber-engine','runtipi','runtipi-db','runtipi-queue','runtipi-reverse-proxy'}
+    apps={r['Id']:{'running':r['State']['Running'],'image':r['Image'],'name':r['Name']} for r in rows if (r['Config'].get('Labels') or {}).get('com.docker.compose.service','') not in system}
+    print('WIZARD_PATCH_OK '+json.dumps({'apps':apps}))
+    PY
+    exit
+    """
 }

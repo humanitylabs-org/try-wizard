@@ -53,7 +53,7 @@ enum WizardShared {
     }
     static var coldBootstrapToken: String? {
         let j = WizardUpdate.json(WizardUpdate.journal)
-        guard (j["kind"] as? String == "legacy-cold" || j["legacyCold"] as? Bool == true), j["phase"] as? String == "guest-activating",
+        guard (j["kind"] as? String == "legacy-cold" || j["legacyCold"] as? Bool == true || j["maintenanceCold"] as? Bool == true), j["phase"] as? String == "guest-activating",
               j["diskIdentity"] as? String == diskIdentity,
               let token = j["nonce"] as? String, UUID(uuidString: token) != nil,
               guestUpdatePayload != nil else { return nil }

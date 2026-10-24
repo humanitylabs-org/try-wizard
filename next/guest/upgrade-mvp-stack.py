@@ -19,6 +19,12 @@ if spec is None or spec.loader is None: raise SystemExit('Missing update contrac
 contract=importlib.util.module_from_spec(spec); spec.loader.exec_module(contract)
 abi=contract.read_platform('/etc/wizard-platform.json',a.guest_abi)
 contract.admit_payload(bom,abi)
+owner_path=Path('/var/lib/wizard/system-owner.json')
+contract.require_system_owner(json.loads(owner_path.read_text()) if owner_path.exists() else {})
+if not a.cold_bootstrap: raise SystemExit('System payload requires an apps-stopped maintenance boot')
+guard_spec=importlib.util.spec_from_file_location('app_guard',Path(__file__).with_name('app-update-guard.py'))
+app_guard=importlib.util.module_from_spec(guard_spec); guard_spec.loader.exec_module(app_guard)
+apps_before=app_guard.inventory(); app_guard.assert_stopped(apps_before)
 with (a.payload/'wizard-shell.tar').open('rb') as f: payload_sha256=hashlib.file_digest(f,'sha256').hexdigest()
 if payload_sha256!=bom['payload_sha256']: raise SystemExit('Payload digest mismatch')
 managed=bom.get('managed_runtime')
@@ -145,7 +151,7 @@ r.wait_status(urn, {'running'}, timeout=600)
 """
 subprocess.run(['sudo','-u','wizard','env','HOME=/home/wizard','python3','-c',restart_service],check=True,stdout=subprocess.DEVNULL)
 subprocess.run(['sudo','-iu','wizard','wam','apps','--json'],check=True,stdout=subprocess.DEVNULL)
-if not a.cold_bootstrap: subprocess.run(['sudo','-u','wizard','env','XDG_RUNTIME_DIR=/run/user/1000','systemctl','--user','restart','wizard-app-manager-api','wizard-app-lifecycle','wizard-app-lifecycle-containers'],check=True)
+# App Manager lifecycle and third-party apps remain quiesced until normal boot.
 subprocess.run(['systemctl','restart','wizard-local-proxy','wizard-setup'],check=True)
 cid=subprocess.check_output(['docker','ps','-q','--filter','label=com.docker.compose.service=hermes-agent-engine'],text=True).strip()
 if not cid or '\n' in cid: raise SystemExit('Ambiguous Hermes engine; refusing restart')
@@ -161,14 +167,23 @@ if actual_image!=expected_image: raise SystemExit('Service did not load the new 
 subprocess.run(['systemctl','is-active','--quiet','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
 if yaml.safe_load((data/'config.yaml').read_text()).get('model')!=before_model: raise SystemExit('Configured model changed')
 if any(digest(runtime_tokens/n)!=v for n,v in tokens_before.items()): raise SystemExit('Existing runtime token changed')
-after={str(p):digest(p) for p in protected}
+# Stock Hermes' supported managed-install marker disables self-update without
+# changing core code or rewriting user config/memories/auth. The marker is config.
+(data/'.managed').write_text('host-payload\n'); os.chown(data/'.managed',1000,1000)
+for home in (data/'profiles').glob('*'):
+ if home.is_dir():
+  (home/'.managed').write_text('host-payload\n'); os.chown(home/'.managed',1000,1000)
+owner_path.parent.mkdir(parents=True,exist_ok=True)
+owner_path.write_text(json.dumps({'systemOwner':'host-payload'})+'\n')
+app_guard.assert_unchanged(apps_before,app_guard.inventory())
+after={str(src):digest(src) for src in protected}
 after_auth_hash,after_auth=auth_snapshot()
 after[str(data/'auth.json')]=after_auth_hash
 auth_report=guard.compare_auth(before_auth,after_auth)
 changed=[Path(p).name for p in before if before[p]!=after[p]]
 env_report=guard.compare_env(before_env,(data/'.env').read_bytes(),managed_ssh_verified=bool(ssh_report.get('ssh_probe') and managed_key_before and managed_key_before==legacy_key_before==digest(managed_key)))
 other_changed=[p for p in changed if p not in ('auth.json','.env')]
-report={'env':env_report,'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
+report={'systemOwner':'host-payload','apps_untouched':True,'env':env_report,'source_pins':bom['sources'],'runtime_bom_sha256':digest(a.payload/'runtime-bom.json'),'configured_model_preserved':True,'runtime_tokens_preserved':True,'patch':'mac-stack-v1','at':int(time.time()),'protected_files_byte_unchanged':before==after,'protected_before_sha256':before,'protected_after_sha256':after,'permanent_identity_credentials_preserved':auth_report['stable_identity_credentials_preserved'],'auth':auth_report,'service_image':actual_image,'engine_image_unchanged':before_engine_image==after_engine_image,'engine_image':after_engine_image}
 if managed:
  report['managed_runtime_image']=managed['image'];report['stock_base_image_preserved']=bom['stock_hermes']['image_id'];report['maintenance_admission_held']=held
 (b/'preservation-latest.json').write_text(json.dumps(report,sort_keys=True)+'\n')

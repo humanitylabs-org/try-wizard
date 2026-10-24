@@ -26,6 +26,11 @@ def admit_payload(bom, abi):
         raise ValueError('Payload guestABI range does not admit this disk')
 
 
+def require_system_owner(receipt):
+    if 'systemOwner' in receipt and receipt['systemOwner'] != 'host-payload':
+        raise ValueError('System payload refused: this disk is owned by another updater')
+
+
 def requires_fresh_apply(baked, bundled):
     return not isinstance(baked, str) or not isinstance(bundled, str) or not baked or not bundled or baked != bundled
 

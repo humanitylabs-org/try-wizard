@@ -54,8 +54,11 @@ class ColdTests(unittest.TestCase):
             self.assertFalse(G.authorize(self.request(path),self.policy,lambda _:self.old),path)
         self.assertFalse(G.authorize(self.request('/containers/create',body={'Image':G.STOCK,'Labels':{'com.docker.compose.service':'runtipi'}}),self.policy))
     def test_inspection_loading_cleanup_not_execution(self):
-        for path in ('/images/load','/networks/create','/volumes/create'):
-            self.assertTrue(G.authorize(self.request(path),self.policy),path)
+        self.assertTrue(G.authorize(self.request('/images/load'),self.policy))
+        for path in ('/networks/create','/volumes/create'):
+            self.assertFalse(G.authorize(self.request(path),self.policy),path)
+            self.assertTrue(G.authorize(self.request(path,body={'Name':'wizard-shell-owned'}),self.policy),path)
+            self.assertFalse(G.authorize(self.request(path,body={'Name':'third-party-app'}),self.policy),path)
         self.assertTrue(G.authorize(self.request('/containers/old/json','GET'),self.policy))
         self.assertTrue(G.authorize(self.request('/containers/old/stop'),self.policy,lambda _:self.old))
     def test_known_core_only(self):

@@ -76,8 +76,12 @@ def inventory(directory=DOCKER):
         s = c['State']
         if any(s.get(k) for k in ('Running', 'Paused', 'Restarting', 'Pid')):
             raise RuntimeError('Disk was not cleanly stopped')
-        if KNOWN.get(service(c)) != c['Image'] or h.get('Runtime') not in ('runc', ''):
-            raise RuntimeError('Unknown legacy container/image/runtime')
+        owned = service(c) in ('hermes-agent-engine', 'wizard-shell')
+        base = service(c).startswith('runtipi') or service(c) == 'hermes-agent'
+        if ((base and KNOWN.get(service(c)) != c['Image']) or
+                (owned and not re.fullmatch('sha256:[a-f0-9]{64}', c['Image'])) or
+                h.get('Runtime') not in ('runc', '')):
+            raise RuntimeError('Unknown container/image/runtime')
         if c.get('Driver') != 'overlay2' or h.get('AutoRemove'):
             raise RuntimeError('Unknown legacy storage/removal semantics')
         rows.append((p, c, h))
@@ -92,7 +96,13 @@ def install():
         raise RuntimeError('Cold bootstrap is PID1 only')
     token = next((x.split('=', 1)[1] for x in Path('/proc/cmdline').read_text().split() if x.startswith('wizard.cold=')), '')
     if not re.fullmatch('[a-fA-F0-9-]{36}', token): raise RuntimeError('Missing cold transaction')
-    if STATE.exists(): raise RuntimeError('Interrupted cold bootstrap: restore stopped snapshot first')
+    if STATE.exists():
+        prior = read(STATE/'policy.json')
+        if prior.get('phase') != 'activated':
+            raise RuntimeError('Interrupted cold bootstrap: restore stopped snapshot first')
+        # Preserve completed evidence; only an activated transaction can start a new one.
+        history = STATE.parent/'cold-history'; history.mkdir(exist_ok=True)
+        STATE.rename(history/prior['token'])
     versions = run(['dpkg-query', '-W', '-f=${Package}=${Version}\n', 'docker-ce', 'containerd.io'])
     if set(versions.splitlines()) != {'docker-ce=5:29.9.0-1~debian.13~trixie', 'containerd.io=2.4.1-2~debian.13~trixie'}:
         raise RuntimeError('Unsupported Docker/containerd version')
@@ -133,8 +143,12 @@ def install():
     sys.path.insert(0, '/opt/wizard/agent-runtime')
     from managed_maintenance import ManagedMaintenance
     m = ManagedMaintenance()
-    if m.read(): raise RuntimeError('Unexpected pre-existing managed lease')
-    m.save({'token': token, 'phase': 'held', 'created': time.time(), 'runtimes': [], 'containers': [], 'admission': 'cold-pid1'})
+    previous = m.read()
+    if previous and (previous['token'] != token or previous['phase'] != 'held'):
+        raise RuntimeError('Unexpected pre-existing managed lease')
+    lease = previous or {'token': token, 'phase': 'held', 'created': time.time(), 'runtimes': [], 'containers': []}
+    lease['admission'] = 'cold-pid1'
+    m.save(lease)
     write(Path('/etc/docker/plugins/wizard-cold.spec'), 'unix:///run/wizard-cold-authz.sock\n', 0o644)
     cfg['authorization-plugins'] = ['wizard-cold']; cfg['live-restore'] = False
     write(daemon, cfg, 0o644)
@@ -189,15 +203,21 @@ def authorize(request, policy, find=lookup):
     if match:
         name, action = match.groups(); c = find(name)
         if not c: return False
-        if action in ('stop', 'kill', 'wait', 'rename'): return True
+        if action in ('stop', 'kill', 'wait', 'rename'):
+            return service(c) in ('hermes-agent-engine', 'wizard-shell') or permitted_container(c, policy)
         if action == 'exec': return False  # no stock CLI invocation during cold migration
         if action == 'update':
             return method == 'POST' and body == {'RestartPolicy': {'Name': 'no', 'MaximumRetryCount': 0}}
         return permitted_container(c, policy)
     # Minimal non-executing API used by sealed image load + Runtipi compose.
-    if method == 'POST' and path in ('/images/load', '/images/prune', '/networks/create', '/volumes/create'): return True
+    if method == 'POST' and path == '/images/load': return True
+    # Never prune app images or mutate app volumes/networks during system apply.
+    if method == 'POST' and path in ('/networks/create', '/volumes/create'):
+        return body.get('Name', body.get('name', '')).startswith(('wizard-shell', 'hermes-agent'))
     if method == 'POST' and re.fullmatch('/networks/[^/]+/(connect|disconnect)', path): return True
-    if method == 'DELETE' and re.fullmatch('/(containers|networks|volumes)/[^/]+', path): return True
+    if method == 'DELETE' and re.fullmatch('/containers/[^/]+', path):
+        c = find(path.rsplit('/', 1)[1])
+        return bool(c and service(c) in ('hermes-agent-engine', 'wizard-shell'))
     return False  # exec-start, build, plugins, swarm, checkpoint restore, etc.
 
 
@@ -230,7 +250,12 @@ def admit(token):
     if run(['docker', 'ps', '-q']): raise RuntimeError('Unexpected cold-started container')
     old = next(k for k,v in p['containers'].items() if v['service']=='hermes-agent-engine')
     denied_routes = []
-    for args in (['start',old], ['restart',old], ['unpause',old], ['exec',old,'python3','-c','raise SystemExit(99)']):
+    # An identical managed image is safe behind its durable launch lease. A
+    # different/legacy engine must never start. Exec remains forbidden for both.
+    probes = [['exec',old,'python3','-c','raise SystemExit(99)']]
+    if p['containers'][old]['image'] != p['managed']:
+        probes += [[action,old] for action in ('start','restart','unpause')]
+    for args in probes:
         denied = subprocess.run(['docker',*args],capture_output=True,text=True,timeout=30)
         if denied.returncode == 0 or 'WIZARD_COLD_DENIED' not in denied.stderr: raise RuntimeError('Forbidden execution not rejected by AuthZ: '+args[0])
         denied_routes.append(args[0])

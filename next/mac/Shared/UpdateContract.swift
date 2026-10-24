@@ -88,6 +88,16 @@ enum WizardGuestABI {
         }
         return abi
     }
+    static func requireSystemOwner(_ receipt: [String: Any], diskIdentity: String, incomingBuild: String) throws {
+        // No field is the legacy host-owned migration case; an explicit other owner never falls back.
+        if let owner = receipt["systemOwner"], (owner as? String) != "host-payload" {
+            throw WizardUpdate.error("System payload refused: this disk is owned by another updater")
+        }
+        if receipt["diskIdentity"] as? String == diskIdentity, let build = receipt["payloadBuild"] as? String,
+           incomingBuild.compare(build, options: .numeric) == .orderedAscending {
+            throw WizardUpdate.error("System payload downgrade refused; newer disk remains bootable")
+        }
+    }
     static func requiresFreshApply(baked: String?, bundled: String?) -> Bool {
         // Missing legacy IDs always apply. Only exact content identity skips.
         guard let baked, let bundled, !baked.isEmpty, !bundled.isEmpty else { return true }

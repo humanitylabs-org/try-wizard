@@ -353,14 +353,14 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
     private var stopCompletion: (() -> Void)?
 
-    func runGuestPatch(until deadline: Date = Date().addingTimeInterval(90), _ complete: @escaping ([String: Any]?) -> Void) {
+    func runGuestPatch(until deadline: Date = Date().addingTimeInterval(90), script: String? = nil, _ complete: @escaping ([String: Any]?) -> Void) {
         guard state == .running, let machine = vm, let device = machine.socketDevices.first as? VZVirtioSocketDevice else { complete(nil); return }
         device.connect(toPort: WizardShared.guestDevShellPort) { [weak self] result in
             guard let self else { complete(nil); return }
             switch result {
             case .failure:
                 if WizardShared.coldBootstrapToken != nil && Date() < deadline {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.runGuestPatch(until: deadline, complete) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.runGuestPatch(until: deadline, script: script, complete) }
                 } else { complete(nil) }
             case .success(let connection):
                 self.heldConnections.append(connection)
@@ -374,7 +374,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 DispatchQueue.global(qos: .utility).async {
                     let handle = FileHandle(fileDescriptor: connection.fileDescriptor, closeOnDealloc: false)
                     do {
-                        try handle.write(contentsOf: Data((WizardGuestPatchCommand.script + "\n").utf8))
+                        try handle.write(contentsOf: Data(((script ?? WizardGuestPatchCommand.script) + "\n").utf8))
                         let data = try handle.readToEnd() ?? Data()
                         let text = String(data: data, encoding: .utf8) ?? ""
                         let line = text.split(separator: "\n").first(where: { $0.hasPrefix("WIZARD_PATCH_OK ") })
@@ -481,7 +481,9 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
         // Developer/QA only: with ~/Library/Application Support/Wizard/dev-shell present, the guest opens a root shell on
         // vsock 9200, bridged to 127.0.0.1:48000 (used by mac/qa-guest.sh for `wam doctor` and friends).
-        if WizardShared.devShell || WizardShared.guestUpdatePayload != nil { boot.commandLine += " wizard.dev=1" }
+        // Private host-only vsock is also needed for pre-clone and post-apply app inventory.
+        // The Mac TCP bridge remains gated by the explicit dev-shell QA switch.
+        boot.commandLine += " wizard.dev=1"
 
         let c = VZVirtualMachineConfiguration()
         c.bootLoader = boot
@@ -637,6 +639,20 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func command(_ n: Notification) {
         if n.object as? String == "prepare-update" { prepareUpdate(); return }
         if n.object as? String == "apply-guest-update" { applyGuestUpdate(); return }
+        if n.object as? String == "verify-apps-after-update" {
+            let journal = WizardUpdate.json(WizardUpdate.journal)
+            guard journal["dataHome"] as? String == WizardShared.supportDir.path,
+                  journal["phase"] as? String == "guest-activated",
+                  journal["diskIdentity"] as? String == WizardShared.diskIdentity else { return }
+            vm.runGuestPatch(script: WizardGuestPatchCommand.appInventory) { inventory in
+                guard let after = inventory?["apps"] as? [String: [String: Any]] else { return }
+                let before = journal["appsBefore"] as? [String: [String: Any]] ?? [:]
+                let known = journal["appsBefore"] != nil || journal["kind"] as? String == "fresh" || journal["kind"] as? String == "legacy-cold"
+                let ok = known && before.allSatisfy { id, app in app["running"] as? Bool != true || (after[id]?["running"] as? Bool == true && after[id]?["image"] as? String == app["image"] as? String) }
+                try? WizardUpdate.write(["nonce": journal["nonce"] ?? "", "ok": ok], WizardUpdate.dir.appendingPathComponent("apps-health.json"))
+            }
+            return
+        }
         if preparingUpdate || guestPatchBusy { return }
         switch n.object as? String {
         case "start": vm.start()
@@ -657,6 +673,11 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let expires = request["expires"] as? Double, expires > Date().timeIntervalSince1970 else { return }
         let response = WizardUpdate.dir.appendingPathComponent("guest-response.json")
         if WizardUpdate.json(response)["nonce"] as? String == nonce { return }
+        do {
+            let release = try WizardRelease.read(URL(fileURLWithPath: enclosingApp))
+            try WizardGuestABI.requireSystemOwner(WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json")),
+                diskIdentity: WizardShared.diskIdentity, incomingBuild: release.build)
+        } catch { try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": error.localizedDescription], response); return }
         guestPatchBusy = true
         let apply: (String?) -> Void = { reason in
             if let reason { self.guestPatchBusy = false; try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": reason], response); return }
@@ -696,7 +717,17 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if self.vm.state == .stopped || self.vm.state == .notInstalled || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
-        else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
+        else {
+            WizardUpdate.maintenance(nonce) { reason in
+                guard reason == nil else { stopWhenIdle(reason); return }
+                self.vm.runGuestPatch(script: WizardGuestPatchCommand.appInventory) { inventory in
+                    guard let apps = inventory?["apps"] as? [String: Any] else { stopWhenIdle("Cannot inventory apps before stopped-disk clone"); return }
+                    var journal = WizardUpdate.json(WizardUpdate.journal); journal["appsBefore"] = apps
+                    do { try WizardUpdate.write(journal, WizardUpdate.journal); stopWhenIdle(nil) }
+                    catch { stopWhenIdle("Cannot journal app inventory") }
+                }
+            }
+        }
     }
 
     func refresh() {
