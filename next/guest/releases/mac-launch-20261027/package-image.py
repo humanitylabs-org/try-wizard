@@ -36,7 +36,7 @@ def main():
         ref=match.group(1)
         for k,v in args.items():ref=ref.replace('${'+k+'}',v)
         if '/' not in ref and ':' not in ref:continue  # named prior stage
-        if key=='wam' and ref.startswith('node:'):ref='node:22-alpine3.21'
+        if key=='wam' and ref.startswith('node:'):ref='node:22.23.4-alpine'  # 22.23.4 = security floor; alpine3.21 tags stopped earlier
         bases[ref]=oci.mirror(ref,env,mirror_records)
         text=text.replace(match.group(1),bases[ref])
     text=re.sub(r'^(FROM (?:--platform=\S+ )?\S+@sha256:[0-9a-f]{64}(?: AS \w+)?\n)',r'\1RUN apk add --no-cache --upgrade ca-certificates && update-ca-certificates\n',text,flags=re.M)
