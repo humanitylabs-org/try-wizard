@@ -7,7 +7,8 @@ class FeedPathContract(unittest.TestCase):
         src = (MAC / 'App/main.swift').read_text()
         m = re.search(r'Store\.downloadsBase \+ "(os/[^"]+)"', src)
         self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), 'os/p1/latest.json')
+        self.assertEqual(m.group(1), 'os/index.json')
+        self.assertIn('https://downloads.aiwizards.com/os/p1/latest.json', src)
         self.assertNotIn('"os/latest.json"', src)
 
     def test_release_metadata_matches(self):

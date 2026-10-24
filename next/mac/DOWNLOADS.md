@@ -14,12 +14,13 @@ Wizard's Mac app, its in-app updates and the Wizard OS image are served publicly
 | `mac/<build>/Wizard-<build>.zip` | Sparkle update archive named by the appcast | cached at the edge (30 days) |
 | `mac/<version>/Wizard-<version>.dmg` | First-install DMG | cached at the edge |
 | `os/latest.json` | Frozen Wizard OS feed for 0.7.0 and older apps (0.4.0 forever) | never cached at the edge |
-| `os/p1/latest.json` | Wizard OS feed for 0.7.1+ (`Store.osFeedURL`); part URLs `../<version>/…` | never cached at the edge |
+| `os/p1/latest.json` | Frozen 0.7.1 feed: 0.4.1 forever; relative URLs resolve against this feed | never cached at the edge |
+| `os/index.json` | ABI-aware clients: newest supported imageBuild; absolute immutable part URLs | short TTL / purge on publish |
 | `os/<version>/wizard-os-<version>.tar.xz.partNN` | Wizard OS image in parts, URLs relative to `latest.json`'s folder or absolute | cached at the edge |
 | `index.html` | Plain landing page the app opens when the feed is unreachable | never cached at the edge |
 
 Rules: versioned paths are immutable (never overwrite a published file; publish a new version path). Only
-`latest.json`, `appcast.xml` and `index.html` change, and they are served uncached so a new release is visible at once.
+`os/index.json`, `appcast.xml` and `index.html` change; both legacy `latest.json` feeds are frozen, and they are served uncached so a new release is visible at once.
 
 ## Why parts of 240 MiB
 
@@ -35,7 +36,7 @@ Write `latest.json` with part URLs relative to `os/latest.json`, for example `0.
 ## Publishing
 
 Upload the versioned files first, verify them byte-for-byte through `https://downloads.aiwizards.com`, then upload
-`os/latest.json` and `mac/appcast.xml` last. The Cloudflare credential stays on the operator's control host; the build
+`os/index.json` and `mac/appcast.xml` last. Do not rewrite either frozen legacy feed. The Cloudflare credential stays on the operator's control host; the build
 machine never holds it.
 
 The operator publish helper (`aiwizards_downloads_publish.py os|mac <feed dir on the build Mac> <version>`) enforces

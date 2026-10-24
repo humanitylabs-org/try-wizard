@@ -33,7 +33,8 @@ def sha(p):
     return h.hexdigest()
 whole = sha(src)
 manifest = json.loads(subprocess.run(["tar", "-xqOf", src, "manifest.json"], capture_output=True, check=True).stdout)
-feed = {"version": ver, "sha256": whole, "bytes": os.path.getsize(src), "installBytes": manifest.get("installBytes"),
+feed = {"guestABI": manifest.get("guestABI", {"0.3.0": 0, "0.4.0": 1, "0.4.1": 1}.get(manifest.get("version"))),
+        "imageBuild": manifest.get("imageBuild", ver), "version": ver, "sha256": whole, "bytes": os.path.getsize(src), "installBytes": manifest.get("installBytes"),
         "background": json.loads(background)}
 parts = sorted(glob.glob(os.path.join(out, name + '.part*')))
 if parts:

@@ -33,10 +33,11 @@ enum Store {
     static var osFeedURL: URL {
         // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
         // Feeds are never repointed under shipped apps: os/latest.json stays frozen at 0.4.0 for 0.7.0 downloads,
-        // and os/p1/latest.json serves only images this build's verifyManifest admits. See DOWNLOADS.md.
+        // and os/p1/latest.json freezes at 0.4.1 for 0.7.1. New clients select by ABI from index.json.
         // QA and testers can point a build elsewhere with `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/p1/latest.json")!
+        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/index.json")!
     }
+    static let legacyOSFeedURL = URL(string: "https://downloads.aiwizards.com/os/p1/latest.json")!
     static let downloadsBase = "https://downloads.aiwizards.com/"
     static var downloadsPage: URL { URL(string: downloadsBase + "index.html")!
     }
@@ -68,10 +69,58 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     struct Background: Decodable { let label: String; let bytes: Int64?; let installBytes: Int64? }
     struct Feed: Decodable {
         let version: String; let url: String?; let sha256: String; let bytes: Int64?; let installBytes: Int64?
+        let guestABI: Int?; let imageBuild: String?
         let parts: [Part]?
         let background: [Background]?
         /// Everything Wizard OS will take on this Mac once the background downloads finish.
         var totalInstallBytes: Int64 { (installBytes ?? (11 << 30)) + (background ?? []).reduce(0) { $0 + ($1.installBytes ?? 0) } }
+    }
+
+    struct ImageIndex: Decodable { let images: [Feed] }
+    static func selectImage(_ index: ImageIndex) throws -> Feed {
+        let compatible = index.images.filter { $0.guestABI.map(WizardGuestABI.supportedGuestABI.contains) == true }
+        guard let image = compatible.max(by: { ($0.imageBuild ?? "").compare($1.imageBuild ?? "", options: .numeric) == .orderedAscending }),
+              let build = image.imageBuild, !build.isEmpty,
+              let bytes = image.bytes, bytes > 0, let installed = image.installBytes, installed > 0,
+              image.sha256.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil,
+              let parts = image.parts, !parts.isEmpty else {
+            throw error("No compatible Wizard OS image in index; update Wizard first")
+        }
+        for part in parts {
+            guard let url = URL(string: part.url), url.scheme == "https", url.host == "downloads.aiwizards.com",
+                  url.query == nil, url.fragment == nil, url.port == nil, url.user == nil, url.password == nil,
+                  !url.absoluteString.contains("%"), url.path.hasPrefix("/os/"), !url.path.contains(".."),
+                  url.path.split(separator: "/").count >= 3,
+                  !["p1", "latest.json", "index.json"].contains(String(url.path.split(separator: "/")[1])),
+                  let size = part.bytes, size > 0,
+                  part.sha256.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil else {
+                throw error("Invalid immutable image parts in Wizard OS index")
+            }
+        }
+        let (sum, overflow) = parts.reduce((Int64(0), false)) { state, part in
+            let (value, overflow) = state.0.addingReportingOverflow(part.bytes ?? 0)
+            return (value, state.1 || overflow)
+        }
+        guard !overflow, sum == bytes else { throw error("Invalid image size in Wizard OS index") }
+        return image
+    }
+    static func resolveFeed(_ complete: @escaping (Result<(Feed, URL), Error>) -> Void) {
+        func fetch(_ url: URL, legacy: Bool) {
+            var req = URLRequest(url: url); req.timeoutInterval = 8
+            URLSession.shared.dataTask(with: req) { data, resp, err in
+                let code = (resp as? HTTPURLResponse)?.statusCode
+                // Absent only: never hide corrupt metadata, TLS errors or unsupported ABI.
+                if !legacy && [404, 410].contains(code ?? 0) { fetch(Store.legacyOSFeedURL, legacy: true); return }
+                guard let data, code == 200 else { complete(.failure(err ?? error("Couldn't reach the Wizard OS feed"))); return }
+                do {
+                    let feed = legacy ? try JSONDecoder().decode(Feed.self, from: data) : try selectImage(JSONDecoder().decode(ImageIndex.self, from: data))
+                    complete(.success((feed, url)))
+                } catch { complete(.failure(error)) }
+            }.resume()
+        }
+        // Preserve explicit developer/local feed override support.
+        let directLegacy = Store.d.string(forKey: "osFeedURL") != nil && Store.osFeedURL.lastPathComponent != "index.json"
+        fetch(Store.osFeedURL, legacy: directLegacy)
     }
 
     static func gb(_ b: Int64) -> String { String(format: "%.1f GB", Double(b) / 1e9) }
@@ -89,11 +138,11 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
 
     /// Read the feed only to say how much space Wizard OS needs (shown before anything downloads).
     func fetchSizeNote(_ done: @escaping (String?) -> Void) {
-        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 6
-        URLSession.shared.dataTask(with: req) { data, resp, _ in
-            let f = data.flatMap { (resp as? HTTPURLResponse)?.statusCode == 200 ? try? JSONDecoder().decode(Feed.self, from: $0) : nil }
-            DispatchQueue.main.async { done(f.map(Self.sizeNote)) }
-        }.resume()
+        Self.resolveFeed { result in
+            let note: String?
+            if case .success(let (feed, _)) = result { note = Self.sizeNote(feed) } else { note = nil }
+            DispatchQueue.main.async { done(note) }
+        }
     }
     private var partURLs: [(url: URL, sha: String)] = []
     private var partIndex = 0
@@ -242,14 +291,12 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         guard !busy else { onProgress?("Wizard OS is already being set up…", nil); return }
         busy = true   // held from here: the feed request can take seconds and must not race a file install
         onProgress?("Finding the latest Wizard OS…", nil)
-        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
-        session.dataTask(with: req) { data, resp, err in
+        Self.resolveFeed { result in
             DispatchQueue.main.async {
-                guard let data, (resp as? HTTPURLResponse)?.statusCode == 200,
-                      let feed = try? JSONDecoder().decode(Feed.self, from: data),
-                      let list = Self.downloadList(feed) else {
+                guard case .success(let (feed, base)) = result, let list = Self.downloadList(feed, base: base) else {
                     self.busy = false
-                    self.onDone?(err ?? Self.error("Couldn't reach the Wizard OS download. Check your connection and try again.")); return
+                    if case .failure(let error) = result { self.onDone?(error) }
+                    else { self.onDone?(Self.error("Invalid OS download list")) }; return
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
                 do {
@@ -262,7 +309,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 self.onProgress?("Downloading Wizard OS \(feed.version)… \(Self.sizeNote(feed))", 0)
                 self.session.dataTask(with: list[0].url).resume()
             }
-        }.resume()
+        }
     }
 
     /// The download is unpacked while it arrives: bytes go to the SHA-256 and to `tar -xJf -` at the same time.
@@ -278,12 +325,12 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     }
 
     /// One archive, or its parts in order. Part hashes are checked one by one, the whole archive at the end.
-    static func downloadList(_ feed: Feed) -> [(url: URL, sha: String)]? {
+    static func downloadList(_ feed: Feed, base: URL = Store.osFeedURL) -> [(url: URL, sha: String)]? {
         if let parts = feed.parts, !parts.isEmpty {
-            let list = parts.compactMap { p in URL(string: p.url, relativeTo: Store.osFeedURL).map { ($0, p.sha256.lowercased()) } }
+            let list = parts.compactMap { p in URL(string: p.url, relativeTo: base).map { ($0, p.sha256.lowercased()) } }
             return list.count == parts.count ? list : nil
         }
-        guard let u = feed.url, let url = URL(string: u, relativeTo: Store.osFeedURL) else { return nil }
+        guard let u = feed.url, let url = URL(string: u, relativeTo: base) else { return nil }
         return [(url, "")]
     }
 
@@ -1236,7 +1283,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose a Wizard OS archive compatible with this app's guest ABI. Update Wizard first if the image requires a newer app.",
                     spinning: false,
                     actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
@@ -1246,16 +1293,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Opens the archive named by the feed in the browser (every part, if it comes in parts); the downloads page
     /// if the feed itself can't be read.
     @objc func openReleasePage() {
-        var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
-        URLSession.shared.dataTask(with: req) { data, resp, _ in
-            let f = data.flatMap { (resp as? HTTPURLResponse)?.statusCode == 200 ? try? JSONDecoder().decode(OSInstaller.Feed.self, from: $0) : nil }
-            let names = f.map { $0.parts?.map(\.url) ?? ($0.url.map { [$0] } ?? []) } ?? []
-            let urls = names.compactMap { URL(string: $0, relativeTo: Store.osFeedURL)?.absoluteURL }
+        OSInstaller.resolveFeed { result in
+            let urls: [URL]
+            if case .success(let (feed, base)) = result {
+                let names = feed.parts?.map(\.url) ?? (feed.url.map { [$0] } ?? [])
+                urls = names.compactMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+            } else { urls = [] }
             DispatchQueue.main.async {
                 if urls.isEmpty { NSWorkspace.shared.open(Store.downloadsPage) }
                 else { urls.forEach { NSWorkspace.shared.open($0) } }
             }
-        }.resume()
+        }
     }
 
     @objc func chooseOSFile() {
