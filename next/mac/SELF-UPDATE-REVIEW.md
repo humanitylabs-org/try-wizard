@@ -21,6 +21,16 @@ Follow-up review confirmed those initial fixes and identified two further P2 iss
 - Python compile checks for both feed/QA scripts: exit 0.
 - Shell parse and git whitespace checks: exit 0.
 
+## Native QA filesystem isolation
+
+The failed extraction-Quit run never reached extraction: its HTTP trace had only the appcast request. A LaunchServices reproduction sampled the main thread blocked in `showUpdateFound → show → WizardUpdate.write → Data.write(.atomic) → __open` on the removable QA volume. A direct SSH-owned executable launch succeeded, but that is not equivalent native-launch evidence. Keeping only DataHome local let the extraction/ready Quit checks pass; a further real replacement attempt still blocked Sparkle's `Autoupdate` helper in `renameatx_np` on that volume.
+
+The app-only harness therefore keeps its **small disposable installed app and DataHome** in a unique local `Library/Caches` directory, while retaining builds, archives, feeds and evidence under `--root`. It still enters through `open`/LaunchServices, not direct execution. Cleanup stops the exact run-owned app and Sparkle helpers, escalating through SIGTERM to SIGKILL after grace even if the notification helper fails, before restoring preferences. It copies runtime artifacts back to `--root` and removes the local cache. A pass cannot hide forced cleanup.
+
+A short runtime-only check using the earlier three-build artifacts verified extraction Quit, ready Quit and one real replacement/relaunch to build 18002 with that layout; it restored the exact original preference values and left no Wizard running. This is not the pending full two-hop run. **This fixture does not establish removable-volume consent, physical permission prompts, real Host/guest shutdown or a daily-install upgrade.** The separate installed-App/Host acceptance must retain its external work data and native GUI-session launcher; no consent was granted or bypassed here.
+
+Portable cleanup regressions are wired into `make test-contracts` via `tests/test-self-update-qa.py`, including notification failure, ignored SIGTERM, real SIGKILL and exclusion of unrelated installations.
+
 ## Durable native QA gate
 
 Run on Thales under the shared resource queue, never on the VPS:

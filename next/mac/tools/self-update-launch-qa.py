@@ -3,7 +3,7 @@
 Builds three ad-hoc Apple-signed apps with an ephemeral Ed25519 update key,
 then drives the real AppKit/Sparkle path 18001 -> 18002 -> 18003.
 """
-import argparse, functools, hashlib, http.server, json, os, pathlib, plistlib, shutil, subprocess, threading, time
+import argparse, functools, hashlib, http.server, json, os, pathlib, plistlib, re, shutil, signal, subprocess, tempfile, threading, time
 
 p = argparse.ArgumentParser()
 p.add_argument('--root', required=True, type=pathlib.Path)
@@ -14,7 +14,7 @@ a = p.parse_args(); root = a.root.resolve(); source = pathlib.Path(__file__).res
 root.mkdir(parents=True, exist_ok=True)
 evidence = root/'evidence'; evidence.mkdir(exist_ok=True)
 feed = root/'feed'; feed.mkdir(exist_ok=True)
-data = root/'data'; data.mkdir(exist_ok=True)
+data = root/'data'; runtime = None
 installed = root/'installed/Wizard.app'; installed.parent.mkdir(exist_ok=True)
 builds=list(range(a.first_build,a.first_build+3))
 results = []; requests = []; server = None; preference_backup = None; passed = False
@@ -26,7 +26,8 @@ def record(name, detail=None):
     print('PASS', name, flush=True)
 def version(): return plistlib.loads((installed/'Contents/Info.plist').read_bytes())['CFBundleVersion']
 def live():
-    r = subprocess.run(['pgrep', '-f', str(installed/'Contents/MacOS/Wizard')], capture_output=True, text=True)
+    pattern = '^' + re.escape(str(installed/'Contents/MacOS/Wizard')) + '([[:space:]]|$)'
+    r = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True)
     return [int(i) for i in r.stdout.split()]
 def notify(command): run([root/'notify', *command.split()], stdout=subprocess.DEVNULL)
 def snapshot():
@@ -48,6 +49,32 @@ def quit_app():
         notify('update-quit'); end=time.time()+20
         while live() and time.time()<end: time.sleep(.25)
         assert not live(), 'Ordinary Quit did not terminate owned app'
+def owned_processes():
+    # Sparkle's Autoupdate can outlive Wizard and replace/relaunch it later.
+    # Include helpers in this disposable bundle, never a different installation.
+    pattern = '^' + re.escape(str(installed/'Contents')) + '/'
+    r = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True)
+    return [int(i) for i in r.stdout.split()]
+
+def cleanup_app(grace=5):
+    """Only this run's bundle; a failed Quit must not strand a job."""
+    cleanup = {'notifyError': None, 'signals': []}
+    if live():
+        try: notify('update-quit')
+        except Exception as error: cleanup['notifyError'] = str(error)
+    for sig in (None, signal.SIGTERM, signal.SIGKILL):
+        if sig is not None:
+            for pid in owned_processes():
+                try:
+                    os.kill(pid, sig)
+                    cleanup['signals'].append({'pid': pid, 'signal': sig.name})
+                except ProcessLookupError: pass
+        end = time.monotonic() + grace
+        while owned_processes() and time.monotonic() < end: time.sleep(.1)
+        if not owned_processes(): break
+    assert not owned_processes(), 'Owned Wizard/helper survived cleanup SIGKILL'
+    return cleanup
+
 def launch():
     run(['open','-n','-a',installed,'--args','--wizard-data-home',data])
     wait_state(lambda s: s.get('build') == version())
@@ -85,6 +112,15 @@ try:
     assert existing.returncode != 0, 'Another native Wizard app/Host is active; retry after its owner finishes'
     mappings=subprocess.check_output(['/usr/bin/hidutil','property','--get','UserKeyMapping'],text=True)
     assert 'HIDKeyboardModifierMappingSrc' not in mappings, 'Existing keyboard remapping belongs to another owner; not running native QA'
+    # Keep the small disposable installation + AppKit state on the internal
+    # cache volume. LaunchServices ad-hoc apps can block in __open writing state
+    # to a removable volume; Sparkle can likewise block in renameatx_np there.
+    # Builds, archives and retained evidence stay under --root (ThalesMedia).
+    cache = pathlib.Path.home()/'Library/Caches'; cache.mkdir(parents=True, exist_ok=True)
+    runtime = tempfile.TemporaryDirectory(prefix='wizard-update-qa-', dir=cache)
+    data = pathlib.Path(runtime.name)/'data'; data.mkdir()
+    installed = pathlib.Path(runtime.name)/'installed/Wizard.app'; installed.parent.mkdir()
+    record('isolated-local-runtime', {'dataHome': str(data), 'installedApp': str(installed)})
     key=root/'update-key'; signer=a.sparkle/'bin/sign_update'
     # Exporting a dedicated keychain item could touch the production signer. Use a
     # fresh CryptoKit key instead, as the 32-byte seed this sign_update accepts.
@@ -136,8 +172,10 @@ try:
     run(['ditto',root/f'build-{first}/Wizard.app',installed])
     run(['open','-n','-a',installed,'--args','--wizard-data-home',data])
     end=time.time()+20
-    while not live() and time.time()<end: time.sleep(.1)
-    assert live(), 'Extraction-quit probe app never started'
+    while not live() and not (data/'updates/ui.json').exists() and time.time()<end: time.sleep(.1)
+    assert live() or (data/'updates/ui.json').exists(), 'Installed app did not launch'
+    # A fast successful Quit can finish before the first PID sample. The UI
+    # file and consumed one-shot preference provide durable hook evidence.
     end=time.time()+180
     while live() and time.time()<end: time.sleep(.25)
     assert not live() and version()==str(first), 'Quit during extraction replaced app or failed to terminate'
@@ -182,17 +220,32 @@ try:
 except Exception as error:
     (evidence/'failure.json').write_text(json.dumps({'pass':False,'error':str(error)},indent=2)+'\n'); raise
 finally:
-    if preference_backup is not None:
-        try: quit_app()
+    # Do not lose the original failure behind a second ordinary-Quit assertion.
+    # Kill owned processes before restoring defaults, even if notification fails.
+    cleanup = None
+    try:
+        if preference_backup is not None:
+            try:
+                cleanup = cleanup_app()
+                (evidence/'process-cleanup.json').write_text(json.dumps(cleanup, indent=2)+'\n')
+            finally:
+                # `defaults import` merges, so clear QA-written keys before restoring.
+                subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                if preference_backup:
+                    backup=root/'restore.plist'; backup.write_bytes(preference_backup); run(['defaults','import','org.humanitylabs.wizard.mvp',backup])
+                else: subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                after=subprocess.run(['defaults','export','org.humanitylabs.wizard.mvp','-'],capture_output=True)
+                assert (plistlib.loads(after.stdout) if after.returncode==0 else {}) == (plistlib.loads(preference_backup) if preference_backup else {}), 'Preferences did not restore'
+                record('original-global-preferences-restored')
+    finally:
+        try:
+            if server: server.shutdown()
+            if runtime:
+                shutil.copytree(data, root/'data', dirs_exist_ok=True, symlinks=True)
+                if installed.exists(): shutil.copytree(installed, root/'installed/Wizard.app', dirs_exist_ok=True, symlinks=True)
         finally:
-            # `defaults import` merges, so clear QA-written keys before restoring.
-            subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            if preference_backup:
-                backup=root/'restore.plist'; backup.write_bytes(preference_backup); run(['defaults','import','org.humanitylabs.wizard.mvp',backup])
-            else: subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            after=subprocess.run(['defaults','export','org.humanitylabs.wizard.mvp','-'],capture_output=True)
-            assert (plistlib.loads(after.stdout) if after.returncode==0 else {}) == (plistlib.loads(preference_backup) if preference_backup else {}), 'Preferences did not restore'
-            record('original-global-preferences-restored')
-    if server: server.shutdown()
+            if runtime: runtime.cleanup()
     if passed:
+        assert cleanup is not None and not cleanup['signals'], 'Final Quit required forced process cleanup; see process-cleanup.json'
+        record('no-owned-Wizard-process-remains')
         (evidence/'complete.json').write_text(json.dumps({'pass':True,'builds':list(builds),'checks':len(results),'publication':'none','DeveloperID':False,'guestCoverage':'not booted; app-only native update proof'},indent=2)+'\n')
