@@ -49,9 +49,14 @@ def recipe(base,config,inventory,plan):
     lines+=['COPY --from=fixed_uv /uv /usr/local/bin/uv','COPY --from=fixed_uv /uvx /usr/local/bin/uvx','COPY certifi.whl pip.whl remediate-trust.py /opt/wizard-security/']
     lines+=['RUN python3 /opt/wizard-security/remediate-trust.py --wheel /opt/wizard-security/certifi.whl --pip-wheel /opt/wizard-security/pip.whl --output /opt/wizard-security/remediation.json']
     # Claude's native executable carries an independent runtime; OS/certifi upgrades cannot repair it.
-    if inventory['claude']:
-        assert major, 'Claude Code upgrade requires Node/npm'
+    if inventory['claude'] and major:
         lines+=['RUN rm -f /usr/local/bin/claude && npm install --global @anthropic-ai/claude-code@2.1.303 && claude --version | grep -F 2.1.303','ENV CLAUDE_CODE_VERSION=2.1.303']
+    elif inventory['claude']:
+        # No Node in this image: build the pinned native executable in a libc-matched Node stage and copy only the binary.
+        stage=plan['upstreamInputs']['node24'+('-alpine' if alpine else '-glibc')]['image']
+        head=['FROM '+stage+' AS fixed_claude','RUN npm install --global @anthropic-ai/claude-code@2.1.303 && cp "$(readlink -f "$(command -v claude)")" /claude-native && /claude-native --version | grep -F 2.1.303']
+        lines[:0]=head
+        lines+=['COPY --from=fixed_claude /claude-native /opt/wizard-security/claude','RUN target=$(readlink -f "$(command -v claude)") && cp /opt/wizard-security/claude "$target" && rm /opt/wizard-security/claude && claude --version | grep -F 2.1.303','ENV CLAUDE_CODE_VERSION=2.1.303']
     lines+=['RUN rm /opt/wizard-security/certifi.whl /opt/wizard-security/pip.whl','USER '+user]
     return '\n'.join(lines)+'\n'
 
