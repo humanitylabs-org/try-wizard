@@ -9,6 +9,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--root', required=True, type=pathlib.Path)
 p.add_argument('--sparkle', required=True, type=pathlib.Path)
 p.add_argument('--first-build', type=int, default=18001)
+p.add_argument('--source-head', required=True)
 a = p.parse_args(); root = a.root.resolve(); source = pathlib.Path(__file__).resolve().parents[1]
 root.mkdir(parents=True, exist_ok=True)
 evidence = root/'evidence'; evidence.mkdir(exist_ok=True)
@@ -92,11 +93,13 @@ try:
     public=subprocess.check_output(['swift',generator,key],text=True).strip()
     os.chmod(key,0o600)
     run(['swiftc',source/'tools/update-qa-notify.swift','-o',root/'notify'])
-    env=os.environ|{'SPARKLE_DIR':str(a.sparkle),'WIZARD_UPDATE_PUBLIC_KEY':public,
-                    'WIZARD_FEED_URL':'http://127.0.0.1:1/appcast.xml'}
+    env=os.environ|{'SPARKLE_DIR':str(a.sparkle),'SPARKLE_PUBLIC_KEY':public,
+                    'SPARKLE_FEED':'http://127.0.0.1:1/appcast.xml','RELEASE_ID':a.source_head,
+                    'DMG':'0','SIGN_IDENTITY':'-','GUEST_UPDATE_PAYLOAD':''}
     for build in builds:
         with (evidence/f'build-{build}.log').open('w') as log:
-            run(['bash',source/'build.sh',root/f'build-{build}'],env=env|{'WIZARD_BUILD':str(build),'WIZARD_VERSION':f'0.7.1-qa.{build}'},stdout=log,stderr=subprocess.STDOUT)
+            run(['bash',source/'build.sh'],env=env|{'BUILD':str(build),'VER':f'0.7.1-qa.{build}'},stdout=log,stderr=subprocess.STDOUT)
+            run(['ditto',source/'dist/Wizard.app',root/f'build-{build}/Wizard.app'],stdout=log,stderr=subprocess.STDOUT)
     for build in builds:
         bundle=root/f'build-{build}/Wizard.app'
         run(['codesign','--verify','--deep','--strict',bundle])

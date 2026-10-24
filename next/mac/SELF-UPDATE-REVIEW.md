@@ -27,7 +27,7 @@ Run on Thales under the shared resource queue, never on the VPS:
 
 ```sh
 python3 next/mac/tools/self-update-launch-qa.py \
-  --root "$QA_ROOT" --sparkle "$SPARKLE_DIR"
+  --root "$QA_ROOT" --sparkle "$SPARKLE_DIR" --source-head "$SOURCE_HEAD"
 ```
 
 A passing run must have `evidence/complete.json` with `pass: true`, individual `results.json` checks, three build logs, three code-signature reports, preferences restoration, both actual replacement/relaunch hops, failure cases and download cleanup. Without that file, the two-hop result is **not verified**. The page is an explicitly labelled local protocol fixture; no real guest inference or shutdown coverage is claimed.
