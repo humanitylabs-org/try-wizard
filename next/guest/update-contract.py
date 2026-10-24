@@ -26,6 +26,10 @@ def admit_payload(bom, abi):
         raise ValueError('Payload guestABI range does not admit this disk')
 
 
+def requires_fresh_apply(baked, bundled):
+    return not isinstance(baked, str) or not isinstance(bundled, str) or not baked or not bundled or baked != bundled
+
+
 def read_platform(path, admitted_abi):
     """Modern factory writes a platform marker; legacy disks use Host admission."""
     path = Path(path)

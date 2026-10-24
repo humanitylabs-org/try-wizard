@@ -15,6 +15,7 @@ struct WizardRelease: Codable {
     let minimumPeer: Int
     let files: [String: String]
     let guestPatch: String?
+    let payloadID: String?
     // Optional only for old signed appcasts. New bundles always emit this range.
     let supportedGuestABI: WizardGuestABI.Range?
 
@@ -86,6 +87,11 @@ enum WizardGuestABI {
             throw WizardUpdate.error("Unsupported guestABI — update Wizard before using this OS image")
         }
         return abi
+    }
+    static func requiresFreshApply(baked: String?, bundled: String?) -> Bool {
+        // Missing legacy IDs always apply. Only exact content identity skips.
+        guard let baked, let bundled, !baked.isEmpty, !bundled.isEmpty else { return true }
+        return baked != bundled
     }
     static func payload(_ url: URL, abi: Int) throws {
         let bom = WizardUpdate.json(url.appendingPathComponent("runtime-bom.json"))

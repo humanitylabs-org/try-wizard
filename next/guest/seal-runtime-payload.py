@@ -20,6 +20,7 @@ bom['stock_hermes']['packaging_label_revision']='f97608f178d1ffeca59860195ab7da2
 def sha(f):
  with f.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 bom['files']={str(f.relative_to(dst)):sha(f) for f in sorted(dst.rglob('*')) if f.is_file()}
+bom['payloadID']='sha256:'+hashlib.sha256(json.dumps({k:v for k,v in bom.items() if k!='payloadID'},sort_keys=True,separators=(',',':')).encode()).hexdigest()
 (dst/'runtime-bom.json').write_text(json.dumps(bom,indent=2)+'\n')
 archive=r/('wizard-guest-software-'+pins['source'][:12]+'.tar.gz')
 subprocess.run(['tar','-czf',str(archive),'-C',str(dst),'.'],check=True)

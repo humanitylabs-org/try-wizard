@@ -1217,8 +1217,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                 let bad = err.localizedDescription.contains("valid Wizard OS")
                 self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
-                HostControl.send("start")
-                self.connectLocal()
+                WizardGuestActivation.shared.onProgress = { [weak self] text in
+                    self?.showOverlay("Finishing Wizard installation", text)
+                }
+                WizardGuestActivation.shared.onDone = { [weak self] error in
+                    guard let self else { return }
+                    if let error {
+                        self.showOverlay("Wizard installation needs attention", error + "\nThe factory rollback copy is retained.", spinning: false,
+                            actions: [("Back", #selector(self.backToChooser))])
+                    } else { self.connectLocal() }
+                }
+                WizardGuestActivation.shared.prepareFresh()
             }
         }
         installer.install()

@@ -16,6 +16,38 @@ import Darwin
         guard clonefile(disk.path, backup.path, 0) == 0 else { throw WizardUpdate.error("APFS stopped-disk rollback clone failed — update deferred (\(errno))") }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
     }
+    func prepareFresh() {
+        do {
+            guard !HostControl.isRunning else { throw WizardUpdate.error("Stop Wizard Host before completing this fresh installation") }
+            let owner = WizardDiskOwnership(); try owner.acquire(); defer { owner.release() }
+            let app = Bundle.main.bundleURL
+            let release = try WizardRelease.read(app); try release.validate(app)
+            let manifest = WizardUpdate.json(WizardShared.osDir.appendingPathComponent("manifest.json"))
+            let abi = try WizardGuestABI.image(manifest)
+            let payload = app.appendingPathComponent("Contents/Resources/GuestUpdate")
+            try WizardGuestABI.payload(payload, abi: abi)
+            let nonce = UUID().uuidString
+            var journal: [String: Any] = ["kind": "fresh", "phase": "fresh-placed", "nonce": nonce,
+                "dataHome": WizardShared.supportDir.path, "diskIdentity": WizardShared.diskIdentity,
+                "appPath": app.path, "releaseID": release.releaseID, "guestABI": abi,
+                "legacyCold": abi == 0, "applyGuest": true]
+            try WizardUpdate.write(journal, WizardUpdate.journal)
+            try Self.snapshotStoppedDisk()
+            if abi >= 1 && !WizardGuestABI.requiresFreshApply(baked: manifest["payloadID"] as? String, bundled: release.payloadID) {
+                try WizardUpdate.write(["releaseID": release.releaseID, "payloadID": release.payloadID!,
+                    "payloadBuild": release.build, "diskIdentity": WizardShared.diskIdentity,
+                    "transactionNonce": nonce, "systemOwner": "host-payload"], WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
+                journal["phase"] = "guest-activated"
+                try WizardUpdate.write(journal, WizardUpdate.journal)
+                onDone(nil); return
+            }
+            journal["phase"] = "fresh-prepared"
+            try WizardUpdate.write(journal, WizardUpdate.journal)
+            if abi == 0 { try WizardUpdate.write(["token": nonce, "admission": "cold-pid1"], WizardUpdate.maintenanceJournal) }
+        } catch { onDone("Fresh installation could not be prepared safely — \(error.localizedDescription)"); return }
+        activate()
+    }
+
     func activate() {
         guard WizardUpdate.json(WizardUpdate.journal)["applyGuest"] as? Bool == true, WizardShared.osInstalled,
               FileManager.default.fileExists(atPath: Self.backup.path), !HostControl.isRunning else {
@@ -142,7 +174,7 @@ import Darwin
                     guard clonefile(Self.backup.path, restored.path, 0) == 0 else { throw WizardUpdate.error("Rollback clone failed") }
                     // Record the intentional inode transition BEFORE the atomic
                     // replacement, so even a crash at rename leaves explicit evidence.
-                    if journal["kind"] as? String == "legacy-cold" {
+                    if journal["kind"] as? String == "legacy-cold" || journal["legacyCold"] as? Bool == true {
                         guard let target = WizardDiskIdentity.read(restored) else { throw WizardUpdate.error("Rollback identity unavailable") }
                         journal["rollbackIdentityTransition"] = ["from": journal["diskIdentity"] as? String ?? "", "to": target]
                         try WizardUpdate.write(journal, WizardUpdate.journal)
@@ -153,7 +185,7 @@ import Darwin
                     }
                     journal["phase"] = "guest-rolled-back"; journal["error"] = migrationError
                     try WizardUpdate.write(journal, WizardUpdate.journal)
-                    if journal["kind"] as? String == "legacy-cold" {
+                    if journal["kind"] as? String == "legacy-cold" || journal["legacyCold"] as? Bool == true {
                         try? FileManager.default.removeItem(at: WizardUpdate.maintenanceJournal)
                         try? FileManager.default.removeItem(at: WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
                         onDone("Prior guest restored and left stopped — \(migrationError)"); return
@@ -163,11 +195,14 @@ import Darwin
                           let nonce = journal["nonce"] as? String, !nonce.isEmpty else { throw WizardUpdate.error("Activation disk binding unavailable") }
                     let receiptURL = WizardUpdate.dir.appendingPathComponent("guest-receipt.json")
                     var receipt = WizardUpdate.json(receiptURL)
+                    let release = try WizardRelease.read(Bundle.main.bundleURL)
+                    receipt["payloadID"] = release.payloadID; receipt["payloadBuild"] = release.build
+                    receipt["systemOwner"] = "host-payload"
                     receipt["diskIdentity"] = identity; receipt["transactionNonce"] = nonce
                     try WizardUpdate.write(receipt, receiptURL)
                     journal["diskIdentity"] = identity; journal["phase"] = "guest-activated"
                     try WizardUpdate.write(journal, WizardUpdate.journal)
-                    if journal["kind"] as? String == "legacy-cold" {
+                    if journal["kind"] as? String == "legacy-cold" || journal["legacyCold"] as? Bool == true {
                         // Admission for normal boot, not a live-runtime health claim.
                         let completion = try WizardDiskIdentity.completionRecord(journal)
                         try WizardUpdate.write(completion, WizardUpdate.dir.appendingPathComponent("legacy-complete.json"))

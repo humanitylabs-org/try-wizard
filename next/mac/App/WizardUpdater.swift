@@ -279,6 +279,10 @@ final class NoticeBarView: NSView {
     private func recoverActivation() {
         var journal = WizardUpdate.json(WizardUpdate.journal)
         guard journal["dataHome"] as? String == WizardShared.supportDir.path else { return }
+        if journal["kind"] as? String == "fresh", ["fresh-placed", "fresh-prepared"].contains(journal["phase"] as? String ?? "") {
+            show("failed", "Fresh installation was interrupted before activation. The factory disk is intact; retry setup.")
+            return
+        }
         if journal["phase"] as? String == "guest-activating" {
             activatingGuest = true; preparing = true; onFreeze(true)
             WizardGuestActivation.shared.onProgress = { [weak self] text in

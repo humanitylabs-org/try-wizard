@@ -26,7 +26,7 @@ enum WizardDiskIdentity {
     }
     /// Caller holds WizardDiskOwnership. No unknown/missing identity is authority.
     static func requireColdOwner(_ journal: [String: Any]) throws {
-        guard journal["kind"] as? String == "legacy-cold" else { return }
+        guard journal["kind"] as? String == "legacy-cold" || journal["kind"] as? String == "fresh" else { return }
         guard journal["dataHome"] as? String == WizardShared.supportDir.path,
               let identity = read(WizardShared.osDir.appendingPathComponent("disk.img")),
               journal["diskIdentity"] as? String == identity else {
@@ -49,7 +49,7 @@ enum WizardDiskIdentity {
     /// Never mint a success receipt for whichever disk happens to be present.
     static func completionRecord(_ journal: [String: Any]) throws -> [String: Any] {
         try requireColdOwner(journal)
-        guard journal["kind"] as? String == "legacy-cold", journal["phase"] as? String == "guest-activated",
+        guard (journal["kind"] as? String == "legacy-cold" || journal["legacyCold"] as? Bool == true), journal["phase"] as? String == "guest-activated",
               let identity = journal["diskIdentity"] as? String,
               let release = journal["releaseID"] as? String else {
             throw WizardUpdate.error("Cold completion does not match the activated transaction")

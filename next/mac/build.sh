@@ -90,7 +90,8 @@ def digest(f):
    if not chunk:break
    h.update(chunk)
  return h.hexdigest()
-r=dict(supportedGuestABI={'min':0,'max':1},schema=1,releaseID=os.environ['RELEASE_ID'],build=os.environ['BUILD'],arch='arm64',minimumOS='14.0',hostProtocol=1,minimumPeer=1,files={f:digest(f) for f in files},guestPatch='mac-stack-v1' if guest else None)
+payload_id=json.loads((a/'Contents/Resources/GuestUpdate/runtime-bom.json').read_text())['payloadID'] if guest else None
+r=dict(payloadID=payload_id,supportedGuestABI={'min':0,'max':1},schema=1,releaseID=os.environ['RELEASE_ID'],build=os.environ['BUILD'],arch='arm64',minimumOS='14.0',hostProtocol=1,minimumPeer=1,files={f:digest(f) for f in files},guestPatch='mac-stack-v1' if guest else None)
 (a/'Contents/Resources/wizard-release.json').write_text(json.dumps(r,sort_keys=True)+'\n')
 PY
 
