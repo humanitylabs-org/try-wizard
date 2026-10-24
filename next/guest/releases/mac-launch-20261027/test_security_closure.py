@@ -74,11 +74,6 @@ class SecurityTests(unittest.TestCase):
     def test_no_node_copy_for_python_helper(self):
         plan=json.loads((HERE/'security-image-plan.json').read_text());source=package.recipe(plan['targets'][0]['base'],{}, {'nodeMajor':0,'alpine':True,'claude':False},plan)
         self.assertNotIn('fixed_node',source);self.assertIn('apk add',source)
-    def test_minimal_files_uses_fixed_helper_not_a_fake_package_manager(self):
-        plan=json.loads((HERE/'security-image-plan.json').read_text());plan['_helperImage']='unit.invalid/helper@sha256:'+'a'*64
-        base=next(t['base'] for t in plan['targets'] if t['key']=='files')
-        source=package.recipe(base,{'User':'user'},{'minimal':True},plan)
-        self.assertIn('AS security_tools',source);self.assertNotIn('apt-get',source);self.assertNotIn('apk add',source)
         self.assertNotIn('p11-kit',source);self.assertNotIn('--browser-evidence',source)
     def test_any_discovered_browser_gets_system_nss_distrust(self):
         plan=json.loads((HERE/'security-image-plan.json').read_text())
@@ -103,6 +98,11 @@ class SecurityTests(unittest.TestCase):
                 else:data['roots']['data'].append(data['roots']['data'][0])
                 path.write_text(json.dumps(data))
                 with self.assertRaises(AssertionError):remediate.browser_certificates(path)
+    def test_minimal_files_uses_fixed_helper_not_a_fake_package_manager(self):
+        plan=json.loads((HERE/'security-image-plan.json').read_text());plan['_helperImage']='unit.invalid/helper@sha256:'+'a'*64
+        base=next(t['base'] for t in plan['targets'] if t['key']=='files')
+        source=package.recipe(base,{'User':'user'},{'minimal':True},plan)
+        self.assertIn('AS security_tools',source);self.assertNotIn('apt-get',source);self.assertNotIn('apk add',source)
         self.assertIn('--output /opt/wizard-security/remediation.json',source)
     def test_unknown_minimal_image_is_not_exempted(self):
         with self.assertRaises(AssertionError):package.recipe('unit.invalid/unknown@sha256:'+'f'*64,{}, {'minimal':True},{})

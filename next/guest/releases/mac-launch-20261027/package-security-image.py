@@ -102,6 +102,7 @@ def main():
         oci.validate(root,helper)
         plan['_helperImage']=helper['ref']+'@'+helper['digest']
     wheel(context,plan);shutil.copy2(HERE/'remediate-trust.py',context/'remediate-trust.py')
+    if inventory.get('browser'):shutil.copy2(HERE/'security-primary-evidence.json',context/'security-primary-evidence.json')
     text=recipe(base,obj['Config'],inventory,plan)
     for match in list(re.finditer(r'^FROM (\S+)',text,re.M)):
         ref=match.group(1);text=text.replace(ref,oci.mirror(ref,env,mirrors))
@@ -111,7 +112,6 @@ def main():
     exact=image+'@'+transport['digest']
     # Preserve runtime identity/entrypoint/cmd and source labels, not just filesystem bytes.
     for field in ['User','Entrypoint','Cmd','WorkingDir','Labels','Volumes']:
-    if inventory.get('browser'):shutil.copy2(HERE/'security-primary-evidence.json',context/'security-primary-evidence.json')
         actual=built['Config'].get(field) or ('0' if field=='User' else None)
         expected=obj['Config'].get(field) or ('0' if field=='User' else None)
         assert actual==expected,field
