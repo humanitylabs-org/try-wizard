@@ -7,6 +7,37 @@ stable manifest. `finalPins` are intentionally null wherever no tested integrate
 source exists. Do not substitute `main` for a protected Mac source, silently use
 old compatibility pins, or set the status to admitted to get past a gate.
 
+## v6 local-only image transport (supersedes GHCR packaging in older notes)
+
+- Build against Colima's **default** daemon with an explicit host socket. This
+  preparation uses the endpoint-selected `default` Docker-driver buildx builder;
+  it does not change the global Docker context or the existing Colima VMs.
+- Export each of the 3 core and 14 derived security images with `type=oci`.
+  Keep the archive on external media. Record its SHA-256, OCI index JSON hash,
+  selected manifest/config digests, revision/base identity and the real local
+  `docker load`/digest inspection result. `loadVerified` is **not** a registry pull.
+- Resolve Docker Hub bases only through `mirror.gcr.io`, then
+  `public.ecr.aws/docker`; enforce unchanged pinned digests and record all tag
+  resolutions. Fail closed if neither mirror serves the selected content.
+  Anonymous pulls of existing GHCR upstreams are still required; pushing is not.
+- Colima's default VM does not expose the external freeze path. Verify a source
+  sentinel before trusting any bind. Source verification copies `final/` into a
+  unique named volume when needed and reads its exact source stamp back.
+  Security packaging likewise copies probe scripts into daemon-owned volumes.
+- The assembly guest imports all 17 byte-verified archives, then inspects each
+  exact `ref@digest` before any installer/configuration writer. It never pulls
+  these unpublished outputs. A guest daemon unable to preserve imported OCI
+  digest references fails closed (containerd-backed image store required).
+- Stage a **new** freeze and inventory. Never rewrite a v5 input underneath a
+  source-verification job. Keep source verification first, then 17 packaging
+  jobs, 05 security closure, 06 resolve, and finally 07 admission/rebuild.
+  Completed packaging can be reused only after archive, source and daemon
+  identity are reverified; failed partial directories require explicit recovery.
+- These are local launch inputs, not public release artifacts. Publishing images
+  happens **after launch**, through reviewed PR merge and normal Actions only.
+  No macOS `docker login`, GHCR push, main merge, channel change or guest rebuild
+  is part of packaging preparation.
+
 ## Findings
 
 - `try-wizard#22` is already merged (`13e20d9`). The front door alone is not the

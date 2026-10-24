@@ -4,6 +4,7 @@ No image build, VM, git tag, feed, release publication or fabricated digest.
 """
 import argparse, hashlib, json, os, re
 from pathlib import Path
+import local_oci as oci
 
 def sha(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
@@ -15,8 +16,9 @@ def main():
     source=json.loads((root/'source-checks-v5/result.json').read_text());assert source['passed'] is True and source['finalPins']==pins['finalPins']
     for key,name in [('wam','wizard-app-manager'),('service','wizard-agent-service'),('ux','wizard-ux')]:
         row=json.loads((root/'image-packaging'/key/'result.json').read_text())
-        assert row['sourceCommit']==pins['finalPins'][key] and row['pullVerified'] is True and row['tagsPublished'] is False
+        assert row['sourceCommit']==pins['finalPins'][key] and row['loadVerified'] is True and row['tagsPublished'] is False
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',row['digest']) and row['ref']=='ghcr.io/humanitylabs-org/'+name
+        oci.validate(root,row)
         pins['assembly']['images'][key]['digest']=row['digest'];images[name]={'ref':row['ref'],'digest':row['digest'],'source_commit':row['sourceCommit']}
     # A built core image alone is not evidence that inherited/default runtime images are remediated.
     plan=json.loads((prep/'security-image-plan.json').read_text());security=json.loads((root/'security-preflight.json').read_text())

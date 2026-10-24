@@ -83,8 +83,8 @@ def finish(plan):
 
 def main():
     p=argparse.ArgumentParser();g=p.add_mutually_exclusive_group(required=True);g.add_argument('--prepare',action='store_true');g.add_argument('--finish',action='store_true');a=p.parse_args();assert os.geteuid()==0;plan=load()
-    # Pull every selected identity, including infrastructure, before any composition changes.
-    for row in plan['resolutions'].values():run(['docker','pull',row['image']],timeout=600)
+    # Images were imported from byte-verified OCI archives before the installer. Never pull.
+    for row in plan['resolutions'].values():run(['docker','image','inspect',row['image']])
     if a.prepare:print(json.dumps(prepare(plan),indent=2))
     else:finish(plan)
 

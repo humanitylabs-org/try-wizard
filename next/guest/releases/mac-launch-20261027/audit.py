@@ -89,7 +89,7 @@ def inspect(manifest,root):
     if not ci or ci.get('headSha')!=manifest['finalPins']['ux'] or ci.get('conclusion')!='success':errors.append('UX_FINAL_HEAD_CI: accepted baseline must have exact-head green CI')
     for key in ['wam','service','ux']:
         receipt=record('image-packaging/'+key+'/result.json');selected=assembly.get('images',{}).get(key,{})
-        if not receipt or receipt.get('sourceCommit')!=manifest['finalPins'][key] or receipt.get('pullVerified') is not True or receipt.get('digest')!=selected.get('digest') or receipt.get('ref')!=selected.get('ref'):errors.append('IMAGE_DIGESTS_PENDING: no matching pull-verified '+key+' output')
+        if not receipt or receipt.get('sourceCommit')!=manifest['finalPins'][key] or receipt.get('loadVerified') is not True or receipt.get('digest')!=selected.get('digest') or receipt.get('ref')!=selected.get('ref'):errors.append('IMAGE_DIGESTS_PENDING: no matching archive/load-verified '+key+' output')
     recipe=(root/execution.get('recipe','.missing')).resolve()
     if not recipe.is_relative_to(root) or not recipe.is_file() or digest(recipe)!=execution.get('sha256'):errors.append('assembly recipe missing or digest mismatch')
     for name,pin in manifest['finalPins'].items():

@@ -352,7 +352,7 @@
   ],
   "execution": {
     "recipe": "preparation/assemble.py",
-    "sha256": "083caf0265dd11249ecf76ebdbe7a33a30e50934c23c32c67cca624f3b7e37ce",
+    "sha256": "7f2262ac0226d5c768e3d5b929ef62a2dc14af850a5b9cec6db239b7d99184c8",
     "argv": [
       "/opt/homebrew/bin/python3",
       "preparation/assemble.py",
@@ -462,6 +462,6 @@
     "selectedTargets": 17,
     "derivedPackagingJobs": 14,
     "allMandatory": true,
-    "acceptance": "05 actual pull-readback/image probes, then final guest host/configured runtime probes; no security deferrals"
+    "acceptance": "05 verified local OCI archive/load and exact image probes, then guest host/configured runtime probes; no registry publication gate or security deferral"
   }
 }

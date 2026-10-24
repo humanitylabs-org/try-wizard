@@ -2,7 +2,8 @@
 """Parent-only image derivation; no VM, source mutation, mutable tag or release publication.
 Every output is pull-read-back by digest. A failed build/probe never emits a success receipt.
 """
-import argparse, base64, hashlib, importlib.util, json, os, re, shutil, subprocess, sys, tempfile, urllib.request
+import argparse, hashlib, importlib.util, json, os, re, shutil, subprocess, sys, urllib.request
+import local_oci as oci
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
 DOCKER='/opt/homebrew/bin/docker'
@@ -22,7 +23,7 @@ def recipe(base,config,inventory,plan):
         # The retained Files engine is BusyBox/static Go, not an apt/apk distribution.
         # Keep its application/rootfs identity, transplant only the already-built fixed helper toolchain,
         # then scrub ALL original stores as well. Never pretend an absent package manager was upgraded.
-        assert base.startswith('filebrowser/filebrowser')
+        assert re.search(r'(?:^|/)filebrowser/filebrowser(?::[^@]+)?@sha256:',base)
         assert re.fullmatch(r'.+@sha256:[0-9a-f]{64}',plan['_helperImage'])
         return '\n'.join(['FROM '+plan['_helperImage']+' AS security_tools','FROM '+base,'USER 0',
             'COPY --from=security_tools /usr/local/ /usr/local/',
@@ -69,45 +70,39 @@ def main():
     plan=json.loads((HERE/'security-image-plan.json').read_text());target=next(t for t in plan['targets'] if t['key']==a.target)
     assert target['resolution']=='derive-image'
     base=target['base'];assert re.fullmatch(r'.+@sha256:[0-9a-f]{64}',base)
-    out=root/'security-packaging'/a.target;out.mkdir(parents=True,exist_ok=False);context=out/'context';context.mkdir()
-    env={**os.environ,'PATH':'/opt/homebrew/bin:'+os.environ.get('PATH',''),'TMPDIR':str(out)}
-    # The worker's default context points at a nonexistent socket; select the verified colima endpoint explicitly.
-    env['DOCKER_HOST']=json.loads(run([DOCKER,'context','inspect','colima']))[0]['Endpoints']['docker']['Host']
-    with tempfile.TemporaryDirectory(prefix='auth-',dir=out) as td:
-        auth=Path(td);auth.chmod(0o700)
-        token=run(['gh','auth','token'],env=env);user=run(['gh','api','user','--jq','.login'],env=env)
-        cfg=auth/'config.json';emit(cfg,{'auths':{'ghcr.io':{'auth':base64.b64encode((user+':'+token).encode()).decode()}}});cfg.chmod(0o600)
-        plugins=auth/'cli-plugins';plugins.mkdir()
-        for name in ['buildx']:
-            candidate=next(x for x in [Path('/opt/homebrew/lib/docker/cli-plugins/docker-'+name),Path.home()/('.docker/cli-plugins/docker-'+name)] if x.exists())
-            (plugins/('docker-'+name)).symlink_to(candidate.resolve())
-        env['DOCKER_CONFIG']=td
-        run([DOCKER,'pull','--platform','linux/arm64',base],env=env,timeout=300)
-        obj=json.loads(run([DOCKER,'inspect',base],env=env))[0];assert obj['Architecture']=='arm64'
-        raw=subprocess.run([DOCKER,'run','--rm','-i','--read-only','--cap-drop=ALL','--entrypoint','/bin/sh',base,'-s'],input=INVENTORY,capture_output=True,text=True,env=env,timeout=60,check=True)
-        inventory=json.loads(raw.stdout);emit(out/'base-inventory.json',inventory)
-        if inventory.get('minimal'):
-            helper=json.loads((root/'security-packaging/helper-python/result.json').read_text())
-            expected=next(t['base'] for t in plan['targets'] if t['key']=='helper-python')
-            assert helper['base']==expected and helper['pullVerified'] is True and helper['tagsPublished'] is False
-            plan['_helperImage']=helper['ref']+'@'+helper['digest']
-        wheel(context,plan);shutil.copy2(HERE/'remediate-trust.py',context/'remediate-trust.py')
-        (context/'Dockerfile').write_text(recipe(base,obj['Config'],inventory,plan));emit(out/'recipe.json',{'base':base,'dockerfileSha256':sha(context/'Dockerfile'),'inventory':inventory,'upstreamInputs':plan['upstreamInputs']})
-        image='ghcr.io/humanitylabs-org/wizard-mac-security-'+a.target
-        argv=[DOCKER,'buildx','build','--platform','linux/arm64','--provenance=false','--metadata-file',str(out/'metadata.json'),'--output','type=image,name='+image+',push-by-digest=true,name-canonical=true,push=true',str(context)]
-        with (out/'build.log').open('w') as log:subprocess.run(argv,env=env,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=1200)
-        digest=json.loads((out/'metadata.json').read_text())['containerimage.digest'];assert re.fullmatch('sha256:[0-9a-f]{64}',digest)
-        exact=image+'@'+digest
-        manifest=json.loads(run([DOCKER,'buildx','imagetools','inspect',exact,'--format','{{json .Manifest}}'],env=env));assert manifest['digest']==digest
-        run([DOCKER,'pull','--platform','linux/arm64',exact],env=env,timeout=300)
-        built=json.loads(run([DOCKER,'inspect',exact],env=env))[0];assert built['Architecture']=='arm64'
-        # Preserve runtime identity/entrypoint/cmd and source labels, not just filesystem bytes.
-        for field in ['User','Entrypoint','Cmd','WorkingDir','Labels','Volumes']:
-            actual=built['Config'].get(field) or ('0' if field=='User' else None)
-            expected=obj['Config'].get(field) or ('0' if field=='User' else None)
-            assert actual==expected,field
-        remediation=json.loads(run([DOCKER,'run','--rm','--read-only','--entrypoint','/bin/cat',exact,'/opt/wizard-security/remediation.json'],env=env))
-        result={'key':a.target,'base':base,'ref':image,'digest':digest,'imageId':built['Id'],'pullVerified':True,'tagsPublished':False,'releasePublished':False,'recipeSha256':sha(out/'recipe.json'),'remediation':remediation}
-        emit(out/'result.json',result);print(json.dumps(result))
+    out=root/'security-packaging'/a.target
+    if (out/'result.json').exists():
+        row=json.loads((out/'result.json').read_text());assert row['base']==base and row['key']==a.target and row['recipeSha256']==sha(out/'recipe.json')
+        oci.load(root,row,DOCKER,oci.environment(out));print(json.dumps({**row,'reusedVerifiedArchive':True}));return
+    out.mkdir(exist_ok=False,parents=True);context=out/'context';context.mkdir()
+    env=oci.environment(out);mirrors={}
+    base=oci.mirror(base,env,mirrors)
+    run([DOCKER,'pull','--platform','linux/arm64',base],env=env,timeout=300)
+    obj=json.loads(run([DOCKER,'inspect',base],env=env))[0];assert obj['Architecture']=='arm64'
+    raw=subprocess.run([DOCKER,'run','--rm','-i','--read-only','--cap-drop=ALL','--entrypoint','/bin/sh',base,'-s'],input=INVENTORY,capture_output=True,text=True,env=env,timeout=60,check=True)
+    inventory=json.loads(raw.stdout);emit(out/'base-inventory.json',inventory)
+    if inventory.get('minimal'):
+        helper=json.loads((root/'security-packaging/helper-python/result.json').read_text())
+        expected=next(t['base'] for t in plan['targets'] if t['key']=='helper-python')
+        assert helper['base']==expected and helper['loadVerified'] is True and helper['tagsPublished'] is False
+        oci.validate(root,helper)
+        plan['_helperImage']=helper['ref']+'@'+helper['digest']
+    wheel(context,plan);shutil.copy2(HERE/'remediate-trust.py',context/'remediate-trust.py')
+    text=recipe(base,obj['Config'],inventory,plan)
+    for match in list(re.finditer(r'^FROM (\S+)',text,re.M)):
+        ref=match.group(1);text=text.replace(ref,oci.mirror(ref,env,mirrors))
+    (context/'Dockerfile').write_text(text);emit(out/'recipe.json',{'base':target['base'],'resolvedBase':base,'mirrors':mirrors,'dockerfileSha256':sha(context/'Dockerfile'),'inventory':inventory,'upstreamInputs':plan['upstreamInputs']})
+    image='ghcr.io/humanitylabs-org/wizard-mac-security-'+a.target
+    transport,built=oci.export(out,context,image,env)
+    exact=image+'@'+transport['digest']
+    # Preserve runtime identity/entrypoint/cmd and source labels, not just filesystem bytes.
+    for field in ['User','Entrypoint','Cmd','WorkingDir','Labels','Volumes']:
+        actual=built['Config'].get(field) or ('0' if field=='User' else None)
+        expected=obj['Config'].get(field) or ('0' if field=='User' else None)
+        assert actual==expected,field
+    with oci.probe_mount([HERE/'security-probe.py'],exact,env) as mount:
+        remediation=json.loads(run([DOCKER,'run','--pull=never','--rm','--entrypoint','/bin/sh','-v',mount,exact,'-lc','PY=$(command -v python3 || command -v python); "$PY" /opt/wizard-probe/security-probe.py'],env,300).splitlines()[-1])
+    result={**transport,'key':a.target,'base':target['base'],'archive':str(Path(transport['archive']).relative_to(root)),'recipeSha256':sha(out/'recipe.json'),'remediation':remediation}
+    emit(out/'result.json',result);print(json.dumps(result))
 
 if __name__=='__main__':main()

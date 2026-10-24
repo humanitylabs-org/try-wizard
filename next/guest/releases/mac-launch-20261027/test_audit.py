@@ -50,8 +50,9 @@ class AdmissionTests(unittest.TestCase):
         self.assertIn("k not in ['WAM_REF'",text)
     def test_three_packaging_jobs_do_not_publish_tags(self):
         text=(ROOT/'package-image.py').read_text()
-        self.assertIn('push-by-digest=true',text);self.assertNotIn("'--push'",text)
-        self.assertIn('DOCKER_CONFIG',text);self.assertNotIn('credsStore',text)
+        helper=(ROOT/'local_oci.py').read_text()
+        self.assertIn('type=oci,name=',helper);self.assertNotIn('push=true',text+helper)
+        self.assertNotIn("'login'",text+helper);self.assertIn('DOCKER_HOST',helper)
     def test_v5_is_linux_short_temp_and_runs_full_suites(self):
         text=(ROOT/'verify-sources-v5.py').read_text()
         for token in ['TMPDIR=/work/t','chmod 1777','npx vitest run','python3 tests/managed_recovery_test.py','node --test tests/*.test.mjs','python -m pytest -q -rs']:self.assertIn(token,text)
@@ -68,7 +69,7 @@ class AdmissionTests(unittest.TestCase):
         self.assertLess(text.index('errors=audit.inspect(pins,root)'),text.index("work=root/'assembly-work'"))
     def test_resolver_does_not_launder_changed_sources(self):
         text=(ROOT/'resolve-images.py').read_text();self.assertIn('immutable staged input changed',text)
-        self.assertIn("row['pullVerified'] is True",text);self.assertIn("security['passed'] is True",text)
+        self.assertIn("row['loadVerified'] is True",text);self.assertIn("security['passed'] is True",text)
 
     def staged_fixture(self,root,prep):
         import shutil
@@ -87,7 +88,7 @@ class AdmissionTests(unittest.TestCase):
             target=root/'final/service'/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_text("['cli', 'tui']")
             m['service64Proof'][rel]=hashlib.sha256(target.read_bytes()).hexdigest()
         for key in ['wam','service','ux']:
-            emit(root/'image-packaging'/key/'result.json',{'sourceCommit':m['finalPins'][key],'pullVerified':True,**m['assembly']['images'][key]})
+            emit(root/'image-packaging'/key/'result.json',{'sourceCommit':m['finalPins'][key],'loadVerified':True,**m['assembly']['images'][key]})
         emit(root/'source-checks-v5/result.json',{'version':5,'passed':True,'finalPins':m['finalPins'],'commands':[{'key':k,'returncode':0} for k in ['linux-create','linux-full','linux-logs','factory-pins','phone','stock-builder','factory-admission']]})
         # Synthetic schema2 fixtures test admission logic only; never copied into real staging evidence.
         closure_spec=importlib.util.spec_from_file_location('closure_fixture',prep/'security-closure.py');assert closure_spec and closure_spec.loader
@@ -95,10 +96,16 @@ class AdmissionTests(unittest.TestCase):
         security_plan=json.loads((prep/'security-image-plan.json').read_text())
         for index,target in enumerate(security_plan['targets']):
             if target['resolution']=='selected-core-image':
-                key=target['key'];row={'sourceCommit':m['finalPins'][key],'pullVerified':True,'tagsPublished':False,'imageId':'sha256:'+str(index).zfill(64),**m['assembly']['images'][key]}
+                key=target['key'];row={'sourceCommit':m['finalPins'][key],'loadVerified':True,'tagsPublished':False,'imageId':'sha256:'+str(index).zfill(64),**m['assembly']['images'][key]}
             else:
-                row={'key':target['key'],'base':target['base'],'ref':'ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key'],'digest':'sha256:'+format(index+1,'064x'),'imageId':'sha256:'+format(index+101,'064x'),'pullVerified':True,'tagsPublished':False,'unitFixtureOnly':True}
+                row={'key':target['key'],'base':target['base'],'ref':'ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key'],'digest':'sha256:'+format(index+1,'064x'),'imageId':'sha256:'+format(index+101,'064x'),'loadVerified':True,'tagsPublished':False,'unitFixtureOnly':True}
             emit(root/target['receipt'],row)
+        from test_local_oci import fixture_archive
+        for target in security_plan['targets']:
+            path=root/target['receipt'];row=json.loads(path.read_text())
+            row.update(fixture_archive(root,row['ref'],target['key']))
+            emit(path,row)
+            if target['resolution']=='selected-core-image':m['assembly']['images'][target['key']]['digest']=row['digest']
         images,resolutions=closure.resolve_plan(security_plan,root,m)
         security_plan.update(complete=True,images=images,resolutions=resolutions)
         emit(prep/'security-image-plan.json',security_plan)
@@ -123,7 +130,7 @@ class AdmissionTests(unittest.TestCase):
                     ('source-checks-v5/result.json',lambda d:d.update(passed=False),'SOURCE_VERIFICATION_V5'),
                     ('security-preflight.json',lambda d:d.update(passed=False),'SECURITY_IMAGE_CLOSURE'),
                     ('evidence/ux-final-ci.json',lambda d:d.update(headSha='0'*40),'UX_FINAL_HEAD_CI'),
-                    ('image-packaging/service/result.json',lambda d:d.update(pullVerified=False),'IMAGE_DIGESTS_PENDING')]:
+                    ('image-packaging/service/result.json',lambda d:d.update(loadVerified=False),'IMAGE_DIGESTS_PENDING')]:
                     p=root/rel;before=p.read_bytes();d=json.loads(before);change(d);p.write_text(json.dumps(d))
                     self.assertTrue(any(e.startswith(prefix) for e in audit.inspect(m,root)),rel);p.write_bytes(before)
                 malicious=copy.deepcopy(m);malicious['execution']['argv']=['bash','build-image.sh']

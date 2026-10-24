@@ -5,6 +5,7 @@ The final guest repeats this for host and each running container's real environm
 """
 import argparse, concurrent.futures, hashlib, importlib.util, json, os, re, subprocess, sys
 from pathlib import Path
+import local_oci as oci
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('security_probe',HERE/'security-probe.py');assert spec and spec.loader
 probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
@@ -17,7 +18,8 @@ def resolve_plan(plan,root,pins):
     assert len(plan['targets'])==17 and len({r['key'] for r in plan['targets']})==17
     images=[];resolutions={}
     for target in plan['targets']:
-        row=json.loads((root/target['receipt']).read_text());assert row['pullVerified'] is True and row['tagsPublished'] is False
+        row=json.loads((root/target['receipt']).read_text());assert row['loadVerified'] is True and row['tagsPublished'] is False
+        oci.validate(root,row)
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',row['digest'])
         if target['resolution']=='derive-image':
             assert row['key']==target['key'] and row['base']==target['base']
@@ -87,7 +89,9 @@ def main():
         assert a.stage_root and sys.platform=='darwin';root=a.stage_root.resolve()
         plan=json.loads((HERE/'security-image-plan.json').read_text());pins=json.loads((HERE/'pins.json').read_text())
         images,resolutions=resolve_plan(plan,root,pins)
-        env['DOCKER_HOST']=json.loads(run([docker,'context','inspect','colima']))[0]['Endpoints']['docker']['Host']
+        env=oci.environment(root/'security-packaging')
+        for target in plan['targets']:
+            row=json.loads((root/target['receipt']).read_text());oci.load(root,row,docker,env)
         running=[(image,image) for image in images]
     else:
         root=Path('/mnt/launch');ids=run([docker,'ps','-q']).split();assert ids
@@ -101,7 +105,7 @@ def main():
         result['checks'].append({'target':'guest-host','returncode':host.returncode,'log':host.stdout+host.stderr})
     def check(row):
         identity,image=row
-        argv=([docker,'exec','-i','-e','PYTHONDONTWRITEBYTECODE=1',identity,'/bin/sh','-s'] if a.guest else [docker,'run','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s'])
+        argv=([docker,'exec','-i','-e','PYTHONDONTWRITEBYTECODE=1',identity,'/bin/sh','-s'] if a.guest else [docker,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s'])
         try:
             proc=subprocess.run(argv,input=PROBE,text=True,capture_output=True,timeout=1200,env=env)
             return {'target':image,'container':identity if a.guest else None,'returncode':proc.returncode,'log':proc.stdout+proc.stderr}

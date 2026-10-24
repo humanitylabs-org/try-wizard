@@ -2,6 +2,7 @@
 """Inside only the disposable retained-factory clone. Frozen RC first, Mac layers second."""
 import argparse, hashlib, json, os, shutil, sqlite3, subprocess
 from pathlib import Path
+import local_oci as oci
 ROOT=Path('/mnt/launch');WORK=ROOT/'assembly-work'
 
 def run(argv,**kw):return subprocess.check_output(list(map(str,argv)),text=True,timeout=kw.pop('timeout',600),**kw)
@@ -44,7 +45,11 @@ def main():
     run(['apt-get','update'],timeout=300)
     run(['apt-get','install','-y','--no-install-recommends','ca-certificates','curl','python3-yaml'],timeout=600)
     plan=json.loads((ROOT/'preparation/security-image-plan.json').read_text());assert plan['complete'] is True
-    helper=plan['resolutions']['helper-python']['image'];run(['docker','pull',helper],timeout=600)
+    for selection in plan['targets']:
+        row=json.loads((ROOT/selection['receipt']).read_text())
+        assert plan['resolutions'][selection['key']]['image']==row['ref']+'@'+row['digest']
+        oci.load(ROOT,row)
+    helper=plan['resolutions']['helper-python']['image']
     cid=run(['docker','create',helper]).strip()
     try:
         for name in ['uv','uvx']:run(['docker','cp',cid+':/usr/local/bin/'+name,'/usr/local/bin/'+name])

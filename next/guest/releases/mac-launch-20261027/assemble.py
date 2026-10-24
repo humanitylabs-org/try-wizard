@@ -4,6 +4,7 @@ Default --plan is read-only. Only admission may call --execute on the Thales wor
 """
 import argparse, hashlib, importlib.util, json, os, re, shutil, socket, subprocess, sys, time
 from pathlib import Path
+import local_oci as oci
 HERE=Path(__file__).resolve().parent
 E2='/opt/homebrew/opt/e2fsprogs/sbin/'
 
@@ -33,7 +34,8 @@ def runtime_release(pins,root):
     rc=json.loads((HERE/'wizard-os-release-candidate.json').read_text());images={}
     for key,name in [('wam','wizard-app-manager'),('service','wizard-agent-service'),('ux','wizard-ux')]:
         receipt=json.loads((root/'image-packaging'/key/'result.json').read_text())
-        assert receipt['sourceCommit']==pins['finalPins'][key] and receipt['pullVerified'] is True
+        assert receipt['sourceCommit']==pins['finalPins'][key] and receipt['loadVerified'] is True
+        oci.validate(root,receipt)
         selected=pins['assembly']['images'][key]
         assert receipt['digest']==selected['digest'] and receipt['ref']==selected['ref']
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',receipt['digest'])
