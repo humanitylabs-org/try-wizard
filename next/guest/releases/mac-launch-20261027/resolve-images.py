@@ -44,6 +44,8 @@ def main():
     rc['images']=images;rc['status']='factory-bootstrap-ready'
     rc['hermes']['image']={'ref':plan['resolutions']['stock']['image'].split('@')[0],'digest':plan['resolutions']['stock']['image'].split('@')[1]}
     rc['default_apps']['recorder']['image']=plan['resolutions']['recorder']['image']
+    pins['recorderImage']['upstreamArm64Image']=pins['recorderImage'].get('upstreamArm64Image',pins['recorderImage']['arm64Image'])
+    pins['recorderImage']['arm64Image']=rc['default_apps']['recorder']['image']
     pins['runtimeBuild']['hermesImage']=plan['resolutions']['stock']['image']
     pins['runtimeBuild']['baseStatus']='all selected image trust clients verified by security-preflight.json; guest host/runtime repeat mandatory'
     runtime={k:rc[k] for k in ['version','components','default_apps','hermes','images']}

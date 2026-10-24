@@ -1,0 +1,194 @@
+{
+  "digest": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+  "manifestDigest": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+  "indexSha256": "ca97dd45cda375a5f9f354d18e6771d31b2a6bae00c524116afb87b4d3ea3ef1",
+  "configDigest": "sha256:97976933bd5302f120283e4b64e2dfa58a9271aefba6daf14d95d4909fe2a48c",
+  "transport": "oci-archive",
+  "archive": "security-packaging/recorder/image.oci.tar",
+  "archiveSha256": "83efcb2ec30545adc8dcc195bf08b1cf69e92b86ff534c34a34c0612d750f288",
+  "archiveVerified": true,
+  "loadVerified": true,
+  "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-recorder",
+  "tagsPublished": false,
+  "releasePublished": false,
+  "imageId": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+  "key": "recorder",
+  "base": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:b617efac660eadf7d0d9f98e4dfdb98843834f252dea4c209d30a8d88db1aa74",
+  "baseDependency": {
+    "receipt": "image-packaging/recorder/result.json",
+    "receiptSha256": "613f678a958582974211b55ef95edf9bd4f0b7aa02e48576115708996ba85ec5",
+    "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+    "digest": "sha256:b617efac660eadf7d0d9f98e4dfdb98843834f252dea4c209d30a8d88db1aa74"
+  },
+  "recipeSha256": "16c635eb8f6a894f43bf2ecebe56c7d874c917b7d399e990a6070a3e09b58250",
+  "remediation": {
+    "python": "/usr/local/bin/python3",
+    "version": "3.12.15 (main, Oct 21 2026, 01:13:35) [GCC 12.2.0]",
+    "contexts": [
+      "system",
+      "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem"
+    ],
+    "checks": [
+      {
+        "context": "system",
+        "url": "https://example.com/",
+        "certificateRejected": false
+      },
+      {
+        "context": "system",
+        "url": "https://probe-emudhra.we-have-a-problem.com/",
+        "certificateRejected": false
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://example.com/",
+        "certificateRejected": false
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://probe-emudhra.we-have-a-problem.com/",
+        "certificateRejected": false
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ov-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ev-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ov-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ev-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ov-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ev-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ov-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://ev-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3b-noct-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "system",
+        "url": "https://dv-g3b-aaa-noct-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ov-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ev-g3b-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ov-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ev-g3c-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ov-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ev-g3b-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ov-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://ev-g3c-aaa-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3b-noct-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      },
+      {
+        "context": "/usr/local/lib/python3.12/site-packages/pip/_vendor/certifi/cacert.pem",
+        "url": "https://dv-g3b-aaa-noct-emudhra.we-have-a-problem.com/",
+        "certificateRejected": true
+      }
+    ]
+  }
+}

@@ -83,17 +83,26 @@ def main():
     root=a.stage_root.resolve();assert sys.platform=='darwin' and root.is_relative_to(Path(os.environ['THALES_MEDIA']))
     plan=json.loads((HERE/'security-image-plan.json').read_text());target=next(t for t in plan['targets'] if t['key']==a.target)
     assert target['resolution']=='derive-image'
-    base=target['base'];assert re.fullmatch(r'.+@sha256:[0-9a-f]{64}',base)
+    dependency=None;local_row=None
+    if target.get('baseComponent'):
+        local_row,dependency=oci.local_base(root,target,json.loads((HERE/'pins.json').read_text()))
+        base=local_row['ref']+'@'+local_row['digest']
+    else:base=target['base']
+    assert re.fullmatch(r'.+@sha256:[0-9a-f]{64}',base)
     out=root/'security-packaging'/a.target
     if (out/'result.json').exists():
         row=json.loads((out/'result.json').read_text());assert row['base']==base and row['key']==a.target and row['recipeSha256']==sha(out/'recipe.json')
+        if dependency:assert row['baseDependency']==dependency
         oci.load(root,row,DOCKER,oci.environment(out));print(json.dumps({**row,'reusedVerifiedArchive':True}));return
     out.mkdir(exist_ok=False,parents=True);context=out/'context';context.mkdir()
     env=oci.environment(out);mirrors={}
-    base=oci.mirror(base,env,mirrors)
-    run([DOCKER,'pull','--platform','linux/arm64',base],env=env,timeout=300)
+    selected_base=base
+    if local_row:oci.load(root,local_row,DOCKER,env)
+    else:
+        base=oci.mirror(base,env,mirrors)
+        run([DOCKER,'pull','--platform','linux/arm64',base],env=env,timeout=300)
     obj=json.loads(run([DOCKER,'inspect',base],env=env))[0];assert obj['Architecture']=='arm64'
-    raw=subprocess.run([DOCKER,'run','--rm','-i','--read-only','--cap-drop=ALL','--entrypoint','/bin/sh',base,'-s'],input=INVENTORY,capture_output=True,text=True,env=env,timeout=60,check=True)
+    raw=subprocess.run([DOCKER,'run','--pull=never','--rm','-i','--read-only','--cap-drop=ALL','--entrypoint','/bin/sh',base,'-s'],input=INVENTORY,capture_output=True,text=True,env=env,timeout=60,check=True)
     inventory=json.loads(raw.stdout);emit(out/'base-inventory.json',inventory)
     if inventory.get('minimal'):
         helper=json.loads((root/'security-packaging/helper-python/result.json').read_text())
@@ -106,7 +115,7 @@ def main():
     text=recipe(base,obj['Config'],inventory,plan)
     for match in list(re.finditer(r'^FROM (\S+)',text,re.M)):
         ref=match.group(1);text=text.replace(ref,oci.mirror(ref,env,mirrors))
-    (context/'Dockerfile').write_text(text);emit(out/'recipe.json',{'base':target['base'],'resolvedBase':base,'mirrors':mirrors,'dockerfileSha256':sha(context/'Dockerfile'),'inventory':inventory,'upstreamInputs':plan['upstreamInputs']})
+    (context/'Dockerfile').write_text(text);emit(out/'recipe.json',{'base':selected_base,'baseDependency':dependency,'resolvedBase':base,'mirrors':mirrors,'dockerfileSha256':sha(context/'Dockerfile'),'inventory':inventory,'upstreamInputs':plan['upstreamInputs']})
     image='ghcr.io/humanitylabs-org/wizard-mac-security-'+a.target
     transport,built=oci.export(out,context,image,env)
     exact=image+'@'+transport['digest']
@@ -117,7 +126,7 @@ def main():
         assert actual==expected,field
     with oci.probe_mount([HERE/'security-probe.py'],exact,env) as mount:
         remediation=json.loads(run([DOCKER,'run','--pull=never','--rm','--entrypoint','/bin/sh','-v',mount,exact,'-lc','PY=$(command -v python3 || command -v python); "$PY" /opt/wizard-probe/security-probe.py'],env=env,timeout=300).splitlines()[-1])
-    result={**transport,'key':a.target,'base':target['base'],'archive':str(Path(transport['archive']).relative_to(root)),'recipeSha256':sha(out/'recipe.json'),'remediation':remediation}
+    result={**transport,'key':a.target,'base':selected_base,'baseDependency':dependency,'archive':str(Path(transport['archive']).relative_to(root)),'recipeSha256':sha(out/'recipe.json'),'remediation':remediation}
     emit(out/'result.json',result);print(json.dumps(result))
 
 if __name__=='__main__':main()

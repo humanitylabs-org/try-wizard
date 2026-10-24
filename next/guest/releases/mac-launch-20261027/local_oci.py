@@ -81,6 +81,18 @@ def validate(root,row):
     for k in ['digest','manifestDigest','indexSha256','configDigest']:assert actual[k]==row[k],k
     return path
 
+def local_base(root,target,pins):
+    """Validate a source-built dependency; never silently fall back to its private registry."""
+    key=target['baseComponent']
+    assert key in pins['finalPins']
+    assert target['sourceCommit']==pins['finalPins'][key]
+    path=Path(root)/'image-packaging'/key/'result.json'
+    row=json.loads(path.read_text())
+    assert row['component']==key and row['sourceCommit']==pins['finalPins'][key]
+    assert row['ref']==target['baseRef'] and row['tagsPublished'] is False
+    validate(root,row)
+    return row,{'receipt':str(path.relative_to(root)),'receiptSha256':sha(path),'sourceCommit':row['sourceCommit'],'digest':row['digest']}
+
 def load(root,row,docker='docker',env=None):
     path=validate(root,row)
     run([docker,'load','-i',path],env,timeout=600)

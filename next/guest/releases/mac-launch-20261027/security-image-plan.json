@@ -111,7 +111,9 @@
     {
       "key": "recorder",
       "resolution": "derive-image",
-      "base": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
+      "baseComponent": "recorder",
+      "baseRef": "ghcr.io/humanitylabs-org/wizard-recorder",
+      "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
       "receipt": "security-packaging/recorder/result.json",
       "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
     },

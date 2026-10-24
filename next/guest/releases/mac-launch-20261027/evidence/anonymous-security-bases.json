@@ -1,0 +1,182 @@
+{
+  "checkedAt": "2026-10-24T21:16:07.814368+00:00",
+  "auth": "empty inline auths, no credential store",
+  "scope": "exact manifests, not layer downloads",
+  "targets": [
+    {
+      "key": "helper-python",
+      "base": "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/library/python@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+      "digest": "sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+      "mirrors": {
+        "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4": {
+          "resolved": "mirror.gcr.io/library/python@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+          "digest": "sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "hermes-app",
+      "base": "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+      "status": "anonymous-manifest-readable",
+      "resolved": "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+      "digest": "sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+      "mirrors": {}
+    },
+    {
+      "key": "chatgpt",
+      "base": "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+      "status": "anonymous-manifest-readable",
+      "resolved": "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+      "digest": "sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+      "mirrors": {}
+    },
+    {
+      "key": "claude",
+      "base": "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+      "status": "anonymous-manifest-readable",
+      "resolved": "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+      "digest": "sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+      "mirrors": {}
+    },
+    {
+      "key": "files",
+      "base": "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/filebrowser/filebrowser@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+      "digest": "sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+      "mirrors": {
+        "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a": {
+          "resolved": "mirror.gcr.io/filebrowser/filebrowser@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+          "digest": "sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "transcriber",
+      "base": "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+      "status": "anonymous-manifest-readable",
+      "resolved": "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+      "digest": "sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+      "mirrors": {}
+    },
+    {
+      "key": "browser",
+      "base": "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/chromedp/headless-shell@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+      "digest": "sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+      "mirrors": {
+        "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071": {
+          "resolved": "mirror.gcr.io/chromedp/headless-shell@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+          "digest": "sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "secrets",
+      "base": "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+      "status": "anonymous-manifest-readable",
+      "resolved": "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+      "digest": "sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+      "mirrors": {}
+    },
+    {
+      "key": "notifications",
+      "base": "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/binwiederhier/ntfy@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+      "digest": "sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+      "mirrors": {
+        "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f": {
+          "resolved": "mirror.gcr.io/binwiederhier/ntfy@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+          "digest": "sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "recorder",
+      "base": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
+      "status": "anonymous-manifest-failed",
+      "error": "Command '['/opt/homebrew/bin/docker', 'buildx', 'imagetools', 'inspect', 'ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a', '--format', '{{json .Manifest}}']' returned non-zero exit status 1.",
+      "stderr": "ERROR: failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Ahumanitylabs-org%2Fwizard-recorder%3Apull&service=ghcr.io: 401 Unauthorized\n",
+      "localReplacement": "recorder"
+    },
+    {
+      "key": "stock",
+      "base": "docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+      "digest": "sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+      "mirrors": {
+        "docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7": {
+          "resolved": "mirror.gcr.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+          "digest": "sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "postgres",
+      "base": "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/library/postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+      "digest": "sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+      "mirrors": {
+        "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1": {
+          "resolved": "mirror.gcr.io/library/postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+          "digest": "sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "rabbitmq",
+      "base": "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/library/rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+      "digest": "sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+      "mirrors": {
+        "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada": {
+          "resolved": "mirror.gcr.io/library/rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+          "digest": "sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "traefik",
+      "base": "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+      "status": "anonymous-manifest-readable",
+      "resolved": "mirror.gcr.io/library/traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+      "digest": "sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+      "mirrors": {
+        "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57": {
+          "resolved": "mirror.gcr.io/library/traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+          "digest": "sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+          "mirror": "mirror.gcr.io"
+        }
+      }
+    },
+    {
+      "key": "wam",
+      "status": "local-source-build",
+      "receipt": "image-packaging/wam/result.json"
+    },
+    {
+      "key": "service",
+      "status": "local-source-build",
+      "receipt": "image-packaging/service/result.json"
+    },
+    {
+      "key": "ux",
+      "status": "local-source-build",
+      "receipt": "image-packaging/ux/result.json"
+    }
+  ]
+}

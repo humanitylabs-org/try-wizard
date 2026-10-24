@@ -22,7 +22,11 @@ def resolve_plan(plan,root,pins):
         oci.validate(root,row)
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',row['digest'])
         if target['resolution']=='derive-image':
-            assert row['key']==target['key'] and row['base']==target['base']
+            if target.get('baseComponent'):
+                source,dependency=oci.local_base(root,target,pins)
+                assert row['base']==source['ref']+'@'+source['digest'] and row['baseDependency']==dependency
+            else:assert row['base']==target['base']
+            assert row['key']==target['key']
             assert row['ref']=='ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key']
         else:
             assert target['resolution']=='selected-core-image' and row['sourceCommit']==pins['finalPins'][target['key']]

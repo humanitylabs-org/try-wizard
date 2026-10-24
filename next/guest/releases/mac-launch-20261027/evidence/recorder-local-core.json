@@ -1,0 +1,18 @@
+{
+  "digest": "sha256:b617efac660eadf7d0d9f98e4dfdb98843834f252dea4c209d30a8d88db1aa74",
+  "manifestDigest": "sha256:b617efac660eadf7d0d9f98e4dfdb98843834f252dea4c209d30a8d88db1aa74",
+  "indexSha256": "5b8beff9afcb29aa395b7dd9eafe57091607fc0bfd108d11714f45f80eefd504",
+  "configDigest": "sha256:50517f51041c170bce3920383f537f26c0225693cb49fdc60e60a08127f1c901",
+  "transport": "oci-archive",
+  "archive": "image-packaging/recorder/image.oci.tar",
+  "archiveSha256": "8fae80f09116d241a118280b43a648640b7bc11544c260c4d1b088cc1d4dadaa",
+  "archiveVerified": true,
+  "loadVerified": true,
+  "ref": "ghcr.io/humanitylabs-org/wizard-recorder",
+  "tagsPublished": false,
+  "releasePublished": false,
+  "imageId": "sha256:b617efac660eadf7d0d9f98e4dfdb98843834f252dea4c209d30a8d88db1aa74",
+  "component": "recorder",
+  "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+  "recipeSha256": "c1f7ddba84e5801470e3492eebb7001adec76fedd0c51ef162b64ffec2171d76"
+}

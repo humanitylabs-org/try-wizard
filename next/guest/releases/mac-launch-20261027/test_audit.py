@@ -94,11 +94,18 @@ class AdmissionTests(unittest.TestCase):
         closure_spec=importlib.util.spec_from_file_location('closure_fixture',prep/'security-closure.py');assert closure_spec and closure_spec.loader
         closure=importlib.util.module_from_spec(closure_spec);closure_spec.loader.exec_module(closure)
         security_plan=json.loads((prep/'security-image-plan.json').read_text())
+        from test_local_oci import fixture_archive
+        import local_oci as oci
+        core=fixture_archive(root,'ghcr.io/humanitylabs-org/wizard-recorder','recorder-core')
+        core.update(component='recorder',sourceCommit=m['finalPins']['recorder'])
+        emit(root/'image-packaging/recorder/result.json',core)
         for index,target in enumerate(security_plan['targets']):
             if target['resolution']=='selected-core-image':
                 key=target['key'];row={'sourceCommit':m['finalPins'][key],'loadVerified':True,'tagsPublished':False,'imageId':'sha256:'+str(index).zfill(64),**m['assembly']['images'][key]}
             else:
-                row={'key':target['key'],'base':target['base'],'ref':'ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key'],'digest':'sha256:'+format(index+1,'064x'),'imageId':'sha256:'+format(index+101,'064x'),'loadVerified':True,'tagsPublished':False,'unitFixtureOnly':True}
+                base=target.get('base',core['ref']+'@'+core['digest'])
+                row={'key':target['key'],'base':base,'ref':'ghcr.io/humanitylabs-org/wizard-mac-security-'+target['key'],'digest':'sha256:'+format(index+1,'064x'),'imageId':'sha256:'+format(index+101,'064x'),'loadVerified':True,'tagsPublished':False,'unitFixtureOnly':True}
+                if target.get('baseComponent'):row['baseDependency']=oci.local_base(root,target,m)[1]
             emit(root/target['receipt'],row)
         from test_local_oci import fixture_archive
         for target in security_plan['targets']:

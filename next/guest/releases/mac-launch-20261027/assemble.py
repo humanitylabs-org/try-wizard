@@ -41,7 +41,14 @@ def runtime_release(pins,root):
         assert re.fullmatch(r'sha256:[0-9a-f]{64}',receipt['digest'])
         images[name]={'ref':receipt['ref'],'digest':receipt['digest'],'source_commit':receipt['sourceCommit']}
     assert all(rc['images'][name]==row for name,row in images.items())
-    assert json.loads((HERE/'security-image-plan.json').read_text())['complete'] is True
+    security=json.loads((HERE/'security-image-plan.json').read_text());assert security['complete'] is True
+    spec=importlib.util.spec_from_file_location('assembly_security',HERE/'security-closure.py');assert spec and spec.loader
+    closure=importlib.util.module_from_spec(spec);spec.loader.exec_module(closure)
+    actual,resolutions=closure.resolve_plan(security,root,pins)
+    assert actual==security['images'] and resolutions==security['resolutions']
+    recorder=resolutions['recorder']['image']
+    assert rc['default_apps']['recorder']['image']==recorder and pins['recorderImage']['arm64Image']==recorder
+    assert rc['images']['wizard-recorder']=={'ref':recorder.split('@')[0],'digest':recorder.split('@')[1],'security_target':'recorder'}
     return {'version':rc['version'],'components':rc['components'],'default_apps':rc['default_apps'],'hermes':rc['hermes'],'images':rc['images']}
 
 def pack(work,pins):

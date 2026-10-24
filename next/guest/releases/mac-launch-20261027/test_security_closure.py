@@ -16,7 +16,12 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(len(plan['targets']),17);self.assertEqual(sum(t['resolution']=='derive-image' for t in plan['targets']),14)
         self.assertTrue(plan['selectionComplete']);self.assertFalse(plan['complete'])
         for row in plan['targets']:
-            if row['resolution']=='derive-image':self.assertRegex(row['base'],r'^.+@sha256:[0-9a-f]{64}$')
+            if row['resolution']=='derive-image':
+                if row.get('baseComponent'):
+                    self.assertEqual(row['sourceCommit'],json.loads((HERE/'pins.json').read_text())['finalPins'][row['baseComponent']])
+                    self.assertEqual(row['baseRef'],'ghcr.io/humanitylabs-org/wizard-recorder')
+                    self.assertNotIn('base',row)  # No private-registry fallback.
+                else:self.assertRegex(row['base'],r'^.+@sha256:[0-9a-f]{64}$')
     def test_all_fourteen_advisory_hosts(self):
         self.assertEqual(len(probe.BAD),14);self.assertEqual(len(set(probe.BAD)),14)
         self.assertIn('dv-g3b-noct-emudhra',probe.BAD);self.assertIn('dv-g3b-aaa-noct-emudhra',probe.BAD)
