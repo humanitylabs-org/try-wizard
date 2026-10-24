@@ -11,9 +11,22 @@ enum WizardShared {
     static var osDir: URL { supportDir.appendingPathComponent("os") }
     static var statusFile: URL { supportDir.appendingPathComponent("host-status.json") }
     static let osInstalled = true
+    static var diskIdentity: String { WizardDiskIdentity.read(osDir.appendingPathComponent("disk.img")) ?? "unknown" }
     static var guestUpdatePayload: URL? { supportDir }
 }
-enum WizardRelease { static let peer = 1 }
+struct WizardRelease {
+    static let peer = 1
+    let releaseID = "test-release"; let build = "309"; let payloadID: String? = "sha256:fixture"
+    static func read(_ app: URL) throws -> WizardRelease { WizardRelease() }
+    func validate(_ app: URL) throws {}
+}
+// I/O fixtures only; actual ABI policy is compiled by test_os_manifest_contract.py.
+enum WizardGuestABI {
+    static func image(_ manifest: [String: Any]) throws -> Int { 1 }
+    static func payload(_ url: URL, abi: Int) throws {}
+    static func requiresFreshApply(baked: String?, bundled: String?) -> Bool { baked == nil || baked != bundled }
+    static func requireSystemOwner(_ receipt: [String: Any], diskIdentity: String, incomingBuild: String) throws {}
+}
 enum WizardUpdate {
     static var dir: URL { WizardShared.supportDir.appendingPathComponent("updates") }
     static var journal: URL { dir.appendingPathComponent("transaction.json") }
@@ -50,7 +63,9 @@ enum WizardUpdate {
     }
     static func waitForLocalWizard(timeout: TimeInterval, tick: @escaping (TimeInterval) -> Void, done: @escaping (Bool) -> Void) { done(true) }
     static func send(_ command: String) {
-        if command == "apply-guest-update" {
+        if command == "verify-apps-after-update" {
+            try! WizardUpdate.write(["nonce": WizardUpdate.json(WizardUpdate.journal)["nonce"]!, "ok":true], WizardUpdate.dir.appendingPathComponent("apps-health.json"))
+        } else if command == "apply-guest-update" {
             let nonce = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-command.json"))["nonce"]!
             try! Data("APPLIED".utf8).write(to: WizardShared.osDir.appendingPathComponent("disk.img"))
             let reply: [String: Any] = failAfterApply ? ["nonce": nonce, "state": "failed", "error": "injected post-apply failure"] : ["nonce": nonce, "state": "applied", "receipt": ["authenticatedByHost": true, "managed_runtime_image": "sha256:test"]]

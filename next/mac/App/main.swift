@@ -113,7 +113,9 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 if !legacy && [404, 410].contains(code ?? 0) { fetch(Store.legacyOSFeedURL, legacy: true); return }
                 guard let data, code == 200 else { complete(.failure(err ?? error("Couldn't reach the Wizard OS feed"))); return }
                 do {
-                    let feed = legacy ? try JSONDecoder().decode(Feed.self, from: data) : try selectImage(JSONDecoder().decode(ImageIndex.self, from: data))
+                    let feed: Feed
+                    if legacy { feed = try JSONDecoder().decode(Feed.self, from: data) }
+                    else { feed = try selectImage(JSONDecoder().decode(ImageIndex.self, from: data)) }
                     complete(.success((feed, url)))
                 } catch { complete(.failure(error)) }
             }.resume()

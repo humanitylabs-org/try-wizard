@@ -9,7 +9,7 @@ assert pins==bom['sources'],'Source pins changed since image build'
 dst=r/'payloads'/pins['source'][:12];dst.mkdir(parents=True,exist_ok=False)
 for name,src in [('wam',r/'wam'),('overlay',r/'source/next/guest/overlay'),('agent-runtime',r/'service/ops/agent-runtime')]:
  shutil.copytree(src,dst/name,ignore=shutil.ignore_patterns('.git','__pycache__','.pytest_cache','node_modules'))
-for name in ['upgrade-mvp-stack.py','stack-preservation.py','test-stack-preservation.py','update-contract.py','app-update-guard.py']:
+for name in ['upgrade-mvp-stack.py','stack-preservation.py','test-stack-preservation.py','update-contract.py','app-update-guard.py','cold-bootstrap.py','cold-config.py']:
  d=dst/'source/next/guest'/name;d.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(r/'source/next/guest'/name,d)
 shutil.copy2(r/'wizard-shell.tar',dst/'wizard-shell.tar')
 if bom.get('managed_runtime'):

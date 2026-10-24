@@ -304,7 +304,16 @@ final class NoticeBarView: NSView {
         var journal = WizardUpdate.json(WizardUpdate.journal)
         guard journal["dataHome"] as? String == WizardShared.supportDir.path else { return }
         if journal["kind"] as? String == "fresh", ["fresh-placed", "fresh-prepared"].contains(journal["phase"] as? String ?? "") {
-            show("failed", "Fresh installation was interrupted before activation. The factory disk is intact; retry setup.")
+            activatingGuest = true; preparing = true; onFreeze(true)
+            WizardGuestActivation.shared.onProgress = { [weak self] text in self?.show("recovering", text) }
+            WizardGuestActivation.shared.onDone = { [weak self] error in
+                guard let self else { return }
+                self.activatingGuest = false; self.releaseLease(); self.onGuestFinished()
+                self.show(error == nil ? "installed" : "failed", error ?? "Fresh installation completed after interruption")
+            }
+            // No payload mutation began. Re-journal/clone the still-pristine factory,
+            // then enter exactly the normal fresh reconciliation path.
+            WizardGuestActivation.shared.prepareFresh()
             return
         }
         if journal["phase"] as? String == "guest-activating" {

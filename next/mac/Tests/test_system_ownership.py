@@ -47,6 +47,21 @@ class SystemOwnershipContract(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             guard.assert_stopped(guard.apps([container(running=True)]))
 
+    def test_runtipi_store_state_is_read_only(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'user-config/notes/settings.json'
+            app.parent.mkdir(parents=True); app.write_text('{"keep":true}')
+            owned = root / 'user-config/wizardapps/wizard-shell/compose.yml'
+            owned.parent.mkdir(parents=True); owned.write_text('old system')
+            before = guard.store_state(root)
+            owned.write_text('new system')
+            self.assertEqual(before, guard.store_state(root))
+            app.write_text('{"keep":false}')
+            self.assertNotEqual(before, guard.store_state(root))
+
     def test_running_apps_must_resume(self):
         before = guard.apps([container(running=True), container('stopped')])
         guard.assert_running_after(before, copy.deepcopy(before))

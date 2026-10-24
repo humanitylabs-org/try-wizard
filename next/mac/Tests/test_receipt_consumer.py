@@ -7,7 +7,7 @@ class ReceiptConsumer(unittest.TestCase):
     def test_exact_embedded_consumer(self):
         source = (Path(__file__).parents[1]/'Shared/GuestPatchCommand.swift').read_text()
         code = textwrap.dedent(source[source.index("    assert d['patch']"):source.index("    print('WIZARD_PATCH_OK")])
-        good = {'patch':'mac-stack-v1', 'permanent_identity_credentials_preserved':True, 'service_image':'sha256:fixture',
+        good = {'systemOwner':'host-payload', 'apps_untouched':True, 'patch':'mac-stack-v1', 'permanent_identity_credentials_preserved':True, 'service_image':'sha256:fixture',
                 'auth':{'stable_identity_credentials_preserved':True,'unexpected_field_changes':[]},
                 'env':{'stable_credentials_preserved':True,'other_bytes_unchanged':True,'managed_terminal_key_path_migrated':False},
                 'protected_before_sha256':{'/data/.env':'env-old','/data/auth.json':'auth-old','/data/SOUL.md':'soul'},

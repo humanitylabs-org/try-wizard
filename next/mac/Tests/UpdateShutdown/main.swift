@@ -9,11 +9,24 @@ enum WizardShared {
     static var osDir: URL { supportDir.appendingPathComponent("os") }
     static var logsDir: URL { supportDir }
     static var statusFile: URL { supportDir.appendingPathComponent("status.json") }
+    static var diskIdentity: String { WizardDiskIdentity.read(osDir.appendingPathComponent("disk.img")) ?? "unknown" }
     static var guestUpdatePayload: URL? { supportDir }
     static let guestControlPort: UInt32 = 9201
     static let osInstalled = true
 }
-enum WizardRelease { static let peer = 1 }
+struct WizardRelease {
+    static let peer = 1
+    let releaseID = "test-release"; let build = "309"; let payloadID: String? = "sha256:fixture"
+    static func read(_ app: URL) throws -> WizardRelease { WizardRelease() }
+    func validate(_ app: URL) throws {}
+}
+// I/O fixtures only; actual ABI policy is compiled by test_os_manifest_contract.py.
+enum WizardGuestABI {
+    static func image(_ manifest: [String: Any]) throws -> Int { 1 }
+    static func payload(_ url: URL, abi: Int) throws {}
+    static func requiresFreshApply(baked: String?, bundled: String?) -> Bool { baked == nil || baked != bundled }
+    static func requireSystemOwner(_ receipt: [String: Any], diskIdentity: String, incomingBuild: String) throws {}
+}
 enum WizardUpdate {
     static var dir: URL { WizardShared.supportDir.appendingPathComponent("updates") }
     static var journal: URL { dir.appendingPathComponent("transaction.json") }

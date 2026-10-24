@@ -4,6 +4,7 @@ import unittest
 from test_guest_abi import MAC
 
 spec = importlib.util.spec_from_file_location('os_index', MAC.parent / 'guest/build-os-index.py')
+assert spec and spec.loader
 index = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(index)
 

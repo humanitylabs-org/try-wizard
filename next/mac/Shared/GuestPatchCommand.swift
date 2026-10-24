@@ -17,6 +17,7 @@ enum WizardGuestPatchCommand {
     import json
     d=json.load(open('/var/lib/wizard/patches/mac-stack-v1/applied.json'))
     assert d['patch']=='mac-stack-v1' and d['permanent_identity_credentials_preserved'] is True and d['service_image'].startswith('sha256:')
+    assert d['systemOwner']=='host-payload' and d['apps_untouched'] is True
     assert d['auth']['stable_identity_credentials_preserved'] is True and not d['auth']['unexpected_field_changes']
     assert d['env']['stable_credentials_preserved'] is True and d['env']['other_bytes_unchanged'] is True
     for p,v in d['protected_after_sha256'].items():

@@ -8,6 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 MAC = ROOT / 'mac'
 spec = importlib.util.spec_from_file_location('guest_contract', ROOT / 'guest/update-contract.py')
+assert spec and spec.loader
 policy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(policy)
 
