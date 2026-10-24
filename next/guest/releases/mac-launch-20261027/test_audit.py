@@ -29,7 +29,12 @@ class AdmissionTests(unittest.TestCase):
         self.assertGreater(len(receipt["blockers"]), 0)
 
     def test_open_source_gates_are_not_hidden(self):
-        errors = audit.inspect(self.manifest, None)
+        # Exercise unresolved-gate rejection independently of real progress in
+        # the checked-in candidate manifest; a resolved gate is not "open".
+        changed = copy.deepcopy(self.manifest)
+        for gate in changed['blockers']:
+            gate['status'] = 'open'
+        errors = audit.inspect(changed, None)
         for key in ["service-integration", "wam-release", "phone-source", "recorder", "pin-consumers", "live-shell-parity"]:
             self.assertIn("open gate: " + key, errors)
 

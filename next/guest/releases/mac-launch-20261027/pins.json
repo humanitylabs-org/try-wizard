@@ -12,7 +12,7 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "bfcf8eddbd59c14bfd51bbff3877eafe5b0dbb7c",
+      "commit": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
       "ref": "release/mac-guest-launch-20261027"
     },
     "ux": {
@@ -244,7 +244,7 @@
     }
   },
   "finalPins": {
-    "native": "bfcf8eddbd59c14bfd51bbff3877eafe5b0dbb7c",
+    "native": "f9bcf4840f8b0f9e85ac3dcc26e010c47a7b6660",
     "ux": "69cb20679e46477a0c1a74a006eec733dd99b284",
     "service": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
     "wam": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
@@ -271,17 +271,17 @@
     {
       "id": "service-integration",
       "status": "open",
-      "detail": "Candidate ee5229f carries both #96 and #138; PR #156 draft. Exact-head GitHub quality/CodeQL/secret/validation green; Thales1311 Vitest pass/8 skipped,22 maintenance/lifecycle node pass,5 real-root recovery pass. No live deployment or merge; review gate remains."
+      "detail": "Candidate ee5229f carries #96 and #138; PR#156 draft, exact-head CI green. Thales:1311 Vitest pass/8 skipped;22 maintenance/lifecycle node tests pass;5 real-root recovery tests pass. Source reconciliation verified, review/merge not claimed."
     },
     {
       "id": "wam-release",
       "status": "open",
-      "detail": "Candidate cf46bc69 contains main custody/backup plus cd3d0593 Mac39. Backup173 pass/13 skipped,focused56 pass on Thales. Stable0.3.38 manager image inputs identical (git diff of packages/Dockerfile/package.json/bun.lock/turbo/workflow empty). PR#204 draft; full exact-head CI/review pending."
+      "detail": "Candidate7a1f0fdc contains custody+backup main and cd3d0593 Mac39. Prior backup run173 pass/13 skipped; exact-head projection/bootstrap reconciliation60 pass on Thales. Stable0.3.38 manager-image build inputs unchanged. PR#204 draft; full latest-head CI/review and backup rerun remain to read/execute."
     },
     {
       "id": "phone-source",
-      "status": "open",
-      "detail": "PR#32 rebased onto current main; helper vendored from selected Serviceee5229f; 8 Thales source tests pass. Final-artifact physical phone/fresh sign-in acceptance remains open."
+      "status": "resolved",
+      "detail": "PR#32 rebased on current main with reconciled Service ee5229f helper receipt;8 unit tests and exact-head macOS Tests/Build green. Kept draft for physical phone/final-guest acceptance; no ingress activated."
     },
     {
       "id": "builder-source",
@@ -290,18 +290,34 @@
     },
     {
       "id": "recorder",
-      "status": "open",
-      "detail": "Proven private arm64 image sha256:34ca1039 selected from successful reviewed-dispatch run40044241148; source0f31e272. PR#1 draft; final guest acceptance remains."
+      "status": "resolved",
+      "detail": "Workflow40044241148 artifact12540398464 proves0.3.5 source0f31e272 and actual arm64 manifest2dfd580d (not prior config id34ca). Clean recording/transcript/6MCP/persistence proof ok. App idwizard-recorder; live legacy appmizel untouched.",
+      "evidence": [
+        {
+          "path": "evidence/recorder-image-manifest.log",
+          "sha256": "d5e2eacd80e7695bd58d6193feb4031d0a36885ec8afee5e629d4da343e93f56"
+        },
+        {
+          "path": "evidence/recorder-clean-result.json",
+          "sha256": "b34c3a46cfbc2703191ef9884332a2f02adac770c91cd60cfe1f572a0be68d3b"
+        }
+      ]
     },
     {
       "id": "pin-consumers",
       "status": "open",
-      "detail": "Factory/runtime now validate pins.json and SHA-pinned get.sh before execution; initial checkout selected via WAM_REF. Complete reviewed factory/runtime assembly recipe still unresolved; admission remains closed."
+      "detail": "Factory, runtime sources, managed Docker base and os.sh now consume pins.json; sha256 checked before os.sh execution, selected WAM_REF before initial bootstrap.12 fail-closed unit tests pass. Full guest-layer build unexecuted; factory bootstrap still lacks a reviewed immutable Wizard OS release/app set. No complete assembly recipe yet."
     },
     {
       "id": "factory-admission",
-      "status": "open",
-      "detail": "New version0.5.0 selected (retained0.4.0 immutable). Actual production Swift validator/classifier extracted and executed on Thales:9 checks passed (new0.5,retained0.4,legacy0.3,unknown0.6,corrupt payload). Native fresh-feed path proof remains post-build."
+      "status": "resolved",
+      "detail": "0.5.0 new factory selected; no0.4.0 relabel. Production Swift validator/classifier ran on Thales:9 checks pass for0.5/retained0.4/legacy0.3/refused0.6/corrupt disk. Fresh native artifact installation remains post-build acceptance.",
+      "evidence": [
+        {
+          "path": "evidence/factory-admission.log",
+          "sha256": "f53078158f1af198075af907f9fb8fa2a66799912249bf1ddd80a6304f2b4230"
+        }
+      ]
     },
     {
       "id": "security",
@@ -359,7 +375,7 @@
     "indexDigest": "sha256:2b96184c02591fc04f1e48433d0bc907ca26236b663ee4ba6fa5b4ce6b5abe11",
     "arm64Image": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
     "proofRun": "https://github.com/humanitylabs-org/wizard-recorder/actions/runs/40044241148",
-    "proof": "success: reviewed-dispatch gate, private multiarch image publication, arm64/amd64 labels/provenance, empty canary /healthz /api/recordings, both clean-volume contracts, 37 passed. Direct registry pull here unauthorized; workflow proof retained.",
+    "proof": "Downloaded workflow artifact12540398464: image-manifest.log identifies arm64 child2dfd580d; clean result ok with real transcript,6 tools,restart/removal persistence. Prior34ca was a config/image id, not the manifest to pull.",
     "reviewState": "proven image candidate; Recorder PR #1 remains draft, final guest acceptance required"
   }
 }
