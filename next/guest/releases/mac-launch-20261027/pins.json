@@ -77,7 +77,7 @@
     "wam-reconciled": {
       "repo": "humanitylabs-org/wizard-app-manager",
       "ref": "reconcile/mac-launch-wam-20261027",
-      "commit": "cf46bc69c45e59e69e320b191c6116c8ba924102",
+      "commit": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "ux-reconciled": {
@@ -247,7 +247,7 @@
     "native": "bfcf8eddbd59c14bfd51bbff3877eafe5b0dbb7c",
     "ux": "69cb20679e46477a0c1a74a006eec733dd99b284",
     "service": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
-    "wam": "cf46bc69c45e59e69e320b191c6116c8ba924102",
+    "wam": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
     "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
@@ -341,7 +341,7 @@
     "ux": "ux-reconciled"
   },
   "osInstaller": {
-    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/cf46bc69c45e59e69e320b191c6116c8ba924102/get.sh",
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7/get.sh",
     "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
     "filename": "os.sh"
   },
@@ -357,7 +357,7 @@
     "repo": "humanitylabs-org/wizard-recorder",
     "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
     "indexDigest": "sha256:2b96184c02591fc04f1e48433d0bc907ca26236b663ee4ba6fa5b4ce6b5abe11",
-    "arm64Image": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:34ca10395144649112e1fb11b001b275056af41a460ae85ac5ba2ea3a97f6949b",
+    "arm64Image": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
     "proofRun": "https://github.com/humanitylabs-org/wizard-recorder/actions/runs/40044241148",
     "proof": "success: reviewed-dispatch gate, private multiarch image publication, arm64/amd64 labels/provenance, empty canary /healthz /api/recordings, both clean-volume contracts, 37 passed. Direct registry pull here unauthorized; workflow proof retained.",
     "reviewState": "proven image candidate; Recorder PR #1 remains draft, final guest acceptance required"
