@@ -209,6 +209,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             return
         }
         do {
+            _ = try WizardGuestABI.image(WizardUpdate.json(WizardShared.osDir.appendingPathComponent("manifest.json")))
             let config = try makeConfiguration()
             let machine = VZVirtualMachine(configuration: config)
             machine.delegate = self

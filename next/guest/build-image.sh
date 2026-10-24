@@ -147,6 +147,10 @@ def sha(p):
     return h.hexdigest()
 files = ["boot/vmlinux", "boot/initrd", "rootfs.img"]
 m = {"name": "Wizard OS", "version": v, "stack": "wizard-os-0.2-runtipi",
+     # This recipe is the legacy cold-bootstrap platform; modern remasters must
+     # explicitly select ABI 1 and a verified baked payload ID.
+     "guestABI": int(os.environ.get("GUEST_ABI", "0")), "imageBuild": v,
+     "payloadID": os.environ.get("BAKED_PAYLOAD_ID"),
      "sourceCommit": sys.argv[2],
      "kernel": "boot/vmlinux", "initrd": "boot/initrd", "rootfs": "rootfs.img",
      "cmdline": "console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false",

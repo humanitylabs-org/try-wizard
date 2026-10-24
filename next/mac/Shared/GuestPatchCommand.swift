@@ -4,7 +4,8 @@ import Foundation
 /// Host runs this directly over its owned VM's private vsock, not a Mac TCP shell.
 enum WizardGuestPatchCommand {
     static var script: String {
-        let command = baseScript
+        guard let abi = try? WizardGuestABI.image(WizardUpdate.json(WizardShared.osDir.appendingPathComponent("manifest.json"))) else { return "exit 1" }
+        let command = baseScript.replacingOccurrences(of: "--apply >", with: "--guest-abi \(abi) --apply >")
         return WizardShared.coldBootstrapToken == nil ? command : command.replacingOccurrences(of: "--apply >", with: "--apply --cold-bootstrap >")
     }
     static let baseScript = """

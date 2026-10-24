@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import CryptoKit
 import Darwin
 
@@ -14,6 +15,9 @@ struct WizardRelease: Codable {
     let minimumPeer: Int
     let files: [String: String]
     let guestPatch: String?
+    // Optional only for old signed appcasts. New bundles always emit this range.
+    let supportedGuestABI: WizardGuestABI.Range?
+
     static let peer = 1
     func validateMetadata() throws {
         guard schema == 1, arch == "arm64", hostProtocol == Self.peer, minimumPeer >= 1, minimumPeer <= Self.peer,
@@ -21,6 +25,9 @@ struct WizardRelease: Codable {
               build.range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil,
               minimumOS.range(of: "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$", options: .regularExpression) != nil,
               guestPatch == nil || guestPatch == "mac-stack-v1" else { throw WizardUpdate.error("Incompatible release metadata") }
+        if let range = supportedGuestABI {
+            guard range.min >= 0, range.min <= range.max else { throw WizardUpdate.error("Invalid supportedGuestABI range") }
+        }
         let parts = minimumOS.split(separator: ".").compactMap { Int($0) }
         guard parts.count == minimumOS.split(separator: ".").count else { throw WizardUpdate.error("Invalid minimum OS version") }
         let os = OperatingSystemVersion(majorVersion: parts[0], minorVersion: parts[1], patchVersion: parts.count == 3 ? parts[2] : 0)
@@ -53,6 +60,39 @@ struct WizardRelease: Codable {
         }
         if let patch = guestPatch {
             guard patch == "mac-stack-v1", files.keys.contains(where: { $0.hasPrefix("Contents/Resources/GuestUpdate/") }) else { throw WizardUpdate.error("Unsupported guest migration") }
+        }
+    }
+}
+
+/// The only legacy version inference table. Explicit ABI never falls back.
+enum WizardGuestABI {
+    struct Range: Codable {
+        let min: Int
+        let max: Int
+        func contains(_ abi: Int) -> Bool { min >= 0 && min <= max && abi >= min && abi <= max }
+    }
+    static let supportedGuestABI = Range(min: 0, max: 1)
+    static let legacy = ["0.3.0": 0, "0.4.0": 1, "0.4.1": 1]
+    static func image(_ manifest: [String: Any]) throws -> Int {
+        let abi: Int?
+        if let raw = manifest["guestABI"] {
+            guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  String(cString: number.objCType) != "d", String(cString: number.objCType) != "f" else {
+                throw WizardUpdate.error("Invalid guestABI: expected an integer")
+            }
+            abi = number.intValue
+        } else { abi = legacy[manifest["version"] as? String ?? ""] }
+        guard let abi, supportedGuestABI.contains(abi) else {
+            throw WizardUpdate.error("Unsupported guestABI — update Wizard before using this OS image")
+        }
+        return abi
+    }
+    static func payload(_ url: URL, abi: Int) throws {
+        let bom = WizardUpdate.json(url.appendingPathComponent("runtime-bom.json"))
+        guard let range = bom["guestABI"] as? [String: Int],
+              let lo = range["min"], let hi = range["max"],
+              lo >= 0, hi <= supportedGuestABI.max, Range(min: lo, max: hi).contains(abi) else {
+            throw WizardUpdate.error("Payload guestABI range does not admit this disk")
         }
     }
 }

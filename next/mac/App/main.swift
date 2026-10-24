@@ -384,9 +384,8 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let bad = error("This file isn't a valid Wizard OS image. Download it again from the release page.")
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let imageVersion = m["version"] as? String,
-              ["0.3.0", "0.4.0", "0.4.1"].contains(imageVersion),
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
+        _ = try WizardGuestABI.image(m)
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }
             let got = try sha256(of: dir.appendingPathComponent(rel))

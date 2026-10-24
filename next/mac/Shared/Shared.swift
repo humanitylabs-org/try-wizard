@@ -32,6 +32,8 @@ enum WizardShared {
         guard let release = try? WizardRelease.read(app), release.guestPatch == "mac-stack-v1",
               (try? release.validate(app)) != nil else { return nil }
         let payload = app.appendingPathComponent("Contents/Resources/GuestUpdate")
+        guard let abi = try? WizardGuestABI.image(WizardUpdate.json(osDir.appendingPathComponent("manifest.json"))),
+              (try? WizardGuestABI.payload(payload, abi: abi)) != nil else { return nil }
         validatedGuestPayload = (path, nonce, payload)
         return payload
     }
@@ -39,8 +41,8 @@ enum WizardShared {
     static var legacyBootstrapNeeded: Bool {
         guard osInstalled else { return false }
         let manifest = WizardUpdate.json(osDir.appendingPathComponent("manifest.json"))
-        if let version = manifest["version"] as? String,
-           Set(["0.4.0", "0.4.1"]).contains(version) { return false }
+        // Unsupported ABI is rejected at every Host boot, never cold-upgraded.
+        if let abi = try? WizardGuestABI.image(manifest), abi >= 1 { return false }
         let receipt = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("legacy-complete.json"))
         let modern = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
         return !WizardDiskIdentity.completed(receipt, modern: modern, journal: WizardUpdate.json(WizardUpdate.journal),
