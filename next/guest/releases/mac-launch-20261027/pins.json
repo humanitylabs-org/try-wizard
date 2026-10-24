@@ -42,7 +42,7 @@
     },
     "phone": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "4a5d2b2f1ba46551d9f572125d5fe6704b61b5a4",
+      "commit": "dab55ba7f2701eb45a724ce99aa9b88092760a6a",
       "ref": "feature/mac-phone-access",
       "pr": 32
     },
@@ -59,14 +59,32 @@
     },
     "recorder": {
       "repo": "humanitylabs-org/wizard-recorder",
-      "commit": "e157185b523af72c4898d77bc9bb01f5323568e1",
-      "ref": "main",
-      "status": "source-only-not-approved-image"
+      "commit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+      "ref": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+      "status": "proven-private-arm64-image-selected"
     },
     "ux-live": {
       "repo": "humanitylabs-org/wizard-ux",
       "commit": "8fa98040195db2f8f86a1f0dffc6c3292b67679c",
       "ref": "live/agent-parity-20261022"
+    },
+    "service-reconciled": {
+      "repo": "humanitylabs-org/wizard-agent-service",
+      "ref": "reconcile/mac-launch-service-20261027",
+      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "role": "candidate reconciliation; review gate remains explicit"
+    },
+    "wam-reconciled": {
+      "repo": "humanitylabs-org/wizard-app-manager",
+      "ref": "reconcile/mac-launch-wam-20261027",
+      "commit": "3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146",
+      "role": "candidate reconciliation; review gate remains explicit"
+    },
+    "ux-reconciled": {
+      "repo": "humanitylabs-org/wizard-ux",
+      "ref": "reconcile/mac-launch-live-shell-20261027",
+      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "role": "candidate reconciliation; review gate remains explicit"
     }
   },
   "stable": {
@@ -222,13 +240,13 @@
   },
   "finalPins": {
     "native": null,
-    "ux": null,
-    "service": null,
-    "wam": null,
-    "recorder": null
+    "ux": "69cb20679e46477a0c1a74a006eec733dd99b284",
+    "service": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+    "wam": "3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146",
+    "recorder": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:34ca10395144649112e1fb11b001b275056af41a460ae85ac5ba2ea3a97f6949b"
   },
   "factory": {
-    "version": null,
+    "version": "0.5.0",
     "flavor": "slim",
     "diskGB": 48,
     "runtimePayload": "must be built with final integrated pins, not legacy defaults"
@@ -248,17 +266,17 @@
     {
       "id": "service-integration",
       "status": "open",
-      "detail": "Mac recovery #96 is not on Service main. Merge preview has 7 conflicted files; preserve maintenance, isolation and controlBoundary. #138 and phone listener #24 are on main only. Requires tested integrated commit, not replacement with main."
+      "detail": "ee5229f carries protected Mac77650c6 and main#138; Thales Vitest1311 passed/8 skipped. PR#150 draft; required CI/review and extra runtime suites pending."
     },
     {
       "id": "wam-release",
       "status": "open",
-      "detail": "Stable 0.3.38 WAM d926eec includes #164/#165 but not merged #61/#127. Current main 1beacee has backup/custody but misses 39 Mac-only commits including managed admission. Requires approved integrated source/image; do not bump stable or publish in this task."
+      "detail": "3c3f8f6f contains main custody/backup plus cd3d0593 Mac integration. Thales backup173 passed/13 skipped; merged registry/custody focused56 passed. PR#204 draft review/CI required."
     },
     {
       "id": "phone-source",
       "status": "open",
-      "detail": "try-wizard #32 is draft. #74 was closed in favor of merged Service #138 (ce01cc7); helper bytes already match #32. Needs integrated Service image, fresh logged-out enrollment, owner/non-owner and reset proof on final guest."
+      "detail": "PR#32 rebased onto current main; helper vendored from selected Serviceee5229f; 8 Thales source tests pass. Final-artifact physical phone/fresh sign-in acceptance remains open."
     },
     {
       "id": "builder-source",
@@ -268,17 +286,17 @@
     {
       "id": "recorder",
       "status": "open",
-      "detail": "wizard-recorder main source exists but no approved immutable arm64 release selected. Recorder #1 remains draft with image/two-skin acceptance missing. UX main still displays Mizel.ai; include actual Recorder name/id wizard-recorder without migrating owner data."
+      "detail": "Proven private arm64 image sha256:34ca1039 selected from successful reviewed-dispatch run40044241148; source0f31e272. PR#1 draft; final guest acceptance remains."
     },
     {
       "id": "pin-consumers",
       "status": "open",
-      "detail": "build-runtime-payload.py still hardcodes UX31bdc3e/Service24a2b3a/WAM0696805. build-image.sh defaults WAM1eab0eb; provision first runs mutable aiwizards.com/os.sh then pins WAM afterwards and does not freeze WIZARD_RELEASE in provision.env. Wire final pins before construction."
+      "detail": "Factory/runtime now validate pins.json and SHA-pinned get.sh before execution; initial checkout selected via WAM_REF. Complete reviewed factory/runtime assembly recipe still unresolved; admission remains closed."
     },
     {
       "id": "factory-admission",
       "status": "open",
-      "detail": "Choose next factory version explicitly and update production validator plus legacyBootstrapNeeded (only 0.4.0 exemption) as needed. Never relabel new factory as 0.4.0 or treat raw vmrun boot as native installer acceptance."
+      "detail": "Chosen new factory0.5.0, not relabelled0.4.0. Production validator/classifier retain0.3/0.4 support and deny unknown versions. Added production-extracted Swift fixture pending Thales proof."
     },
     {
       "id": "security",
@@ -293,7 +311,7 @@
     {
       "id": "live-shell-parity",
       "status": "open",
-      "detail": "Current main UX pin differs from live on 41 tracked files. Resolve concurrent/unmerged live fixes before claiming current main/live shell included; see live-shell-comparison.json. Main/live histories diverge 247/111 commits; 3-way merge has conflicts, so no single current main/live SHA can truthfully be claimed."
+      "detail": "69cb2067 contains exact live8fa9804 and current main. PR#472 draft. Thales769 pass/7 owner-skin protection assertions fail on carried live4defd354. Protection assertions NOT weakened; explicit baseline/visual review required."
     }
   ],
   "postBuildAcceptance": [
@@ -309,6 +327,34 @@
   "execution": {
     "argv": null,
     "recipe": null,
-    "sha256": null
+    "sha256": null,
+    "reason": "Full bounded factory recompose/runtime build/apply/sanitize/package/fresh-feed recipe not yet implemented/reviewed. Retained run-factory.py nests lockf and hardcodes old source/payload; do not run as-is."
+  },
+  "runtimeSelected": {
+    "service": "service-reconciled",
+    "wam": "wam-reconciled",
+    "ux": "ux-reconciled"
+  },
+  "osInstaller": {
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146/get.sh",
+    "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
+    "filename": "os.sh"
+  },
+  "runtimeBuild": {
+    "baseImageId": "sha256:b2f114e0520b4f210fd7e99dab08ccae44bb6bb47c870b00581f2cec30c24aca",
+    "baseStatus": "blocked pending Node/certifi/trust remediation, not accepted",
+    "wamImage": "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:07df73e79ee3bea5465cd27d90f99191317075e7a669678a8d066c51473d4116",
+    "hermesImage": "docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7"
+  },
+  "recorderImage": {
+    "appId": "wizard-recorder",
+    "liveLegacyAppId": "mizel",
+    "repo": "humanitylabs-org/wizard-recorder",
+    "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+    "indexDigest": "sha256:2b96184c02591fc04f1e48433d0bc907ca26236b663ee4ba6fa5b4ce6b5abe11",
+    "arm64Image": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:34ca10395144649112e1fb11b001b275056af41a460ae85ac5ba2ea3a97f6949b",
+    "proofRun": "https://github.com/humanitylabs-org/wizard-recorder/actions/runs/40044241148",
+    "proof": "success: reviewed-dispatch gate, private multiarch image publication, arm64/amd64 labels/provenance, empty canary /healthz /api/recordings, both clean-volume contracts, 37 passed. Direct registry pull here unauthorized; workflow proof retained.",
+    "reviewState": "proven image candidate; Recorder PR #1 remains draft, final guest acceptance required"
   }
 }

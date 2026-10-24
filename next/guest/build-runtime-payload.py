@@ -4,15 +4,21 @@ Run inside the owned Linux QA guest, with archives extracted in --workspace.
 """
 import argparse,hashlib,json,platform,shutil,subprocess,tempfile
 from pathlib import Path
-PINS={'ux':'31bdc3ecb0586f61323b72227ab70506d2627e5d','service':'24a2b3ac9e941c595bb60dc826b52c9308260c8e','wam':'0696805fe000dfc616abd0cf772c52ff83d580d9'}
-BASE='sha256:b2f114e0520b4f210fd7e99dab08ccae44bb6bb47c870b00581f2cec30c24aca'
+import importlib.util
+_spec=importlib.util.spec_from_file_location('release_pins',Path(__file__).with_name('release-pins.py'))
+assert _spec is not None and _spec.loader is not None
+_release_pins=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_release_pins)
 def run(args):return subprocess.check_output(list(map(str,args)),text=True).strip()
 def sha(path):
  with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def main():
- p=argparse.ArgumentParser();p.add_argument('--workspace',type=Path,required=True);a=p.parse_args();r=a.workspace
+ p=argparse.ArgumentParser();p.add_argument('--workspace',type=Path,required=True);p.add_argument('--pins',type=Path,required=True);a=p.parse_args();r=a.workspace
+ manifest,expected=_release_pins.load(a.pins);BASE=manifest['runtimeBuild']['baseImageId']
  assert platform.machine()=='aarch64','Build only in arm64 guest'
- pins=json.loads((r/'source-pins.json').read_text());assert all(pins[k]==v for k,v in PINS.items())
+ pins=json.loads((r/'source-pins.json').read_text());assert pins==expected, 'source-pins.json differs from pins.json'
+ for key in ['service','ux','wam']:
+  receipt=json.loads((r/key/'.wizard-source.json').read_text());assert receipt['commit']==expected[key], 'archive receipt differs: '+key
+ shutil.copy2(a.pins,r/'pins.json')
  assert run(['docker','image','inspect',BASE,'--format','{{.Id}}'])==BASE
  base_tag='wizard-shell:release-base-b2f114e0520b'
  subprocess.run(['docker','tag',BASE,base_tag],check=True)
@@ -37,5 +43,6 @@ def main():
  bom['managed_runtime']={**manifest,'archive':'wizard-hermes-managed.tar','sha256':sha(r/'wizard-hermes-managed.tar'),'bytes':(r/'wizard-hermes-managed.tar').stat().st_size}
  bom['files']={str(f.relative_to(r)):sha(f) for root in [r/'wam',r/'overlay',r/'agent-runtime',r/'source/next/guest'] for f in sorted(root.rglob('*')) if f.is_file() and '__pycache__' not in f.parts}
  bom['files']['managed-runtime.json']=sha(r/'managed-runtime.json')
+ bom['files']['pins.json']=sha(r/'pins.json')
  (r/'runtime-bom.json').write_text(json.dumps(bom,indent=2)+'\n');print(json.dumps(bom))
 if __name__=='__main__':main()

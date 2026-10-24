@@ -8,7 +8,8 @@ P=/var/lib/wizard/provision.env           # written by build-image.sh: pins
 [ -r "$P" ] && . "$P"
 WAM_COMMIT="${WAM_COMMIT:-}"
 WAM_IMAGE="${WAM_IMAGE:-}"
-OS_SH_URL="${OS_SH_URL:-https://aiwizards.com/os.sh}"
+OS_SH_URL="${OS_SH_URL:?pinned os.sh URL required}"
+OS_SH_SHA256="${OS_SH_SHA256:?pinned os.sh sha256 required}"
 FACTORY="${FACTORY:-slim}"
 HERMES_IMAGE="${HERMES_IMAGE:-}"
 T0=$(date +%s.%N)
@@ -40,17 +41,13 @@ stamp network
 # The real one-liner. Root mode installs Docker, creates/uses the `wizard` user (uid 1000, made by the image),
 # then runs get.sh as that user: clone wizard-app-manager main, install.sh (Runtipi box-only, wam, defaults).
 curl -fsSL "$OS_SH_URL" -o /tmp/os.sh || fail "download os.sh"
-sha256sum /tmp/os.sh
-WAM_IMAGE="$WAM_IMAGE" WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
+printf '%s  %s\n' "$OS_SH_SHA256" /tmp/os.sh | sha256sum -c - || fail "os.sh digest mismatch (not executed)"
+WAM_REF="$WAM_COMMIT" WIZARD_MODE=fresh WAM_IMAGE="$WAM_IMAGE" WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
 stamp os_sh
-# Pin: os.sh installs whatever main is today; if main moved past the pinned commit, re-run install.sh there.
+# Verify the one-liner actually honored its immutable WAM_REF; never run mutable main as a first pass.
 if [ -n "$WAM_COMMIT" ]; then
   head=$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD)
-  if [ "$head" != "$WAM_COMMIT" ]; then
-    echo "wizard-app-manager main is $head; pinning $WAM_COMMIT"
-    as_wizard git -C /home/wizard/wizard-app-manager checkout -q "$WAM_COMMIT" || fail "checkout $WAM_COMMIT"
-    as_wizard env WAM_IMAGE="$WAM_IMAGE" bash /home/wizard/wizard-app-manager/install.sh </dev/null || fail "install.sh at pin"
-  fi
+  [ "$head" = "$WAM_COMMIT" ] || fail "os.sh did not install the selected WAM_REF"
 fi
 stamp pinned
 # Wait until every default app answers (bootstrap installs them in the background of Runtipi's queue).

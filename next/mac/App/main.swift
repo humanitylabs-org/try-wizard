@@ -383,7 +383,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let imageVersion = m["version"] as? String,
-              ["0.3.0", "0.4.0"].contains(imageVersion),
+              ["0.3.0", "0.4.0", "0.5.0"].contains(imageVersion),
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }

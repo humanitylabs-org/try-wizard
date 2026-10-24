@@ -39,7 +39,7 @@ enum WizardShared {
     static var legacyBootstrapNeeded: Bool {
         guard osInstalled else { return false }
         let manifest = WizardUpdate.json(osDir.appendingPathComponent("manifest.json"))
-        if manifest["version"] as? String == "0.4.0" { return false }
+        if ["0.4.0", "0.5.0"].contains(manifest["version"] as? String ?? "") { return false }
         let receipt = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("legacy-complete.json"))
         let modern = WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json"))
         return !WizardDiskIdentity.completed(receipt, modern: modern, journal: WizardUpdate.json(WizardUpdate.journal),

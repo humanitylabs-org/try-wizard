@@ -13,19 +13,23 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # Optional machine-local Docker/PATH setup; other Macs can export their own environment.
 if [ -n "${WIZARD_BUILD_ENV:-}" ]; then . "$WIZARD_BUILD_ENV"; fi
-VER=${VER:-0.2.0}
+# One manifest drives both factory provisioning and the runtime payload.
+: "${WIZARD_PINS:?set WIZARD_PINS to the reviewed pins.json}"
+requested_version="${VER:-}"
+pin_env="$(python3 "$HERE/release-pins.py" "$WIZARD_PINS" --shell)" || exit 2
+eval "$pin_env"
+[ -z "$requested_version" ] || [ "$requested_version" = "$VERSION" ] || { echo "VER differs from pins.json" >&2; exit 2; }
+VER="$VERSION"
 W=${W:-$HERE/../../out/wizard-os-build}   # must be inside Docker/colima's shared mount
 BUILD_SOURCE_SHA=${BUILD_SOURCE_SHA:-$(git -C "$HERE" rev-parse HEAD)}
 COLIMA_PROFILE=${COLIMA_PROFILE:-wb}
 OUT=$W/out; WORK=$W/work; mkdir -p "$OUT" "$WORK"
-# Pins (Wizard OS release 0.2.0 + wizard-app-manager main).
-WAM_COMMIT=${WAM_COMMIT:-1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a}
-WAM_IMAGE=${WAM_IMAGE:-ghcr.io/humanitylabs-org/wizard-app-manager@sha256:8afef790d701d8bdd6728187f943c5d4de50cd09da5dc29f245f636af32c1117}
+# Source/image/installer pins above are validated before any Docker or VM work.
+cp "$WIZARD_PINS" "$OUT/pins.json"
 BUILD_DISK_GB=${BUILD_DISK_GB:-48}
 # Slim factory (default): voice, Browser and AI Accounts are left out of the download (voice installs itself after
 # first launch). FACTORY=full keeps every default app. HERMES_IMAGE pins the Hermes engine image (slim build).
 FACTORY=${FACTORY:-slim}
-HERMES_IMAGE=${HERMES_IMAGE:-}
 VMRUN=$HERE/../mac/tools/vmrun
 STEP=${1:-all}
 t() { date +%s; }
@@ -39,7 +43,7 @@ docker export "$cid" > "$WORK/base.tar"; docker rm "$cid" >/dev/null
 rm -rf "$WORK/g"; mkdir -p "$WORK/g"; cp -R "$HERE/overlay" "$WORK/g/overlay"; cp "$HERE/check-image.sh" "$WORK/g/"
 # A locally built engine image (docker save) rides into the build disk and is loaded during provisioning.
 if [ -n "${HERMES_IMAGE_TAR:-}" ]; then cp "$HERMES_IMAGE_TAR" "$WORK/g/hermes-image.tar"; fi
-printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\nHERMES_IMAGE=%s\nFACTORY=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" "$HERMES_IMAGE" "$FACTORY" > "$WORK/g/provision.env"
+printf 'WAM_COMMIT=%s\nWAM_IMAGE=%s\nHERMES_IMAGE=%s\nFACTORY=%s\nOS_SH_URL=%s\nOS_SH_SHA256=%s\n' "$WAM_COMMIT" "$WAM_IMAGE" "$HERMES_IMAGE" "$FACTORY" "$OS_SH_URL" "$OS_SH_SHA256" > "$WORK/g/provision.env"
 docker run --rm --privileged -e GB=$BUILD_DISK_GB -v "$WORK:/w" alpine:3.21 sh -eu -c '
 apk add -q e2fsprogs tar coreutils shadow file >/dev/null
 R=/r; rm -rf $R; mkdir -p $R
