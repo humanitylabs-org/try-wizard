@@ -25,12 +25,57 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def inspect_preparation(manifest, queue):
+    """Source mapping is not final acceptance; an intent-only RC cannot bootstrap."""
+    errors = []
+    loaded = {}
+    for key, spec in [('mapping', manifest['queue'].get('mapping')), ('candidate', manifest.get('wizardOsCandidate'))]:
+        path = (HERE / (spec or {}).get('path', '.missing')).resolve()
+        if not spec or not path.is_relative_to(HERE.resolve()) or not path.is_file() or digest(path) != spec.get('sha256'):
+            errors.append(key + ' missing or digest mismatch')
+        else:
+            loaded[key] = json.loads(path.read_text())
+    mapping = loaded.get('mapping')
+    if mapping:
+        rows = mapping.get('entries', [])
+        selection = hashlib.sha256(json.dumps(manifest['finalPins'], sort_keys=True).encode()).hexdigest()
+        if mapping.get('sourceSelectionSha256') != selection:
+            errors.append('queue mapping selects different final pins')
+        if mapping.get('queueSha256') != queue['queueSha256'] or len(rows) != queue['entryCount']:
+            errors.append('queue mapping snapshot mismatch')
+        if [r.get('id') for r in rows] != list(range(1, queue['entryCount'] + 1)):
+            errors.append('queue mapping IDs must be complete, ordered and unique')
+        if [(r.get('queueLine'), r.get('entry')) for r in rows] != [(r['queueLine'], r['entry']) for r in queue['entries']]:
+            errors.append('queue mapping altered original queue entries')
+        for row in rows:
+            for component in row.get('components', []):
+                if component.get('pinnedCommit') != manifest['finalPins'].get(component.get('component')):
+                    errors.append('queue mapping component pin mismatch: ' + str(row.get('id')))
+        if any(r.get('status') == 'not-fully-carried' for r in rows):
+            errors.append('queue has explicitly uncarried or unproven requirements; see queue-mapping.json')
+    candidate = loaded.get('candidate')
+    if candidate:
+        base = candidate.get('baseRelease', {})
+        path = (HERE / base.get('snapshot', '.missing')).resolve()
+        if not path.is_relative_to(HERE.resolve()) or not path.is_file() or digest(path) != base.get('sha256'):
+            errors.append('candidate base stable snapshot digest mismatch')
+        for key, app in [('wam', 'wizard-app-manager'), ('service', 'wizard-agent-service'), ('ux', 'wizard-ux')]:
+            if candidate.get('components', {}).get(app, {}).get('commit') != manifest['finalPins'][key]:
+                errors.append('candidate component pin mismatch: ' + key)
+        if candidate.get('default_apps', {}).get('recorder', {}).get('commit') != manifest['finalPins']['recorder']:
+            errors.append('candidate Recorder pin mismatch')
+        if candidate.get('status') != 'factory-bootstrap-ready':
+            errors.append('Wizard OS source RC is not yet an executable factory bootstrap release')
+    return errors
+
+
 def inspect(manifest, root):
     errors = []
     stable_path = HERE / manifest["stable"]["manifest"]
     if digest(stable_path) != manifest["stable"]["sha256"]:
         errors.append("stable release snapshot digest mismatch")
     queue = json.loads((HERE / manifest["queue"]["manifest"]).read_text())
+    errors.extend(inspect_preparation(manifest, queue))
     if len(queue["entries"]) != manifest["queue"]["entryCount"]:
         errors.append("queue coverage count mismatch")
     if queue["queueSha256"] != manifest["queue"]["sha256"]:

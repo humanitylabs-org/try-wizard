@@ -265,7 +265,12 @@
   "queue": {
     "manifest": "queue-inventory.json",
     "sha256": "d8d4f8aab1bcf9a26238a27f4892560ddb2f8d2709bac1a3f0c76bf08d90a53b",
-    "entryCount": 84
+    "entryCount": 84,
+    "mapping": {
+      "path": "queue-mapping.json",
+      "sha256": "96970844d71857c20b9876b8e7976c6254c284467c0da03e5c1bea852f4027e4",
+      "semantics": "source ancestry/file equivalence only; not final guest acceptance"
+    }
   },
   "blockers": [
     {
@@ -377,5 +382,10 @@
     "proofRun": "https://github.com/humanitylabs-org/wizard-recorder/actions/runs/40044241148",
     "proof": "Downloaded workflow artifact12540398464: image-manifest.log identifies arm64 child2dfd580d; clean result ok with real transcript,6 tools,restart/removal persistence. Prior34ca was a config/image id, not the manifest to pull.",
     "reviewState": "proven image candidate; Recorder PR #1 remains draft, final guest acceptance required"
+  },
+  "wizardOsCandidate": {
+    "path": "wizard-os-release-candidate.json",
+    "sha256": "93e7aa0ea79ee184c599edb242c648e52ce6e64870c8f126775232b2a71bf81b",
+    "status": "source-frozen; assembly/image/bootstrap gates remain"
   }
 }

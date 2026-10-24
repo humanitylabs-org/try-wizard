@@ -1,0 +1,206 @@
+{
+  "schema": "wizard-mac-unpublished-source-rc-v1",
+  "version": "0.3.39-mac.20261027-rc.1",
+  "status": "blocked-assembly-and-image-gates",
+  "promote": false,
+  "publish": false,
+  "baseRelease": {
+    "version": "0.3.39",
+    "snapshot": "wizard-os-current-stable.json",
+    "sha256": "6aa5201e633339f71b3854c13dff30189d0a03d57799854713c1455e19a60243",
+    "github": {
+      "sha": "7b05503e459b1e555b38083cab79257b60509966",
+      "path": "releases/0.3.39.json",
+      "html_url": "https://github.com/humanitylabs-org/wizard-app-manager/blob/main/releases/0.3.39.json"
+    }
+  },
+  "components": {
+    "wizard-app-manager": {
+      "repo": "humanitylabs-org/wizard-app-manager",
+      "commit": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
+      "review": "draft candidate; not promoted"
+    },
+    "wizard-troubleshooter": {
+      "repo": "humanitylabs-org/wizard-troubleshooter",
+      "commit": "4b1f0efc09ea6a57f5fe35e8e52e014258d634e7",
+      "branch": "main",
+      "note": "Host tooling, no image: installed by `wam troubleshooter` as user systemd units (wizard-troubleshooter.service + wizard-guardian.timer, report-only) from exactly this commit; c434bbe plus #9 (connection app links follow apps.json; no dead Claude button when Claude Code is missing)."
+    },
+    "wizard-agent-service": {
+      "repo": "humanitylabs-org/wizard-agent-service",
+      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "review": "draft candidate; not promoted"
+    },
+    "wizard-ux": {
+      "repo": "humanitylabs-org/wizard-ux",
+      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "review": "draft candidate; not promoted"
+    }
+  },
+  "default_apps": {
+    "shell": {
+      "app": "wizard-ux",
+      "repo": "humanitylabs-org/wizard-ux",
+      "index_version": "0.3.0-candidate.20261012",
+      "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "note": "RC source selection; replacement candidate image must be built before provisioning"
+    },
+    "agent-service": {
+      "app": "wizard-agent-service",
+      "repo": "humanitylabs-org/wizard-agent-service",
+      "index_version": "0.3.0-candidate.20261012",
+      "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "note": "RC source selection; replacement candidate image must be built before provisioning"
+    },
+    "agent": {
+      "app": "hermes-agent",
+      "repo": "oscarhenrycollins/hermes-agent",
+      "index_version": "2026.9.24-wizard2",
+      "alongside": "external: host Hermes",
+      "commit": "e8ae558f26bf4b981e0cad60e387386a1ad7b869"
+    },
+    "ai-connection": {
+      "app": "wizard-chatgpt",
+      "repo": "oscarhenrycollins/chatgpt-connection",
+      "index_version": "0.1.4",
+      "commit": "f87d5ddc449535418ee92ebeb24aaec36cc58058",
+      "note": "Host Hermes owns and renews its sign-in; the connection app reads sanitized usage through the wizard-os dashboard plugin. Claude is installed by default as its own `claude-subscription` row below."
+    },
+    "claude-subscription": {
+      "app": "wizard-claude",
+      "repo": "oscarhenrycollins/claude-connection",
+      "index_version": "0.1.2",
+      "commit": "3b2d6186b86a896f254150ad056b9eaa495e738e",
+      "note": "Installed on every box next to ChatGPT. Alongside with host Hermes on a claude-subscription provider: App Manager binds the agent's own Claude Code login folder at the engine's /claude, so Connect/Test and auto-renew act on the agent's sign-in; tokens are never copied."
+    },
+    "files": {
+      "app": "files",
+      "repo": "oscarhenrycollins/files",
+      "index_version": "2.63.23-wizard2",
+      "commit": "8a4dd8ac5189d7d9d8af2bb8a2416936668e90df"
+    },
+    "transcription": {
+      "app": "transcriber",
+      "repo": "oscarhenrycollins/transcriber",
+      "index_version": "0.9.0-rc.3.cpu",
+      "commit": "b8d1170a3f97e1d6eed8abc874bdebdf7e9f21dc"
+    },
+    "browser": {
+      "app": "browser",
+      "repo": "oscarhenrycollins/browser",
+      "index_version": "155.0.8059.40",
+      "commit": "4c313284bc73e0af20b7faba7a2554bff1b63513"
+    },
+    "secrets": {
+      "app": "secret-drop",
+      "repo": "oscarhenrycollins/secret-drop",
+      "index_version": "0.1.1",
+      "commit": "690b277619847405cffc711917abafd85223f10b",
+      "note": "secret-drop #1: the engine image is pinned by its multi-arch digest (secret-drop:0.1.1@sha256:29ebc6a7\u2026c03302), the same bytes as the 0.1.1 tag in 0.3.19."
+    },
+    "notifications": {
+      "app": "notifications",
+      "repo": "oscarhenrycollins/notifications",
+      "index_version": "2.29.0-wizard2",
+      "commit": "0428e7c73a4ac9cb0f7a21d40c7c7a5fda16af55"
+    },
+    "recorder": {
+      "app": "wizard-recorder",
+      "repo": "humanitylabs-org/wizard-recorder",
+      "commit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+      "install": "portable-app",
+      "image": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:2dfd580d9d47e2b3af3e534ab9276991d689a4eec301143316fe5ffdce17433a",
+      "note": "optional hardware access explicit; no capture permission implied"
+    }
+  },
+  "hermes": {
+    "tag": "v2026.9.24",
+    "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f",
+    "image": {
+      "ref": "docker.io/nousresearch/hermes-agent:v2026.9.24",
+      "digest": "sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7"
+    },
+    "test_record": "none: carried over from 0.3.21, pinned before Wizard stable existed",
+    "rollback": null
+  },
+  "bootstrapImages": {
+    "wizard-app-manager": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-app-manager:v4.10.2-wizard.465-db4325a",
+      "digest": "sha256:07df73e79ee3bea5465cd27d90f99191317075e7a669678a8d066c51473d4116",
+      "built_from": "wizard-app-manager",
+      "source_commit": "db4325adcb6ff93de70f760c8b584c93a71f058f",
+      "image_inputs": [
+        "packages/**",
+        "Dockerfile",
+        "package.json",
+        "bun.lock",
+        "turbo.json",
+        ".github/workflows/image.yml"
+      ],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
+      "ci_run": "https://github.com/humanitylabs-org/wizard-app-manager/actions/runs/40008375561",
+      "note": "Official multi-arch image built from db4325a; image_inputs unchanged at d926eec."
+    },
+    "wizard-ux": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-ux:sha-c8433e348f1e715a5652089411f11d401a7860bc",
+      "digest": "sha256:57bb8e26154aeec5a1316497ab6e22570858a842b6e8ecda7890568ea594ee19",
+      "built_from": "wizard-ux",
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
+      "ci_run": "https://github.com/humanitylabs-org/wizard-ux/actions/runs/40102061327"
+    },
+    "wizard-agent-service": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-agent-service:sha-6424db094d03af255b7ec35cb731bfc0087c61ef",
+      "digest": "sha256:840a371ca864755e01490ab7e5e31a1fc8bd0d698637ecd7e9b1523b3419a9b8",
+      "built_from": "wizard-agent-service",
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
+      "ci_run": "https://github.com/humanitylabs-org/wizard-agent-service/actions/runs/40088580225"
+    }
+  },
+  "candidateImagePolicy": {
+    "wizard-app-manager": {
+      "mode": "reuse-stable-image-only-if-image-inputs-identical",
+      "sourceCommit": "7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7",
+      "imageSourceCommit": "db4325adcb6ff93de70f760c8b584c93a71f058f",
+      "imageInputs": [
+        "packages/**",
+        "Dockerfile",
+        "package.json",
+        "bun.lock",
+        "turbo.json",
+        ".github/workflows/image.yml"
+      ]
+    },
+    "wizard-agent-service": {
+      "mode": "build-from-pinned-source",
+      "sourceCommit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+      "digest": null
+    },
+    "wizard-ux": {
+      "mode": "build-from-pinned-source",
+      "sourceCommit": "69cb20679e46477a0c1a74a006eec733dd99b284",
+      "digest": null
+    }
+  },
+  "factoryPolicy": {
+    "noMutableStablePointer": true,
+    "noMutableMain": true,
+    "mustEmitValidatedRuntimeReleaseBeforeBootstrap": true,
+    "getShInput": "generated get.sh release record with built candidate image digests; not this source RC",
+    "installer": {
+      "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/7a1f0fdc3507e69f1144424c6d3dc0f566a46fd7/get.sh",
+      "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
+      "filename": "os.sh"
+    },
+    "signing": "unsigned; signing remains pluggable"
+  },
+  "notSelected": "Private/local apps, optional licensing and device grants are not auto-installed from queue prose."
+}
