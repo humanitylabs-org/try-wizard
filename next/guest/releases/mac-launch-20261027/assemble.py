@@ -115,7 +115,7 @@ def pack(work,pins):
     return {'archive':str(archive),'sha256':sha(archive),'manifest':manifest,'archiveMembersVerified':True}
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--stage-root',type=Path,required=True);parser.add_argument('--execute',action='store_true');a=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--stage-root',type=Path,required=True);mode=parser.add_mutually_exclusive_group();mode.add_argument('--execute',action='store_true');mode.add_argument('--plan',action='store_true');a=parser.parse_args()
     pins=json.loads((HERE/'pins.json').read_text());root=a.stage_root.resolve()
     if not a.execute:print(json.dumps(plan(pins),indent=2));return 0
     # Defence in depth: direct invocation cannot bypass admission.
