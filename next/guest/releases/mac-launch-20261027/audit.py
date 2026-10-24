@@ -93,12 +93,18 @@ def inspect(manifest, root):
         native = root / "final/native"
         payload = native / "next/guest/build-runtime-payload.py"
         if payload.is_file():
-            assignments = [n for n in ast.parse(payload.read_text()).body if isinstance(n, ast.Assign)]
-            values = {n.targets[0].id: ast.literal_eval(n.value) for n in assignments
-                      if isinstance(n.targets[0], ast.Name) and n.targets[0].id == "PINS"}
+            helper = native / "next/guest/release-pins.py"
             expected = {name: manifest["finalPins"][name] for name in ["ux", "service", "wam"]}
-            if values.get("PINS") != expected:
-                errors.append("runtime payload consumer does not use final integrated pins")
+            try:
+                # Execute only the exact staged and inventory-verified read-only pin validator.
+                result = subprocess.run([sys.executable, str(helper), str(HERE / "pins.json")],
+                                        capture_output=True, text=True, check=True, timeout=20)
+                consumed = json.loads(result.stdout)["sources"]
+                source = payload.read_text()
+                if any(consumed.get(k) != v for k, v in expected.items()) or "_release_pins.load(a.pins)" not in source or "assert pins==expected" not in source:
+                    errors.append("runtime payload consumer does not use final integrated pins")
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+                errors.append("runtime pin validator failed or is missing")
         else:
             errors.append("integrated runtime payload recipe missing")
         provision = native / "next/guest/overlay/opt/wizard/bin/wizard-provision"

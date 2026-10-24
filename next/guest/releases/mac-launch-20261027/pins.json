@@ -12,8 +12,8 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "13e20d9bac263e46da811111f4867c9b15dc63dd",
-      "ref": "main"
+      "commit": "bfcf8eddbd59c14bfd51bbff3877eafe5b0dbb7c",
+      "ref": "release/mac-guest-launch-20261027"
     },
     "ux": {
       "repo": "humanitylabs-org/wizard-ux",
@@ -77,7 +77,7 @@
     "wam-reconciled": {
       "repo": "humanitylabs-org/wizard-app-manager",
       "ref": "reconcile/mac-launch-wam-20261027",
-      "commit": "3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146",
+      "commit": "cf46bc69c45e59e69e320b191c6116c8ba924102",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "ux-reconciled": {
@@ -85,6 +85,11 @@
       "ref": "reconcile/mac-launch-live-shell-20261027",
       "commit": "69cb20679e46477a0c1a74a006eec733dd99b284",
       "role": "candidate reconciliation; review gate remains explicit"
+    },
+    "wam-mac-launch": {
+      "repo": "humanitylabs-org/wizard-app-manager",
+      "commit": "cd3d0593dbeb5ebb62585dc7c9ce825ebba36b25",
+      "ref": "integration/backup-launch-mac-v1"
     }
   },
   "stable": {
@@ -239,11 +244,11 @@
     }
   },
   "finalPins": {
-    "native": null,
+    "native": "bfcf8eddbd59c14bfd51bbff3877eafe5b0dbb7c",
     "ux": "69cb20679e46477a0c1a74a006eec733dd99b284",
     "service": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
-    "wam": "3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146",
-    "recorder": "ghcr.io/humanitylabs-org/wizard-recorder@sha256:34ca10395144649112e1fb11b001b275056af41a460ae85ac5ba2ea3a97f6949b"
+    "wam": "cf46bc69c45e59e69e320b191c6116c8ba924102",
+    "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
     "version": "0.5.0",
@@ -266,12 +271,12 @@
     {
       "id": "service-integration",
       "status": "open",
-      "detail": "ee5229f carries protected Mac77650c6 and main#138; Thales Vitest1311 passed/8 skipped. PR#150 draft; required CI/review and extra runtime suites pending."
+      "detail": "Candidate ee5229f carries both #96 and #138; PR #156 draft. Exact-head GitHub quality/CodeQL/secret/validation green; Thales1311 Vitest pass/8 skipped,22 maintenance/lifecycle node pass,5 real-root recovery pass. No live deployment or merge; review gate remains."
     },
     {
       "id": "wam-release",
       "status": "open",
-      "detail": "3c3f8f6f contains main custody/backup plus cd3d0593 Mac integration. Thales backup173 passed/13 skipped; merged registry/custody focused56 passed. PR#204 draft review/CI required."
+      "detail": "Candidate cf46bc69 contains main custody/backup plus cd3d0593 Mac39. Backup173 pass/13 skipped,focused56 pass on Thales. Stable0.3.38 manager image inputs identical (git diff of packages/Dockerfile/package.json/bun.lock/turbo/workflow empty). PR#204 draft; full exact-head CI/review pending."
     },
     {
       "id": "phone-source",
@@ -281,7 +286,7 @@
     {
       "id": "builder-source",
       "status": "open",
-      "detail": "try-wizard #21 refreshed to current main with focused 3/3. Exact-head native Build/review passed; Tests failed in existing PortForwardSocketTests.swift closing-connection case (one issue across 425 Swift tests), failed-job rerun requested. Green tests and non-author admin approval/merge required; runtime factory/SSH proof remains a release acceptance gate."
+      "detail": "PR#21 d786206 has exact-head native Tests/Build/review green after rerun. Candidate native bfcf8ed contains it plus phone32 and factory pins. Non-author admin approval and final guest stock-builder/SSH proof still required."
     },
     {
       "id": "recorder",
@@ -296,7 +301,7 @@
     {
       "id": "factory-admission",
       "status": "open",
-      "detail": "Chosen new factory0.5.0, not relabelled0.4.0. Production validator/classifier retain0.3/0.4 support and deny unknown versions. Added production-extracted Swift fixture pending Thales proof."
+      "detail": "New version0.5.0 selected (retained0.4.0 immutable). Actual production Swift validator/classifier extracted and executed on Thales:9 checks passed (new0.5,retained0.4,legacy0.3,unknown0.6,corrupt payload). Native fresh-feed path proof remains post-build."
     },
     {
       "id": "security",
@@ -336,7 +341,7 @@
     "ux": "ux-reconciled"
   },
   "osInstaller": {
-    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/3c3f8f6f34ee3dbb87e8eec86aa3ebf83c88f146/get.sh",
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/cf46bc69c45e59e69e320b191c6116c8ba924102/get.sh",
     "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
     "filename": "os.sh"
   },
