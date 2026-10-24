@@ -26,7 +26,7 @@ enum WizardDiskIdentity {
     }
     /// Caller holds WizardDiskOwnership. No unknown/missing identity is authority.
     static func requireColdOwner(_ journal: [String: Any]) throws {
-        guard journal["kind"] as? String == "legacy-cold" || journal["kind"] as? String == "fresh" else { return }
+        guard journal["kind"] as? String == "legacy-cold" || journal["kind"] as? String == "fresh" || journal["maintenanceCold"] as? Bool == true else { return }
         guard journal["dataHome"] as? String == WizardShared.supportDir.path,
               let identity = read(WizardShared.osDir.appendingPathComponent("disk.img")),
               journal["diskIdentity"] as? String == identity else {

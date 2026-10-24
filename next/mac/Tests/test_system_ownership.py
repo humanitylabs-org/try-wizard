@@ -33,6 +33,9 @@ class SystemOwnershipContract(unittest.TestCase):
         source = (MAC / 'Shared/UpdateContract.swift').read_text()
         self.assertIn('System payload downgrade refused', source)
         self.assertIn('incomingBuild.compare(build, options: .numeric)', source)
+        identity = (MAC / 'Shared/DiskIdentity.swift').read_text()
+        self.assertIn('journal["maintenanceCold"] as? Bool == true else { return }', identity)
+        self.assertIn('Payload transaction disk identity changed', (MAC / 'App/WizardGuestActivation.swift').read_text())
 
     def test_apps_untouched(self):
         before = guard.apps([container(), container('system', 'wizard-shell', True)])

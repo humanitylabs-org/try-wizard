@@ -56,6 +56,11 @@ import Darwin
         do {
             var journal = WizardUpdate.json(WizardUpdate.journal)
             let release = try WizardRelease.read(Bundle.main.bundleURL)
+            let identity = WizardShared.diskIdentity
+            guard identity != "unknown", journal["diskIdentity"] == nil || journal["diskIdentity"] as? String == identity else {
+                throw WizardUpdate.error("Payload transaction disk identity changed; stopped rollback copy retained")
+            }
+            journal["diskIdentity"] = identity
             try WizardGuestABI.requireSystemOwner(WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json")),
                 diskIdentity: WizardShared.diskIdentity, incomingBuild: release.build)
             journal["maintenanceCold"] = true

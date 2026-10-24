@@ -23,7 +23,7 @@ enum WizardShared {
               let path = journal["appPath"] as? String else { return nil }
         let app = URL(fileURLWithPath: path)
         let nonce = journal["nonce"] as? String ?? ""
-        if journal["kind"] as? String == "legacy-cold" {
+        if journal["kind"] as? String == "legacy-cold" || journal["kind"] as? String == "fresh" || journal["maintenanceCold"] as? Bool == true {
             guard journal["diskIdentity"] as? String == diskIdentity,
                   let release = try? WizardRelease.read(app),
                   journal["releaseID"] as? String == release.releaseID else { return nil }
