@@ -20,16 +20,41 @@ for name in ["disk.img","boot/vmlinux","boot/initrd"] {
 func manifest(_ version:String,_ files:[String:String]) throws {
  try JSONSerialization.data(withJSONObject:["version":version,"files":files]).write(to:root.appendingPathComponent("manifest.json"))
 }
-for version in ["0.3.0","0.4.0"] {
+for version in ["0.3.0","0.4.0","0.4.1"] {
  try manifest(version,hashes);try OSInstaller.verifyManifest(in:root)
  print("MANIFEST_"+version+"_PASS")
 }
-try manifest("0.5.0",hashes)
+try manifest("0.4.9",hashes)
 do { try OSInstaller.verifyManifest(in:root);fatalError("unknown future version accepted") } catch {}
 var bad=hashes;bad["disk.img"]=String(repeating:"0",count:64)
 try manifest("0.4.0",bad)
 do { try OSInstaller.verifyManifest(in:root);fatalError("bad digest accepted") } catch {}
 print("UNKNOWN_VERSION_AND_CORRUPTION_REJECTED")
+'''
+shared=(a.source.parent.parent/'Shared/Shared.swift').read_text()
+source,installer=shared,code
+legacy=function('static var legacyBootstrapNeeded: Bool')
+code=installer+r'''
+enum WizardUpdate {
+ static var dir:URL { root }; static var journal:URL { root.appendingPathComponent("journal.json") }
+ static func json(_ url:URL)->[String:Any] {
+  guard let data=try? Data(contentsOf:url),let obj=try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return [:] };return obj
+ }
+}
+enum WizardDiskIdentity {
+ static func completed(_ receipt:[String:Any],modern:[String:Any],journal:[String:Any],disk:URL,home:URL)->Bool { false }
+}
+enum WizardShared {
+ static var osInstalled:Bool { true };static var osDir:URL { root };static var supportDir:URL { root }
+'''+legacy+'\n}\n'+r'''
+for version in ["0.4.0","0.4.1"] {
+ try manifest(version,hashes)
+ precondition(!WizardShared.legacyBootstrapNeeded,"precomposed factory misclassified as legacy")
+ print("NONLEGACY_"+version+"_PASS")
+}
+try manifest("0.4.9",hashes)
+precondition(WizardShared.legacyBootstrapNeeded,"unknown version bypassed legacy admission")
+print("UNKNOWN_VERSION_NOT_PRECOMPOSED_PASS")
 '''
 swift=a.work/'main.swift';swift.write_text(code)
 subprocess.run(['xcrun','swiftc','-O',str(swift),'-o',str(a.work/'test')],check=True)

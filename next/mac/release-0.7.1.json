@@ -2,7 +2,7 @@
   "schema": 1,
   "nativeVersion": "0.7.1",
   "nativeBuild": "308",
-  "guestVersion": "0.4.0",
+  "guestVersion": "0.4.1",
   "nativeBase": "2d68853d3983a05873dfd512836fceb036321ce1",
   "service": "77650c65f9c80b999ffd78ee58a23ecd99bdfbeb",
   "wam": "0696805fe000dfc616abd0cf772c52ff83d580d9",
