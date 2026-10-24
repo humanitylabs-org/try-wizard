@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "nativeVersion": "0.7.1",
+  "nativeBuild": "308",
+  "guestVersion": "0.4.0",
+  "nativeBase": "2d68853d3983a05873dfd512836fceb036321ce1",
+  "service": "77650c65f9c80b999ffd78ee58a23ecd99bdfbeb",
+  "wam": "0696805fe000dfc616abd0cf772c52ff83d580d9",
+  "ux": "31bdc3ecb0586f61323b72227ab70506d2627e5d",
+  "guestPayloadBaseline": "307",
+  "guestPayloadPolicy": "Preserve build 307 payload files and managed Hermes archive byte-for-byte except rebuilt Service image and its BOM; do not import trunk guest overlay changes.",
+  "reason": "Jan fresh-install post-onboarding same-site entry navigation, wizard-agent-service #95 / PR #96",
+  "distribution": "staged-only; ad-hoc native signing; no publication, appcast write, Apple identity or notarization",
+  "deferred": ["Factory OS rebuild", "Other guest rebuild queue items"]
+}
