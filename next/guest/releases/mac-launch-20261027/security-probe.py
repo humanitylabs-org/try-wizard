@@ -58,20 +58,67 @@ def python_checks():
                     assert b'2026.10.19' in raw,(parent,raw)
     print(json.dumps({'python':sys.executable,'version':sys.version,'contexts':[n for n,_ in ctxs],'checks':checks}))
 
+class _CDP:
+    """Chrome DevTools over --remote-debugging-pipe (fds 3/4); stdlib only. headless-shell 155 no longer honours --dump-dom."""
+    def __init__(self,binary):
+        import tempfile
+        r1,w1=os.pipe();r2,w2=os.pipe()  # r1->chrome fd3 (commands), w2<-chrome fd4 (responses)
+        self.dir=tempfile.mkdtemp()
+        # close_fds runs after preexec_fn, so pass_fds keeps the remapped 3/4.
+        def fds():
+            a,b=os.dup(r1),os.dup(w2);os.dup2(a,3);os.dup2(b,4)  # temp copies: r1/w2 may already be 3 or 4
+        self.proc=subprocess.Popen([binary,'--headless','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+self.dir,'--remote-debugging-pipe','about:blank'],preexec_fn=fds,pass_fds=(3,4),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        os.close(r1);os.close(w2);self.w=os.fdopen(w1,'wb');self.r=os.fdopen(r2,'rb');self.n=0;self.buf=b''
+    def call(self,method,params=None,session=None,timeout=40):
+        import select,time
+        self.n+=1;msg={'id':self.n,'method':method,'params':params or {}}
+        if session:msg['sessionId']=session
+        self.w.write(json.dumps(msg).encode()+b'\0');self.w.flush();end=time.time()+timeout
+        while True:
+            while b'\0' in self.buf:
+                raw,self.buf=self.buf.split(b'\0',1);obj=json.loads(raw)
+                if obj.get('id')==self.n:
+                    assert 'error' not in obj,(method,obj['error']);return obj['result']
+            left=end-time.time();assert left>0,('cdp timeout',method)
+            ready,_,_=select.select([self.r],[],[],left)
+            if ready:
+                chunk=os.read(self.r.fileno(),65536);assert chunk,'chrome exited'
+                self.buf+=chunk
+    def close(self):
+        try:self.proc.kill();self.proc.wait(10)
+        finally:shutil.rmtree(self.dir,ignore_errors=True)
+
+def _visit(cdp,url):
+    import time
+    target=cdp.call('Target.createTarget',{'url':'about:blank'})['targetId']
+    session=cdp.call('Target.attachToTarget',{'targetId':target,'flatten':True})['sessionId']
+    nav=cdp.call('Page.navigate',{'url':url},session,timeout=40)
+    text=''
+    if not nav.get('errorText'):
+        for _ in range(40):
+            res=cdp.call('Runtime.evaluate',{'expression':'document.readyState+"|"+(document.body?document.body.innerText:"")','returnByValue':True},session)
+            text=res['result'].get('value','')
+            if text.startswith('complete|'):break
+            time.sleep(.5)
+    cdp.call('Target.closeTarget',{'targetId':target})
+    return nav.get('errorText',''),text
+
 def browser_checks():
     # Chrome has its own trust path; curl success is never browser evidence.
     paths=[shutil.which(n) for n in ['headless-shell','headless_shell','chromium','chromium-browser','google-chrome']]
     paths += [str(p) for p in [Path('/headless-shell/headless-shell'),Path('/headless-shell/headless_shell')] if p.is_file()]
     binaries=sorted({str(Path(p).resolve()) for p in paths if p})
     for binary in binaries:
-        for host,bad in [('probe-emudhra.we-have-a-problem.com',False)]+[(h+'.we-have-a-problem.com',True) for h in BAD]:
-            proc=subprocess.run([binary,'--headless','--no-sandbox','--disable-dev-shm-usage','--dump-dom','https://'+host+'/'],capture_output=True,text=True,timeout=40)
-            assert proc.returncode==0,(binary,host,proc.stderr)
-            if not bad:assert 'Your client successfully connected to the site.' in proc.stdout,(binary,host,proc.stderr)
-            else:
-                assert 'Your client successfully connected to the site.' not in proc.stdout,(binary,host,'compromised chain accepted')
-                assert re.search(r'ERR_CERT_|ERR_CERTIFICATE_|net_error -20[0-9]',proc.stdout+proc.stderr),(binary,host,'network failure is not certificate rejection',proc.stderr)
-            print(json.dumps({'browser':binary,'host':host,'certificateRejected':bad}))
+        cdp=_CDP(binary)
+        try:
+            for host,bad in [('probe-emudhra.we-have-a-problem.com',False)]+[(h+'.we-have-a-problem.com',True) for h in BAD]:
+                error,text=_visit(cdp,'https://'+host+'/')
+                if not bad:assert not error and 'Your client successfully connected to the site.' in text,(binary,host,error,text[:200])
+                else:
+                    assert 'Your client successfully connected to the site.' not in text,(binary,host,'compromised chain accepted')
+                    assert re.search(r'ERR_CERT_|ERR_CERTIFICATE_',error),(binary,host,'network failure is not certificate rejection',error)
+                print(json.dumps({'browser':binary,'host':host,'certificateRejected':bad,'netError':error}))
+        finally:cdp.close()
 
 def main():
     python_checks()
