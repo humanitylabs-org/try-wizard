@@ -101,7 +101,7 @@ def main():
         expected=obj['Config'].get(field) or ('0' if field=='User' else None)
         assert actual==expected,field
     with oci.probe_mount([HERE/'security-probe.py'],exact,env) as mount:
-        remediation=json.loads(run([DOCKER,'run','--pull=never','--rm','--entrypoint','/bin/sh','-v',mount,exact,'-lc','PY=$(command -v python3 || command -v python); "$PY" /opt/wizard-probe/security-probe.py'],env,300).splitlines()[-1])
+        remediation=json.loads(run([DOCKER,'run','--pull=never','--rm','--entrypoint','/bin/sh','-v',mount,exact,'-lc','PY=$(command -v python3 || command -v python); "$PY" /opt/wizard-probe/security-probe.py'],env=env,timeout=300).splitlines()[-1])
     result={**transport,'key':a.target,'base':target['base'],'archive':str(Path(transport['archive']).relative_to(root)),'recipeSha256':sha(out/'recipe.json'),'remediation':remediation}
     emit(out/'result.json',result);print(json.dumps(result))
 
