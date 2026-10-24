@@ -34,7 +34,7 @@ try:
  contexts.append(ssl.create_default_context(cafile=certifi.where()))
 except ImportError:pass
 # Vendored and venv copies must be checked too, not just the first import on sys.path.
-for root in ['/opt','/app','/usr/local/lib']:
+for root in ['/opt','/app','/usr/local/lib','/home/wizard','/root']:
  for bundle in pathlib.Path(root).glob('**/certifi/cacert.pem'):
   contexts.append(ssl.create_default_context(cafile=str(bundle)))
 for ctx in contexts:
@@ -61,15 +61,17 @@ def main():
         ids=subprocess.check_output([docker,'ps','-q'],text=True).split()
         assert ids,'no guest containers to verify'
         rows=json.loads(subprocess.check_output([docker,'inspect',*ids],text=True));images=sorted({c['Image'] for c in rows});root=Path('/mnt/launch')
+        # Test every running container's actual environment and bind-mounted trust stores, not fresh image defaults.
+        running=[(c['Id'],c['Image']) for c in rows]
     output=a.output or root/'security-preflight.json';result={'passed':False,'images':images,'checks':[],'allGuestImagesEnumerated':bool(a.guest),'publishing':False}
     if a.guest:
         host=subprocess.run(['sh','-s'],input=PROBE,text=True,capture_output=True,timeout=240)
         result['checks'].append({'target':'guest-host','returncode':host.returncode,'log':host.stdout+host.stderr})
-    for image in images:
+    for identity,image in (running if a.guest else [(image,image) for image in images]):
         if not a.guest:assert re.fullmatch(r'.+@sha256:[0-9a-f]{64}',image),'immutable manifest required'
-        argv=[docker,'run','--rm','-i','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s']
+        argv=([docker,'exec','-i','-e','PYTHONDONTWRITEBYTECODE=1',identity,'/bin/sh','-s'] if a.guest else [docker,'run','--rm','-i','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s'])
         proc=subprocess.run(argv,input=PROBE,text=True,capture_output=True,timeout=240)
-        result['checks'].append({'target':image,'returncode':proc.returncode,'log':proc.stdout+proc.stderr})
+        result['checks'].append({'target':image,'container':identity if a.guest else None,'returncode':proc.returncode,'log':proc.stdout+proc.stderr})
     result['passed']=bool(result['checks']) and all(x['returncode']==0 for x in result['checks'])
     # preflight inventory is complete only when every explicitly enumerated selected/default/inherited image was tested.
     if not a.guest:result['allGuestImagesEnumerated']=plan['complete']
