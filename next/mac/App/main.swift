@@ -32,8 +32,10 @@ enum Store {
     }
     static var osFeedURL: URL {
         // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
+        // Feeds are never repointed under shipped apps: os/latest.json stays frozen at 0.4.0 for 0.7.0 downloads,
+        // and os/p1/latest.json serves only images this build's verifyManifest admits. See DOWNLOADS.md.
         // QA and testers can point a build elsewhere with `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/latest.json")!
+        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/p1/latest.json")!
     }
     static let downloadsBase = "https://downloads.aiwizards.com/"
     static var downloadsPage: URL { URL(string: downloadsBase + "index.html")!

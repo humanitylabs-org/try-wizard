@@ -13,7 +13,8 @@ Wizard's Mac app, its in-app updates and the Wizard OS image are served publicly
 | `mac/appcast.xml` | Sparkle feed, signed (`SURequireSignedFeed`). Built-in default `SPARKLE_FEED` in `build.sh`. | never cached at the edge |
 | `mac/<build>/Wizard-<build>.zip` | Sparkle update archive named by the appcast | cached at the edge (30 days) |
 | `mac/<version>/Wizard-<version>.dmg` | First-install DMG | cached at the edge |
-| `os/latest.json` | Wizard OS feed the app reads on first install (`Store.osFeedURL`) | never cached at the edge |
+| `os/latest.json` | Frozen Wizard OS feed for 0.7.0 and older apps (0.4.0 forever) | never cached at the edge |
+| `os/p1/latest.json` | Wizard OS feed for 0.7.1+ (`Store.osFeedURL`); part URLs `../<version>/…` | never cached at the edge |
 | `os/<version>/wizard-os-<version>.tar.xz.partNN` | Wizard OS image in parts, URLs relative to `latest.json`'s folder or absolute | cached at the edge |
 | `index.html` | Plain landing page the app opens when the feed is unreachable | never cached at the edge |
 
@@ -43,3 +44,8 @@ through the public URL with a unique query string before switching the feed.
 
 Verified 15 Oct 2026: a 300 MB two-part test image published, reassembled by the app's Swift URL resolution and matched
 its SHA-256; repeat downloads were edge HITs; feeds and 404s are never edge-cached.
+
+
+## Feed immutability rule
+
+Never repoint a feed that a shipped app reads to an image that app's `verifyManifest` rejects. Image parts live once under `os/<version>/` and are never overwritten or deleted. A new admission rule gets a new feed path; the old one is frozen.

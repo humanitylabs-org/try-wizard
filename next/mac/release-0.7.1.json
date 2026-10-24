@@ -11,5 +11,9 @@
   "guestPayloadPolicy": "Preserve build 307 payload files and managed Hermes archive byte-for-byte except rebuilt Service image and its BOM; do not import trunk guest overlay changes.",
   "reason": "Jan fresh-install post-onboarding same-site entry navigation, wizard-agent-service #95 / PR #96",
   "distribution": "staged-only; ad-hoc native signing; no publication, appcast write, Apple identity or notarization",
-  "deferred": ["Factory OS rebuild", "Other guest rebuild queue items"]
+  "deferred": [
+    "Factory OS rebuild",
+    "Other guest rebuild queue items"
+  ],
+  "imageFeed": "https://downloads.aiwizards.com/os/p1/latest.json"
 }
