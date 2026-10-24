@@ -1248,6 +1248,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
 
     func installOnThisMac() {
+        showOverlay("Checking Wizard updates", "Checking the signed app update before downloading Wizard OS…")
+        WizardUpdater.shared.checkBeforeOSDownload { [weak self] proceed in
+            guard let self else { return }
+            if proceed { self.installOSAfterAppCheck() }
+            else {
+                self.showOverlay("Update Wizard first", "Finish the Wizard app update, then return to set up its OS. No OS download has started.", spinning: false,
+                    actions: [("Try Again", #selector(self.retryInstall)), ("Back", #selector(self.backToChooser))])
+            }
+        }
+    }
+    private func installOSAfterAppCheck() {
         showOverlay("Setting up Wizard on this Mac", "Downloading Wizard OS, a small Linux computer just for your Wizard. This happens once.", progress: nil)
         installer.onProgress = { [weak self] msg, p in
             self?.showOverlay("Setting up Wizard on this Mac", msg, progress: p)

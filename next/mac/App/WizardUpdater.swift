@@ -156,6 +156,30 @@ final class NoticeBarView: NSView {
         }
         return true
     }
+    private var firstInstallCheck: ((Bool) -> Void)?
+    func checkBeforeOSDownload(_ complete: @escaping (Bool) -> Void) {
+        guard firstInstallCheck == nil else { return }
+        firstInstallCheck = complete
+        startFirstInstallCheck(until: Date().addingTimeInterval(30))
+    }
+    private func startFirstInstallCheck(until deadline: Date) {
+        guard firstInstallCheck != nil else { return }
+        guard let updater else { finishFirstInstallCheck(unavailable: true); return }
+        if updater.canCheckForUpdates { updater.checkForUpdates(); return }
+        // Let an already-running automatic Sparkle check finish; its callbacks use this same gate.
+        guard Date() < deadline else { finishFirstInstallCheck(unavailable: true); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.startFirstInstallCheck(until: deadline) }
+    }
+    private func finishFirstInstallCheck(unavailable: Bool) {
+        guard let complete = firstInstallCheck else { return }; firstInstallCheck = nil
+        if unavailable {
+            let alert = NSAlert(); alert.messageText = "Couldn't check for a newer Wizard"
+            alert.informativeText = "You can retry the app update check, or deliberately continue with this app's supported Wizard OS images."
+            alert.addButton(withTitle: "Retry Later"); alert.addButton(withTitle: "Continue with This App")
+            complete(alert.runModal() == .alertSecondButtonReturn)
+        } else { complete(true) }
+    }
+
     @objc func checkForUpdates(_ sender: Any? = nil) {
         guard let updater else { return }
         if ready != nil { show("ready", "Update \(version) available — ready to restart"); return }
@@ -363,13 +387,27 @@ final class NoticeBarView: NSView {
               contract.hostProtocol == WizardRelease.peer, contract.build == item.versionString,
               !contract.releaseID.isEmpty, item.installationType == "application" else { throw WizardUpdate.error("Incompatible release contract — prior app preserved") }
         try contract.validateMetadata()
+        if WizardShared.osInstalled, let range = contract.supportedGuestABI {
+            let abi = try WizardGuestABI.image(WizardUpdate.json(WizardShared.osDir.appendingPathComponent("manifest.json")))
+            guard range.contains(abi) else { throw WizardUpdate.error("App update does not support this disk's guestABI") }
+        }
         incomingGuest = contract.guestPatch != nil
         incomingReleaseID = contract.releaseID
     }
-    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) { if (error as NSError).code != 1001 { show("failed", "Update access unavailable or validation failed — \(error.localizedDescription)", retry: true) } }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) { finishFirstInstallCheck(unavailable: (error as NSError).code != 1001); if (error as NSError).code != 1001 { show("failed", "Update access unavailable or validation failed — \(error.localizedDescription)", retry: true) } }
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) { reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false)) }
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { cancel = cancellation; show("checking", "Checking for updates…") }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        if let complete = firstInstallCheck {
+            firstInstallCheck = nil
+            let alert = NSAlert(); alert.messageText = "Update Wizard before downloading its OS?"
+            alert.informativeText = "Wizard \(item.displayVersionString) is available. Updating first gives this Mac the current compatible OS and payload."
+            alert.addButton(withTitle: "Update Wizard First"); alert.addButton(withTitle: "Continue with This App")
+            if alert.runModal() == .alertSecondButtonReturn {
+                reply(.dismiss); complete(true); return
+            }
+            complete(false)
+        }
         version = item.versionString
         if item.isInformationOnlyUpdate { show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss); return }
         show("available", "Update \(item.displayVersionString) available — downloading…")
@@ -378,8 +416,8 @@ final class NoticeBarView: NSView {
     }
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
-    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) { cancel = nil; show("current", "No compatible newer update is available", retry: true); acknowledgement() }
-    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) { cancel = nil; ready = nil; fail(error.localizedDescription); acknowledgement() }
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) { finishFirstInstallCheck(unavailable: false); cancel = nil; show("current", "No compatible newer update is available", retry: true); acknowledgement() }
+    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) { finishFirstInstallCheck(unavailable: true); cancel = nil; ready = nil; fail(error.localizedDescription); acknowledgement() }
     func showDownloadInitiated(cancellation: @escaping () -> Void) { cancel = cancellation; expected = 0; received = 0; show("downloading", "Update available — downloading…") }
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) { expected = expectedContentLength }
     func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
