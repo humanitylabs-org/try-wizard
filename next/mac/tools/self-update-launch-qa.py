@@ -125,7 +125,7 @@ try:
     preference_backup=original.stdout if original.returncode==0 else b''
     (evidence/'preferences-before.plist').write_bytes(preference_backup)
     subprocess.run(['defaults','delete',domain],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    prefs={'QAHooks':True,'QAWebStorage':True,'wizardDataHome':str(data),'SUFeedURL':base+'/appcast.xml',
+    prefs={'QAHooks':True,'QAWebStorage':True,'DataHome':str(data),'SUFeedURL':base+'/appcast.xml',
            'SUEnableAutomaticChecks':True,'SUAutomaticallyUpdate':False,'SUHasLaunchedBefore':True,
            'SUValidateBeforeExtraction':True,'backends':b'[]','activeBackend':0,'filesFolder':str(root/'files'),
            'SUEnableSystemProfiling':False,'wizardKeyEnabled':False,'MeetingPrompts':False,'VoiceKeys':False,
