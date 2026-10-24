@@ -3,7 +3,7 @@ SHELL := /bin/bash
 override ROOT := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
 override DIST := $(ROOT)/dist
 override GUEST_DIST := $(DIST)/guest
-override APP := $(DIST)/app.noindex/Try Omarchy.app
+override APP := $(DIST)/app.noindex/Wizard.app
 override BUILD_CACHE := $(ROOT)/scripts/build-cache.py
 override BUILD_STATE := $(ROOT)/.build/state
 RELEASE_SIGN_IDENTITY ?= Developer ID Application: Eduardo Martinez (RZC79MPD34)
@@ -69,9 +69,19 @@ test:
 
 # Start Swift early; shell integration suites consume its helper binary. Each
 # suite owns its temporary state, but SwiftPM has a single build directory.
-test-all: test-swift test-contracts test-guest test-shell test-resize
+test-all: test-swift test-contracts test-guest test-shell test-resize test-backup
+
+.PHONY: test-backup
+test-backup:
+	@mkdir -p $(ROOT)/next/mac/.build/module-cache/swift $(ROOT)/next/mac/.build/module-cache/clang
+	@SWIFT_MODULECACHE_PATH=$(ROOT)/next/mac/.build/module-cache/swift CLANG_MODULE_CACHE_PATH=$(ROOT)/next/mac/.build/module-cache/clang swift test --package-path $(ROOT)/next/mac --disable-sandbox
+	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s $(ROOT)/next/guest/tests -p test_backup_frontdoor.py -v
 
 test-contracts:
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-backup-test-dependencies.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_cold_boot_wait.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-portable-paths.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-configured-endpoints.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-hda-recovery.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-network-identity.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-libslirp-icmp.py"

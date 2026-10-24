@@ -1,0 +1,841 @@
+{
+  "schema": 1,
+  "scope": "try-wizard native/guest source composition only; not release acceptance",
+  "audit_cutoff": "2026-10-15T06:00:54Z",
+  "base_sha": "91f62f708902b9f6ffea38a6cf910577cbb1c50e",
+  "branch": "integration/mac-release-native-20261015",
+  "github_url": "https://github.com/humanitylabs-org/try-wizard/tree/integration/mac-release-native-20261015",
+  "source_head_sha": "b07d8e85fe85745737a4ce1237001a2ebbb932d8",
+  "compiled_runtime_sha": "b495fb3e5e9f3032bab1b823ed4b5cf0a43f8829",
+  "compiled_runtime_diff_to_source_head": [
+    "next/tests/test_import_boundary.py"
+  ],
+  "commits": [
+    {
+      "sha": "b5a28963c2cb56adfd1ecd29307054589dea852f",
+      "title": "Integrate Bring My Hermes and VM SSH migration from c851bea",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/b5a28963c2cb56adfd1ecd29307054589dea852f"
+    },
+    {
+      "sha": "ed006178abfde70057024f4a19422f145d7b4f8e",
+      "title": "Keep Linux guest disks from corrupting under host load",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/ed006178abfde70057024f4a19422f145d7b4f8e"
+    },
+    {
+      "sha": "de5bbca1efbc42058f4599d380d3d0511c7f4b54",
+      "title": "Compose supplied hat branding with Sparkle candidate",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/de5bbca1efbc42058f4599d380d3d0511c7f4b54"
+    },
+    {
+      "sha": "3cda1a7f4f9fe8776950456e5050e17b8c74efe0",
+      "title": "feat(mac): serve downloads and updates from downloads.aiwizards.com (Cloudflare R2)",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/3cda1a7f4f9fe8776950456e5050e17b8c74efe0"
+    },
+    {
+      "sha": "b495fb3e5e9f3032bab1b823ed4b5cf0a43f8829",
+      "title": "Align native workspace slots and preserve explicit terminal routes",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/b495fb3e5e9f3032bab1b823ed4b5cf0a43f8829"
+    },
+    {
+      "sha": "b07d8e85fe85745737a4ce1237001a2ebbb932d8",
+      "title": "Test native Hermes import origin and upload boundaries",
+      "url": "https://github.com/humanitylabs-org/try-wizard/commit/b07d8e85fe85745737a4ce1237001a2ebbb932d8"
+    }
+  ],
+  "hosting": {
+    "donor_sha": "ec8cbc8dc388ae6f094fa80d150646cc23548235",
+    "integrated_sha": "3cda1a7f4f9fe8776950456e5050e17b8c74efe0",
+    "fallback": "https://downloads.aiwizards.com/index.html",
+    "fallback_get_status": 200,
+    "part_default_mib": 240,
+    "public_object_limit": "strictly less than 250 MiB; publisher gate remains parent-owned"
+  },
+  "composition": {
+    "base_is_ancestor": true,
+    "unmerged_entries": 0,
+    "git_diff_check": "pass",
+    "unchanged_critical_files": [
+      {
+        "path": "next/mac/Shared/Shared.swift",
+        "baseline_blob": "65dfa52ddf580bb2200a3902890bceedd88b7475",
+        "current_blob": "65dfa52ddf580bb2200a3902890bceedd88b7475",
+        "identical": true
+      },
+      {
+        "path": "next/mac/Shared/UpdateContract.swift",
+        "baseline_blob": "c2814c423bb51825e48cc0effd6824b84a2259b9",
+        "current_blob": "c2814c423bb51825e48cc0effd6824b84a2259b9",
+        "identical": true
+      },
+      {
+        "path": "next/mac/Shared/GuestPatchCommand.swift",
+        "baseline_blob": "d835e5cf0d365e620301511ae127c4535120754b",
+        "current_blob": "d835e5cf0d365e620301511ae127c4535120754b",
+        "identical": true
+      },
+      {
+        "path": "next/mac/App/WizardUpdater.swift",
+        "baseline_blob": "a14af6a9f7d3ea2f65268abcea9cd5be5cbd3443",
+        "current_blob": "a14af6a9f7d3ea2f65268abcea9cd5be5cbd3443",
+        "identical": true
+      },
+      {
+        "path": "next/mac/App/WizardGuestActivation.swift",
+        "baseline_blob": "cb5a233c2734391995da6e046df3e7db866876e7",
+        "current_blob": "cb5a233c2734391995da6e046df3e7db866876e7",
+        "identical": true
+      },
+      {
+        "path": "next/mac/App/MeetingCapture.swift",
+        "baseline_blob": "aaadac989d567643a99fc3e1e83a4d8f38dfcb67",
+        "current_blob": "aaadac989d567643a99fc3e1e83a4d8f38dfcb67",
+        "identical": true
+      },
+      {
+        "path": "next/mac/App/MeetingUI.swift",
+        "baseline_blob": "b2ed1bfd7216a982c2bfc64bf27601d6c759bd52",
+        "current_blob": "b2ed1bfd7216a982c2bfc64bf27601d6c759bd52",
+        "identical": true
+      },
+      {
+        "path": "next/guest/stack-preservation.py",
+        "baseline_blob": "32553aa2080a9dc85742e0117d10ace8392eea61",
+        "current_blob": "32553aa2080a9dc85742e0117d10ace8392eea61",
+        "identical": true
+      },
+      {
+        "path": "next/guest/build-image.sh",
+        "baseline_blob": "1bdb4e444dff9d639d9b2751d1404052b5b49370",
+        "current_blob": "1bdb4e444dff9d639d9b2751d1404052b5b49370",
+        "identical": true
+      },
+      {
+        "path": "next/guest/overlay/opt/wizard/bin/wizard-ctl",
+        "baseline_blob": "5efd065e513719c07aee628a5c3515a7f7757a4d",
+        "current_blob": "5efd065e513719c07aee628a5c3515a7f7757a4d",
+        "identical": true
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "Thales optimized App and Host compilation",
+      "result": "pass; no warnings in either compiler log",
+      "source_sha": "b495fb3e5e9f3032bab1b823ed4b5cf0a43f8829",
+      "evidence": "native-evidence/integration/thales-compile/receipt.json"
+    },
+    {
+      "name": "Python setup + import boundary + native contracts",
+      "result": "32 passed (15 existing setup, 7 new import, 10 native contracts)",
+      "evidence": "native-evidence/integration/python-discovery.log"
+    },
+    {
+      "name": "Supplied brand",
+      "result": "4 passed; icon SHA256 0a775ba954a8a1fafcc3fef901fd6cafb4a3ff1256ad07a6e9a1368269f340cf",
+      "evidence": "native-evidence/integration/thales-compile/branding.log"
+    },
+    {
+      "name": "Stack preservation",
+      "result": "24 passed",
+      "evidence": "native-evidence/integration/thales-compile/preservation.log"
+    },
+    {
+      "name": "Setup auth JS races",
+      "result": "7 passed",
+      "evidence": "native-evidence/integration/thales-compile/setup-auth-js.log"
+    },
+    {
+      "name": "Native build shell syntax; changed Python AST; diff whitespace",
+      "result": "passed"
+    }
+  ],
+  "remote_evidence": "Thales:/Volumes/ThalesMedia/Projects/wizard-desktop/mac-release-20261015/native-source-qa/evidence",
+  "counts": {
+    "features": 28,
+    "dispositions": {
+      "integrated": 5,
+      "unfinished-native-port": 1,
+      "preserved-baseline": 7,
+      "parent-shared-dependency": 10,
+      "partially-retained-ancillary": 1,
+      "excluded-superseded": 1,
+      "deferred-explicit": 1,
+      "excluded-unbuilt": 1,
+      "excluded-other-platform": 1
+    }
+  },
+  "features": [
+    {
+      "id": "native-disk-cache",
+      "feature": "Explicit cached VZ Linux disk attachment",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "fix/linux-disk-cached-20261014",
+          "commit": "26662e305ccf8e46ed996608d51737021aa20083",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/26662e305ccf8e46ed996608d51737021aa20083"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "integrated",
+      "source_disposition": "26662e3 cherry-picked as ed00617; actual next/mac Host uses cached/full-sync storage attachment.",
+      "original_audit_acceptance_notes": [
+        "No final integrated Host boot/load/fsck acceptance found; commit rationale is not proof of corruption elimination"
+      ]
+    },
+    {
+      "id": "supplied-native-hat",
+      "feature": "Supplied hat in native app/Host/menu/installer and guest setup",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "branding/mac-hat-20261014",
+          "commit": "95f81765d506e4bfa6a686c3264a7ea1534df4ec",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/95f81765d506e4bfa6a686c3264a7ea1534df4ec"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "integrated",
+      "source_disposition": "4f94cdb + 12c884f + 95f8176 composed as de5bbca; Brand compile inputs unioned with Sparkle/updater/import, candidate version/build policy retained. b495fb3 adds existing-guest onboarding HTML/PNG migration.",
+      "original_audit_acceptance_notes": [
+        "Merge shared Brand compile inputs into Sparkle build script without resetting release version/build",
+        "Rebuild guest with current queued UX, not obsolete hat.2 frozen UX; test update of existing onboarding assets"
+      ]
+    },
+    {
+      "id": "bring-my-hermes",
+      "feature": "Bring My Hermes menu, stock backup/import, messaging/job suspension and undo",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "feature/bring-hermes-20261014",
+          "commit": "c851bea023bc986ad39a5a241a5b649859dd3cec",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/c851bea023bc986ad39a5a241a5b649859dd3cec"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "integrated",
+      "source_disposition": "108559e + c851bea ported as b5a2896; stale r5 output omitted. Menu remains opt-in, helper uses stock backup, guest importer suspends jobs/messaging and offers undo. This replaces MAIN, not a separate Agents entry.",
+      "original_audit_acceptance_notes": [
+        "Final combined Swift build/menu action not accepted; owner notes inherited actor errors on earlier base",
+        "r8 imported_cli_chat_listed=false: search works but imported CLI chats do not appear in Chats list",
+        "Currently replaces MAIN agent, not separate Agents registry import; prior box threads disappear until undo",
+        "Retest archive validation, origin boundary, interruption and undo on exact selected guest; never import automatically during upgrade"
+      ]
+    },
+    {
+      "id": "agent-ssh-key",
+      "feature": "Persistent VM terminal key outside Runtipi chmod tree",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "feature/bring-hermes-20261014",
+          "commit": "c851bea023bc986ad39a5a241a5b649859dd3cec",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/c851bea023bc986ad39a5a241a5b649859dd3cec"
+        },
+        {
+          "repo": "wizard-app-manager",
+          "branch": "feature/bring-hermes-20261014",
+          "commit": "a9d9be5080383f50b06c156d0ef327ecb2cb72d0",
+          "url": "https://github.com/humanitylabs-org/wizard-app-manager/commit/a9d9be5080383f50b06c156d0ef327ecb2cb72d0"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "integrated",
+      "source_disposition": "c851bea migration plus b495fb3 guard: migrate only Wizard-managed ssh/wizard-vm/wizard/22 route with old or new managed key. Explicit backend/host/user/port/key preserved; ambiguous engine/unreadable config fail closed. Final WAM must provide read-only /opt/agent-ssh mount.",
+      "original_audit_acceptance_notes": [
+        "Exercise fresh provision AND existing-install migration with final WAM pins",
+        "Preserve explicit terminal settings and verify rollback of key/config/compose changes"
+      ]
+    },
+    {
+      "id": "bluetooth-input",
+      "feature": "Avoid default Bluetooth mic degrading music",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "fix/bluetooth-mic-avoidance",
+          "commit": "5d65d996014eb7c7dedb93b59a10a8815deba194",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/5d65d996014eb7c7dedb93b59a10a8815deba194"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "unfinished-native-port",
+      "source_disposition": "5d65d9 is legacy macos/Sources/OmarchyVMHelper, not next/mac/App/MeetingCapture.swift. MVP MicSource has no explicit-device selection contract and always opens AVCaptureDevice.default(for:.audio); meeting Start/Tap/Choose re-use default. Cannot distinguish intentional system-selected Bluetooth from avoidable default without product choice. No donor cherry-pick or silent input override. Needed: MVP device UID/transport selection, explicit override precedence, per-session choice shared by all paths, actual format after start, device disconnect handling and physical music/TCC checks.",
+      "original_audit_acceptance_notes": [
+        "Physical music/mic test outstanding",
+        "Cherry-picking donor alone cannot change MVP MicSource: need separately reviewed adaptation to actual MVP capture path; respect explicit mic selections"
+      ]
+    },
+    {
+      "id": "desktop-shortcuts",
+      "feature": "Native desktop/chat/focus/fullscreen shortcuts and dynamic desktops",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "feature/dynamic-desktop-keys",
+          "commit": "ae1aa38829d1c37ae4e7299befcb877f05ceaf16",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/ae1aa38829d1c37ae4e7299befcb877f05ceaf16"
+        },
+        {
+          "repo": "try-wizard",
+          "branch": "integration/mac-fix-round-20261014",
+          "commit": "8c782e89bcaf52d5ff88b2906b7795d94cd6e76b",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/8c782e89bcaf52d5ff88b2906b7795d94cd6e76b"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "integrated",
+      "source_disposition": "Existing command chat/focus/fullscreen/close/desktop-cycle shortcuts retained; b495fb3 adds native Home Option1, app workspace Option2-9, Shift-Option2-9 moves; no Home move target. Emits DigitN and altKey without metaKey; guest owns next-slot creation and inert missing slots. Command-number still selects backend.",
+      "original_audit_acceptance_notes": [
+        "Reconcile latest UX Home=Option1/apps=Option2\u20139 with native labels/dispatcher and shift-move slots",
+        "Physical keys, actual OS fullscreen and exact assembled guest acceptance outstanding"
+      ]
+    },
+    {
+      "id": "foreground-voice",
+      "feature": "Foreground Right Command, quiet ready footer, retry/wake and draft send",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "fix/mac-mvp-native-20261014",
+          "commit": "a8c147171a2eaf578c296269e57360e9baf42093",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/a8c147171a2eaf578c296269e57360e9baf42093"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "preserved-baseline",
+      "source_disposition": "MeetingUI/capture admission, foreground Right Command and opt-in background behavior unchanged from exact baseline.",
+      "original_audit_acceptance_notes": [
+        "Physical right-command/mic/TCC on new binary; exact native Host+guest lifecycle remains open"
+      ]
+    },
+    {
+      "id": "drag-authority",
+      "feature": "Native title dragging and exact local main-origin privilege boundaries",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "fix/mac-native-drag-authority-20261014",
+          "commit": "342c0befa8fd53aaa8e8f89363172d5341d55b5a",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/342c0befa8fd53aaa8e8f89363172d5341d55b5a"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Native drag and exact local main-origin bridge/navigation checks retained; App main diff is additive menus/branding/import and approved feed/fallback only.",
+      "original_audit_acceptance_notes": [
+        "Physical title-bar/window chrome and native full-screen acceptance outstanding"
+      ]
+    },
+    {
+      "id": "sparkle-updater",
+      "feature": "Signed Sparkle native self-update plus owned Host/guest transaction",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "feature/mac-mvp-updater-20261014",
+          "commit": "cdec846ad2a9a7a563d7131453e9685b23f81f08",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/cdec846ad2a9a7a563d7131453e9685b23f81f08"
+        },
+        {
+          "repo": "try-wizard",
+          "branch": "repair/mac-updater-execution-20261014",
+          "commit": "1372048f1acfe5b7bef595048be2f6117e5923d2",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/1372048f1acfe5b7bef595048be2f6117e5923d2"
+        },
+        {
+          "repo": "try-wizard",
+          "branch": "integration/mac-fix-round-20261014",
+          "commit": "91f62f708902b9f6ffea38a6cf910577cbb1c50e",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/91f62f708902b9f6ffea38a6cf910577cbb1c50e"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Updater, release handshake, owned Host lifecycle, guest transaction command and guest activation Swift files byte-identical to baseline. No release build number, releaseID, signing key or artifact created. Approved hosting ec8cbc8 cherry-picked as 3cda1a7; fallback already uses /index.html (GET200).",
+      "original_audit_acceptance_notes": [
+        "203\u2192204 guest update never starts VM; Host PID3117 stalled mkdirat; do not touch under this audit",
+        "Guest transaction/rollback, existing state preservation through actual native update, unused-factory rollback unaccepted",
+        "Production signer/notarization, recipient-accessible signed feed, version/build and exact release provenance not established",
+        "0.6.1 has no Sparkle updater: initial upgrade to enabled app is manual"
+      ]
+    },
+    {
+      "id": "stack-repairs",
+      "feature": "Real Files/Accounts routes, configured models, Wizard identity and preserving software patch",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "fix/mac-stack-20261014",
+          "commit": "75d9d29d372216e6597930d7d244608c0fc38487",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/75d9d29d372216e6597930d7d244608c0fc38487"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "integration/mac-fix-round-20261014",
+          "commit": "0f38625285d4fb78092e1d645299c0b03661ee2d",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/0f38625285d4fb78092e1d645299c0b03661ee2d"
+        },
+        {
+          "repo": "wizard-app-manager",
+          "branch": "fix/mac-stack-20261014",
+          "commit": "af9f4d6f5443194631be2cc84c0f928db9c21f0a",
+          "url": "https://github.com/humanitylabs-org/wizard-app-manager/commit/af9f4d6f5443194631be2cc84c0f928db9c21f0a"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Baseline preserving stack transaction retained. Migration allowlist adds import/server/key tools and onboarding assets only; state-preservation library, backup/rollback, grants accounting unchanged. Parent/shared lane must preserve routes/model filters in pinned Service/WAM.",
+      "original_audit_acceptance_notes": [
+        "Actual Host-dispatched guest installation/rollback still blocked",
+        "Any newer Service/WAM replacement must preserve route isolation, configured model filters, stock grant accounting and strict unchanged personal data"
+      ]
+    },
+    {
+      "id": "meeting-native",
+      "feature": "Native meeting recorder, system audio tap, floating HUD, outbox and call prompts",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "mizel-mac",
+          "commit": "0dccf1b94dfc927e173eb78c6d9bc1b2888b0929",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/0dccf1b94dfc927e173eb78c6d9bc1b2888b0929"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Native recorder, HUD, system audio, outbox, prompts and capture admission unchanged; no physical acceptance implied.",
+      "original_audit_acceptance_notes": [
+        "Separate listen/think/late-permission meeting admission matrix still unexercised",
+        "Physical mic/system audio/device-change/TCC not established by fixture tests"
+      ]
+    },
+    {
+      "id": "meeting-package",
+      "feature": "Installable Meeting Recorder app and bound-agent recap delivery",
+      "source_refs": [
+        {
+          "repo": "meeting-recorder",
+          "branch": "feature/wizard-app-package",
+          "commit": "4b339cd3394b498a78e33162e63fdf559e001f79",
+          "url": "https://github.com/humanitylabs-org/meeting-recorder/commit/4b339cd3394b498a78e33162e63fdf559e001f79"
+        },
+        {
+          "repo": "meeting-recorder",
+          "branch": "feature/agent-binding",
+          "commit": "e81e47aa6690eaea5c8e390e9c5045ca6ca1cbcd",
+          "url": "https://github.com/humanitylabs-org/meeting-recorder/commit/e81e47aa6690eaea5c8e390e9c5045ca6ca1cbcd"
+        }
+      ],
+      "audit_status": "unfinished",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No try-wizard native addition selected; parent/shared lane owns catalogue/registry/runtime/app-binding integration and acceptance.",
+      "original_audit_acceptance_notes": [
+        "Index write/publication issue, private-name integration, real installation/recording/hosted Back/gateway/retained-data tests open",
+        "Bound-agent recap needs Service Agents/app-bindings/runtime support; existing legacy /meetings route contract must survive"
+      ]
+    },
+    {
+      "id": "phone-setup",
+      "feature": "Built-in Setup app with local QR and Tailscale enrollment API/helper",
+      "source_refs": [
+        {
+          "repo": "wizard-ux",
+          "branch": "feature/setup-app",
+          "commit": "cffae868851653d8226137cff4f3357526c80945",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/cffae868851653d8226137cff4f3357526c80945"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/phone-setup",
+          "commit": "e8b9e12eccb9fe0dff836cce6ba6251f92813539",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/e8b9e12eccb9fe0dff836cce6ba6251f92813539"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No private network enrollment or phone helper auto-enabled here; parent owns deliberate guest packaging and owner-ingress acceptance.",
+      "original_audit_acceptance_notes": [
+        "No final guest installation of helper/systemd/socket mounts/second listener or real owner phone enrollment proof found",
+        "Must enforce/test loopback-only owner ingress and separate Serve listener: never expose owner-header injection",
+        "Fresh image must contain no node state/auth keys; unpaired until explicit Connect",
+        "Previously deliberately excluded from fix round; new release owner must deliberately select and close gates"
+      ]
+    },
+    {
+      "id": "privacy-config",
+      "feature": "Remove owner-specific names/URLs; runtime settings and phone connection defaults",
+      "source_refs": [
+        {
+          "repo": "wizard-ux",
+          "branch": "fix/no-private-config",
+          "commit": "86b32da4fbb3ed9370314687a80af4dbd723d973",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/86b32da4fbb3ed9370314687a80af4dbd723d973"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/phone-setup",
+          "commit": "e8b9e12eccb9fe0dff836cce6ba6251f92813539",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/e8b9e12eccb9fe0dff836cce6ba6251f92813539"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Existing local loopback authority unchanged; no owner-specific network defaults imported. Shared runtime config and phone settings remain parent/shared-lane work.",
+      "original_audit_acceptance_notes": [
+        "Do not replace private Android build defaults or compile phone-only changes into Mac claims",
+        "Guest runtime network.base_url/aliases and owner.name must work without hardcoded endpoint; keep Mac loopback authority"
+      ]
+    },
+    {
+      "id": "tailscale-auth",
+      "feature": "Opt-in Tailscale Serve identity verification source",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/tailscale-access",
+          "commit": "d8a1e29c5ebc93e5163a1e775612ba4131278fbd",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/d8a1e29c5ebc93e5163a1e775612ba4131278fbd"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No Tailscale auth activation here. Parent must close peer/header/forgery/direct/cross-origin gates before enabling in guest.",
+      "original_audit_acceptance_notes": [
+        "Actual Serve peer/header provenance, owner success and forged/missing/nonowner/Host/direct/cross-origin rejection remain gates"
+      ]
+    },
+    {
+      "id": "queue-home-resources",
+      "feature": "Home Resources, centered house, shared workspace glyphs and Home-first shortcuts",
+      "source_refs": [
+        {
+          "repo": "wizard-ux",
+          "branch": "daily",
+          "commit": "4a2371dc281104e58e6b16482a3164e74b77d869",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/4a2371dc281104e58e6b16482a3164e74b77d869"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "fix/desktop-home-parity-20261015",
+          "commit": "90908f809c576e0d84c3a9d867ecedb948d86507",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/90908f809c576e0d84c3a9d867ecedb948d86507"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "Native Home-first slots reconciled against shared UX workspace-navigation.js and desktop.js; actual current UX still needs parent guest pin/payload.",
+      "original_audit_acceptance_notes": [
+        "Native Option mapping/labels must match new Home1/apps2\u20139 rule",
+        "General desktop retained-node soak fails equally on baseline and donor; do not hide it",
+        "Existing guest updater must deliver current UX alongside fresh image"
+      ]
+    },
+    {
+      "id": "queue-hat-sizing",
+      "feature": "Current web hat sizing and restored house/agent-coloured icons",
+      "source_refs": [
+        {
+          "repo": "wizard-ux",
+          "branch": "daily",
+          "commit": "4fbafd556ff1b33d4848b1fd2ad8bc606c3354cd",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/4fbafd556ff1b33d4848b1fd2ad8bc606c3354cd"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "daily",
+          "commit": "f4e5a7e0894f795233a392243cf2e29bfb3d78a7",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/f4e5a7e0894f795233a392243cf2e29bfb3d78a7"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "Supplied native/setup hat included, not old hat.2 UX snapshot. Current shared web sizing/house/agent glyphs are parent UX pin.",
+      "original_audit_acceptance_notes": [
+        "Guest image must include current icon meaning and sizing, not just native hat ICNS"
+      ]
+    },
+    {
+      "id": "queue-user-files",
+      "feature": "Files Upload destinations and user-files read API",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/files-upload-dest",
+          "commit": "de9222cd97333149b4f20591508550f42c42d932",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/de9222cd97333149b4f20591508550f42c42d932"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No local-only Files Browser UI copied; baseline Files routes retained; parent owns GitHub-backed shared Files API/source selection.",
+      "original_audit_acceptance_notes": [
+        "Files folder view files-browser is James-box only with no GitHub remote; API source alone is not a packaged Files UI",
+        "Avoid blanket PR branch replacement: donor carries live Service deltas; preserve existing Mac Files route/permissions"
+      ]
+    },
+    {
+      "id": "agents-runtime",
+      "feature": "Agents registry/UI, sealed private agents, per-agent apps, runtime driver and app bindings",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/agents-mvp",
+          "commit": "2dbcfcfd7e215f7fe2f59b29c40acb66aadbe3b2",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/2dbcfcfd7e215f7fe2f59b29c40acb66aadbe3b2"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/agents-sealed-apps",
+          "commit": "1d9816fdfe82b53ed14f58ec0a05edba1df5d77f",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/1d9816fdfe82b53ed14f58ec0a05edba1df5d77f"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "fix/runtipi-agent-driver",
+          "commit": "2aed55db17a0189dcdb31f656e27a67f70862d1a",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/2aed55db17a0189dcdb31f656e27a67f70862d1a"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/launcher-link-binding",
+          "commit": "15799aa238fd4545a3517664956f47e67906ad0a",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/15799aa238fd4545a3517664956f47e67906ad0a"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "feature/agents-mvp",
+          "commit": "d486becf355587daa58b81409854910be5ad67cc",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/d486becf355587daa58b81409854910be5ad67cc"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No native separate-agent import promised. Parent owns runtime driver, tokens, proxy/helper/images/mounts and isolated routing.",
+      "original_audit_acceptance_notes": [
+        "Guest agent-runtime helper, container/proxy/images/token wiring need packaging and native guest acceptance",
+        "Bring My Hermes still replaces main; no implemented separate-agent import contract",
+        "Private routing must not fall back to main on stopped agent"
+      ]
+    },
+    {
+      "id": "resumable-sharing",
+      "feature": "Resumable uploads/chat attachments and agent-aware private shares",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/resumable-uploads",
+          "commit": "848115c9f5691f0d6db82e991c28b931f9919846",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/848115c9f5691f0d6db82e991c28b931f9919846"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "feature/share-files",
+          "commit": "5e05b906c64841dbec6eda1b05ab5633f44a191f",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/5e05b906c64841dbec6eda1b05ab5633f44a191f"
+        },
+        {
+          "repo": "wizard-agent-service",
+          "branch": "fix/private-share-live",
+          "commit": "260f517954587a4cc7d34de894ef6e44dc2e527b",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/260f517954587a4cc7d34de894ef6e44dc2e527b"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No native Finder sharing added. Parent owns Service/UX agent-aware upload/private-share source and privacy verification.",
+      "original_audit_acceptance_notes": [
+        "Private-share live readability/isolation verification still pending per PR29; must not claim approved final delivery",
+        "Private destinations require selected agent-home and proxy, cannot leak into main/media",
+        "Android share intent receiver is not native Mac Finder sharing support"
+      ]
+    },
+    {
+      "id": "five-fixes",
+      "feature": "Media-root attachments, voice/screen/silence parity and manual Continue",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "0a12f43a1e0b81965c6a863952e381f24f2b96ee",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/0a12f43a1e0b81965c6a863952e381f24f2b96ee"
+        },
+        {
+          "repo": "wizard-app-manager",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "84e7a4a5eee7a5f72cb7da44f890c22712363f8c",
+          "url": "https://github.com/humanitylabs-org/wizard-app-manager/commit/84e7a4a5eee7a5f72cb7da44f890c22712363f8c"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "8f86086806d8dec1e7df437701a07d6b991646f8",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/8f86086806d8dec1e7df437701a07d6b991646f8"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No shared Service/UX/WAM edits here; parent/shared lane must compose manual Continue and media/voice/screen/silence fixes and retain dispatch security checks.",
+      "original_audit_acceptance_notes": [
+        "Independent dispatch/manual-marker security review on final composition",
+        "Donor recording harness14/22 with8 known AltRight mismatch failures; update harness without weakening acceptance",
+        "WAM Thales75pass/1fail/2skip fixed-port environmental failure reproduced baseline, not blanket green"
+      ]
+    },
+    {
+      "id": "modular-package",
+      "feature": "Split headless Agent Service and UX shell packaging",
+      "source_refs": [
+        {
+          "repo": "wizard-agent-service",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "81575409c23e289fd765834a5a5853b72dff85ee",
+          "url": "https://github.com/humanitylabs-org/wizard-agent-service/commit/81575409c23e289fd765834a5a5853b72dff85ee"
+        },
+        {
+          "repo": "wizard-app-manager",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "84e7a4a5eee7a5f72cb7da44f890c22712363f8c",
+          "url": "https://github.com/humanitylabs-org/wizard-app-manager/commit/84e7a4a5eee7a5f72cb7da44f890c22712363f8c"
+        },
+        {
+          "repo": "wizard-ux",
+          "branch": "feature/modular-shell-20261012",
+          "commit": "bc9e2ec0daa15cbf69349eeae5e5f8bf358055d2",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/bc9e2ec0daa15cbf69349eeae5e5f8bf358055d2"
+        }
+      ],
+      "audit_status": "staged",
+      "disposition": "parent-shared-dependency",
+      "source_disposition": "No topology/image swap in native source. Parent owns split-service payload and persistent-state acceptance.",
+      "original_audit_acceptance_notes": [
+        "Requires selected image digests, runtime topology and migration, not just source merge",
+        "Do not replace bundled guest path with new split images without preservation test"
+      ]
+    },
+    {
+      "id": "prep-status",
+      "feature": "Local voice preparation state and ChatGPT sign-in race fencing",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "prep-ui-isolated",
+          "commit": "e81fdad73c8efadd7bce6b37f7be6b70fc370de7",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/e81fdad73c8efadd7bce6b37f7be6b70fc370de7"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "preserved-baseline",
+      "source_disposition": "Existing setup status/auth race fixes retained; 15 existing Python setup tests and 7 JS race tests still pass after import route/branding integration.",
+      "original_audit_acceptance_notes": [
+        "No new separate integration required"
+      ]
+    },
+    {
+      "id": "github-download-check",
+      "feature": "Standalone human GitHub download checker",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "mac-mvp",
+          "commit": "1f90762533051b91982e9c2ce71e02ba74b15781",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/1f90762533051b91982e9c2ce71e02ba74b15781"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "partially-retained-ancillary",
+      "source_disposition": "Base retains generic WKDownload probe. Retain 1f90762 quit-on-last-window delta; exclude old DownloadCheckLauncher/package-check.py that hardcode private mac-mvp-20261013 image URLs and 0.6.1 package defaults. Approved R2 replaces that private-download distribution workflow; no stale checker offered as this release.",
+      "original_audit_acceptance_notes": [
+        "Not part of native runtime; confirm whether still wanted as ancillary distribution tool"
+      ]
+    },
+    {
+      "id": "parked-existing-hermes",
+      "feature": "Existing Mac Hermes vsock relay / early Import Hermes prototype",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "feature/existing-hermes-vm",
+          "commit": "c5b5076485133744b2208d723ee45b43c005133a",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/c5b5076485133744b2208d723ee45b43c005133a"
+        },
+        {
+          "repo": "try-wizard",
+          "branch": "feature/import-hermes",
+          "commit": "fdd6059776c6838c4755a9ccbcbf5e067a4b13ad",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/fdd6059776c6838c4755a9ccbcbf5e067a4b13ad"
+        }
+      ],
+      "audit_status": "unfinished",
+      "disposition": "excluded-superseded",
+      "source_disposition": "Do not merge c5b5076/fdd6059 or vsock relay/prototype path; selected product is c851bea backup/import.",
+      "original_audit_acceptance_notes": [
+        "No acceptance as supported final product; would create conflicting import/relay paths"
+      ]
+    },
+    {
+      "id": "future-qa-channel",
+      "feature": "In-client QA release channel",
+      "source_refs": [],
+      "audit_status": "unfinished",
+      "disposition": "deferred-explicit",
+      "source_disposition": "No in-client QA channel activation, feed generation, or publication.",
+      "original_audit_acceptance_notes": [
+        "No implemented/authorized channel activation; staged Sparkle candidates are not human delivery"
+      ]
+    },
+    {
+      "id": "intel-and-always-on",
+      "feature": "Intel support and always-on roadmap (resources/disk/encrypted export/headless/backups)",
+      "source_refs": [
+        {
+          "repo": "try-wizard",
+          "branch": "main",
+          "commit": "5b3b40abf5e45241928a3cd0f2a7762e6ae64d25",
+          "url": "https://github.com/humanitylabs-org/try-wizard/commit/5b3b40abf5e45241928a3cd0f2a7762e6ae64d25"
+        }
+      ],
+      "audit_status": "unfinished",
+      "disposition": "excluded-unbuilt",
+      "source_disposition": "No Intel binary/resource UI/disk/export/always-on roadmap claimed; native compilation is arm64/macOS14 target.",
+      "original_audit_acceptance_notes": [
+        "Issues/spec labels are not built artifacts; no verified Intel binary or scheduled restore acceptance"
+      ]
+    },
+    {
+      "id": "android-everywhere",
+      "feature": "Everywhere processing ring/admission correction",
+      "source_refs": [
+        {
+          "repo": "wizard-ux",
+          "branch": "fix/everywhere-transcribing-20261015",
+          "commit": "058942b80f7b6711efe79632300970df292467d5",
+          "url": "https://github.com/humanitylabs-org/wizard-ux/commit/058942b80f7b6711efe79632300970df292467d5"
+        }
+      ],
+      "audit_status": "delivered",
+      "disposition": "excluded-other-platform",
+      "source_disposition": "Android processing/admission fix is not a built Mac port; native capture admission baseline preserved.",
+      "original_audit_acceptance_notes": [
+        "No Mac port implemented"
+      ]
+    }
+  ],
+  "unresolved": [
+    "Bluetooth default-mic avoidance has no safe completed MVP port; see bluetooth-input.",
+    "No combined App/Host/VM update, restart, rollback, state-preservation or fresh-guest QA performed by this lane. Compile is not proof of any of these.",
+    "No physical keyboard/fullscreen/title drag/mic/music/meeting/TCC acceptance. Source and fixture checks are not physical-event acceptance.",
+    "Bring My Hermes replaces MAIN; imported CLI chat-list visibility remains a known donor gap; separate-agent import not implemented. Must recheck interruption/undo/archive validation and fresh/existing terminal key with exact WAM pins.",
+    "Parent owns final shared UX/Service/WAM pins, factory image and existing-guest payload, native build/version freeze, signer/notarization, signed feeds/artifact sizes and any public publication.",
+    "Hosting source dependency is resolved; fallback index GET200 is a placeholder page, not proof a final release or signed feed is published.",
+    "Standalone old private-image checker package excluded deliberately; reusable underlying probe retained.",
+    "Existing FINISHER-HANDOFF.md and suspect Host PID3117 were not modified/stopped by this lane."
+  ],
+  "issues_encountered": [
+    "Hat build.sh conflicted with candidate Sparkle build: resolved by unioning inputs/resources, retaining required monotonic BUILD and candidate version (not donor 0.6.0/build2).",
+    "Initial shared worker.lock probe was busy; no compile bypass. Later acquired nonblocking lock and compiled both native programs on Thales.",
+    "Remote non-login PATH lacked node; native compile already succeeded; reran only JS checks via /opt/homebrew/bin/node. Remote system Python lacks aiohttp; HTTP fixture checks ran lightweight locally with isolated temporary HOME and no user data.",
+    "Donor SSH migration would replace an explicit terminal key; added managed-route guard and tests before handoff."
+  ]
+}

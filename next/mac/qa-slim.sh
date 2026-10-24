@@ -1,4 +1,5 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Slim factory acceptance, after qa-fresh.sh reached a first chat (dev shell on):
 #   1. what the factory shipped (apps, images, disk, RAM)
 #   2. local Parakeet voice arrives in the background, with progress, and transcribes through Wizard's own voice
@@ -9,7 +10,7 @@
 #   5. RAM with voice up
 #   qa-slim.sh [evidence dir]
 set -u
-EV=${1:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020/evidence/slim}
+EV=${1:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/evidence/slim}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$EV"; exec > >(tee "$EV/qa-slim.log") 2>&1
 G() { bash "$HERE/qa-guest.sh" "$1"; }

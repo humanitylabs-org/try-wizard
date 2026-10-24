@@ -1,7 +1,8 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Headless DMG: Wizard.app + Applications link, compressed, ad-hoc signed. No Finder scripting.
 set -euo pipefail
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 APP="$D/try-omarchy/dist/release.noindex/Wizard.app"
 OUT="$D/try-omarchy/dist/Wizard.dmg"
 STAGE="$D/tmp/dmg-stage"

@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Run on Thales: apply Wizard app patch, build ad-hoc signed Wizard.app with the Wizard guest.
 set -uo pipefail
-source /Volumes/ThalesMedia/Projects/wizard-desktop/env.sh
-D=/Volumes/ThalesMedia/Projects/wizard-desktop
+source "$WIZARD_WORK_ROOT/Projects/wizard-desktop/env.sh"
+D="$WIZARD_WORK_ROOT/Projects/wizard-desktop"
 L=$D/build-app-wizard.log
 {
   cd "$D/try-omarchy" || exit 1

@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Bring your Hermes into Wizard: back up the Hermes on this Mac with its own `hermes backup`, then hand the backup to
+Wizard OS, which makes it the agent inside Wizard (memory, skills, chats, settings and sign-ins).
+
+    wizard-bring-hermes [--hermes PATH] [--hermes-home DIR] [--port 48030]
+    wizard-bring-hermes --undo [--port 48030]
+
+Your Hermes on this Mac is not changed and keeps running; it stays as your copy to go back to. In Wizard, its
+messaging (Telegram, Slack, ...) starts switched off and its scheduled jobs start paused, so the two copies never
+answer the same chat or run the same job twice. Prints one JSON line.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+def find_hermes(arg: str | None) -> str:
+    for c in (arg, shutil.which("hermes"), str(Path.home() / ".local/bin/hermes"), "/opt/homebrew/bin/hermes",
+              "/usr/local/bin/hermes"):
+        if c and os.access(c, os.X_OK):
+            return c
+    raise SystemExit(json.dumps({"ok": False, "error": "no_hermes", "detail": "Couldn't find Hermes on this Mac"}))
+
+
+def talk(port: int, path: str, body: Path | None) -> dict:
+    """POST to Wizard OS's front door on this Mac (127.0.0.1:<port>, bridged into the VM)."""
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3600)
+    headers = {"X-Wizard-Import": "hermes-backup", "Content-Type": "application/zip" if body else "application/json"}
+    try:
+        if body:
+            headers["Content-Length"] = str(body.stat().st_size)
+            with body.open("rb") as f:
+                conn.request("POST", path, body=f, headers=headers)
+        else:
+            conn.request("POST", path, body=b"{}", headers=headers)
+        resp = conn.getresponse()
+        raw = resp.read().decode(errors="replace")
+    finally:
+        conn.close()
+    try:
+        out = json.loads(raw)
+    except ValueError:
+        return {"ok": False, "error": "no_reply", "detail": raw[-300:]}
+    if "ok" not in out:
+        out = {"ok": False, "error": "refused", "detail": out.get("error") or raw[-300:]}
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="wizard-bring-hermes", description=__doc__.split("\n\n")[0])
+    ap.add_argument("--hermes")
+    ap.add_argument("--hermes-home")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("WIZARD_IMPORT_PORT") or 48030),
+                    help="Wizard OS front door on this Mac (default 48030)")
+    ap.add_argument("--undo", action="store_true", help="put back the agent Wizard had before the last import")
+    ns = ap.parse_args()
+    if ns.undo:
+        res = talk(ns.port, "/api/agent-import/undo", None)
+        print(json.dumps(res)); return 0 if res.get("ok") else 1
+    hermes = find_hermes(ns.hermes)
+    env = dict(os.environ)
+    if ns.hermes_home:
+        env["HERMES_HOME"] = ns.hermes_home
+    with tempfile.TemporaryDirectory(prefix="wizard-bring-hermes-") as d:
+        os.chmod(d, 0o700)
+        zp = Path(d) / "hermes-backup.zip"
+        p = subprocess.run([hermes, "backup", "-o", str(zp)], env=env, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=3600)
+        if p.returncode or not zp.is_file():
+            print(json.dumps({"ok": False, "error": "backup_failed", "detail": (p.stderr or p.stdout)[-400:]}))
+            return 1
+        os.chmod(zp, 0o600)
+        size = zp.stat().st_size
+        try:
+            res = talk(ns.port, "/api/agent-import", zp)
+        except OSError as e:
+            res = {"ok": False, "error": "wizard_not_running", "detail": f"Wizard OS isn't answering ({e})"}
+        res["backup_bytes"] = size
+    print(json.dumps(res))
+    return 0 if res.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

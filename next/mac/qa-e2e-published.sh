@@ -1,12 +1,14 @@
 #!/bin/bash
 # End-to-end acceptance on Thales from the PUBLISHED artifacts: install the DMG from the private
 # download page, wipe Wizard OS + app prefs, choose "On this Mac", and let the app pull Wizard OS
-# from the real feed (https://private.wizard001.com/reports/wizard-next/os/latest.json).
+# from the app's configured OS feed. Set WIZARD_QA_DOWNLOAD_BASE to the published release directory.
 set -u
-B=https://private.wizard001.com/reports/wizard-next
+: "${WIZARD_QA_DOWNLOAD_BASE:?Set WIZARD_QA_DOWNLOAD_BASE to the published release directory URL}"
+B=${WIZARD_QA_DOWNLOAD_BASE%/}
 AS="$HOME/Library/Application Support/Wizard"
 APP="$HOME/Applications/WizardNext/Wizard.app"
-W=/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-mac
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
+W="$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-mac"
 T=/tmp/wizard-e2e; rm -rf $T; mkdir -p $T
 
 echo "== stop running Wizard"

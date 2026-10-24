@@ -1,11 +1,12 @@
 #!/bin/bash
+: "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
 # Developer VM on the build Mac: boot a clone of a built disk with a root shell on vsock 9200.
 #   devvm.sh start <disk.img> [share-dir]   clone the disk (APFS clone, instant), boot it in the background
 #   devvm.sh sh '<command>'                   run a command as root in the guest, print its output
 #   devvm.sh stop
 # Bridges: 127.0.0.1:48000 -> dev shell, 47931 -> onboarding (8930), 47924 -> Wizard UX (8923).
 set -euo pipefail
-W=${W:-/Volumes/ThalesMedia/Projects/wizard-desktop/wizard-os-020}
+W=${W:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020}
 D=$W/dev; mkdir -p "$D"
 VMRUN=$(cd "$(dirname "$0")" && pwd)/vmrun
 case "${1:-}" in

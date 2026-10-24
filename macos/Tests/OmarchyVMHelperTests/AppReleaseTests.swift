@@ -215,7 +215,7 @@ struct AppReleaseTests {
         }
     }
 
-    @Test("cached update notifications survive automatic check failures until a successful refresh")
+    @Test("cached updates survive disabled automatic polling and failed manual checks until refreshed")
     func cachedUpdateSurvivesFailure() async throws {
         let cached = try release()
         let refreshed = try release("0.4.1")
@@ -237,10 +237,17 @@ struct AppReleaseTests {
             checker.onChange = { observedTitles.append(checker.menuTitle) }
             defer { checker.onChange = nil }
             #expect(checker.menuTitle == "Update Available…")
+            #expect(preferences.shouldCheckAutomatically(now: now))
             checker.checkAutomaticallyIfDue()
+            // Wizard must not poll the upstream Try Omarchy release feed.
+            #expect(checker.state == .available(cached))
+            #expect(requests == 0)
+            #expect(observedTitles.isEmpty)
+            #expect(preferences.shouldCheckAutomatically(now: now))
+            let manualCheck = checker.check()
             #expect(checker.state == .checking)
             #expect(checker.menuTitle == "Update Available…")
-            await checker.check().value
+            await manualCheck.value
             guard case .failed = checker.state else {
                 Issue.record("Expected an offline failure")
                 return
@@ -257,6 +264,28 @@ struct AppReleaseTests {
             #expect(checker.menuTitle == "Check for Updates…")
             #expect(preferences.latestRelease == refreshed)
             #expect(observedTitles.last == "Check for Updates…")
+        }
+    }
+
+    @Test("Wizard never polls upstream automatically, even when the legacy preference is enabled")
+    func automaticPollingIsDisabled() async throws {
+        let latest = try release()
+        await withPreferences { preferences in
+            let now = Date(timeIntervalSince1970: 1_000_000)
+            var requests = 0
+            let checker = AppReleaseChecker(
+                installed: installed("0.4.1"), preferences: preferences, now: { now },
+                fetch: { requests += 1; return latest }
+            )
+            for enabled in [false, true] {
+                preferences.automaticChecks = enabled
+                checker.checkAutomaticallyIfDue()
+                await Task.yield()
+                #expect(checker.state == .idle)
+                #expect(requests == 0)
+                #expect(preferences.latestRelease == nil)
+                #expect(preferences.shouldCheckAutomatically(now: now) == enabled)
+            }
         }
     }
 

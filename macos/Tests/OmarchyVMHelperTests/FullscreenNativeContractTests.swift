@@ -7,7 +7,7 @@ struct FullscreenNativeContractTests {
     func runnerMapping() throws {
         let runner = try source(named: "run-qemu-gpu.sh")
 
-        #expect(runner.contains("case ${OMARCHY_QEMU_GPU_IMMERSIVE:-1} in"))
+        #expect(runner.contains("case ${OMARCHY_QEMU_GPU_IMMERSIVE:-0} in"))
         #expect(runner.contains("cocoa_full_screen=on\n    cocoa_immersive=on"))
         #expect(runner.contains("cocoa_full_screen=off\n    cocoa_immersive=off"))
         #expect(runner.contains("OMARCHY_QEMU_GPU_IMMERSIVE must be 0 or 1"))

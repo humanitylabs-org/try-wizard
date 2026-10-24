@@ -51,7 +51,7 @@ esac
 stale_fixture=''
 trap '/bin/rm -rf "$test_root"; [[ -z "$stale_fixture" ]] || /bin/rm -rf "$stale_fixture"' EXIT HUP INT TERM
 
-app="$test_root/Try Omarchy.app"
+app="$test_root/Wizard.app"
 contents="$app/Contents"
 resources="$contents/Resources"
 shim_dir="$test_root/bin"
@@ -133,7 +133,7 @@ exit 0
 SH
 chmod 755 "$contents/MacOS/omarchy-vm-helper"
 
-cat >"$resources/runtime/bin/Try Omarchy" <<'SH'
+cat >"$resources/runtime/bin/Wizard" <<'SH'
 #!/bin/bash
 # Identity markers validated by the production launcher:
 # TryOmarchy.icns
@@ -188,7 +188,7 @@ import threading
 import time
 
 arguments = sys.argv[1:]
-is_recovery = "Try Omarchy Boot Recovery" in arguments
+is_recovery = "Wizard Boot Recovery" in arguments
 log_variable = "FAKE_QEMU_RECOVERY_LOG" if is_recovery else "FAKE_QEMU_LOG"
 geometry = os.environ.get("TRYOMARCHY_KEYBOARD", "")
 Path(os.environ[log_variable]).write_text(
@@ -291,7 +291,7 @@ PY
     ;;
 esac
 SH
-chmod 755 "$resources/runtime/bin/Try Omarchy"
+chmod 755 "$resources/runtime/bin/Wizard"
 
 cat >"$resources/scripts/qemu-persistent-storage.sh" <<'SH'
 #!/bin/bash
@@ -584,7 +584,7 @@ assert_contains "$development_validation" \
 
 # Verified older factories retain their creation-time host renderer metadata.
 # Accept that known ABI, but reject arbitrary backends before launching QEMU.
-for renderer in angle-metal unsupported-renderer macos-opengl; do
+for renderer in angle-metal unsupported-renderer macos-opengl invalid-image-size; do
   /usr/bin/python3 - "$development_guest" "$renderer" <<'PY_GRAPHICS'
 import hashlib
 import json
@@ -594,7 +594,10 @@ import sys
 guest = Path(sys.argv[1])
 spec_path = guest / "build-spec.json"
 spec = json.loads(spec_path.read_text())
-spec["runtime"]["graphics"]["hostRenderer"] = sys.argv[2]
+if sys.argv[2] == "invalid-image-size":
+    spec["image"]["sizeMiB"] += 1
+else:
+    spec["runtime"]["graphics"]["hostRenderer"] = sys.argv[2]
 spec_path.write_text(json.dumps(spec) + "\n")
 manifest_path = guest / "guest-manifest.json"
 manifest = json.loads(manifest_path.read_text())
@@ -613,6 +616,9 @@ PY_GRAPHICS
     >"$test_root/graphics-$renderer.stdout" 2>"$test_root/graphics-$renderer.stderr" || graphics_status=$?
   if [[ $renderer == unsupported-renderer ]]; then
     [[ $graphics_status != 0 ]] || fail 'unsupported graphics backend was accepted'
+  elif [[ $renderer == invalid-image-size ]]; then
+    [[ $graphics_status != 0 ]] || fail 'unsupported factory image size was accepted'
+    assert_contains "$(<"$test_root/graphics-$renderer.stderr")" 'build spec image contract is invalid'
   else
     [[ $graphics_status == 0 ]] || fail "compatible graphics metadata rejected: $renderer"
   fi
@@ -685,7 +691,7 @@ assert_not_contains "$disabled_qemu" hostfwd
 assert_not_contains "$disabled_qemu" tryomarchy.ssh_access
 assert_keyboard_lockstep "$test_root/disabled/qemu.log" iso
 assert_contains "$disabled_qemu" \
-  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=on,full-grab=on,immersive=on,swap-opt-cmd=off'
+  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off'
 assert_contains "$disabled_qemu" \
   'socket,id=omarchy-authentication-bridge,path='
 assert_contains "$disabled_qemu" \
@@ -893,6 +899,10 @@ run_scenario non-immersive 0 '' OMARCHY_QEMU_GPU_IMMERSIVE=0
 non_immersive_qemu=$(<"$test_root/non-immersive/qemu.log")
 assert_contains "$non_immersive_qemu" \
   'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off'
+
+run_scenario immersive 0 '' OMARCHY_QEMU_GPU_IMMERSIVE=1
+assert_contains "$(<"$test_root/immersive/qemu.log")" \
+  'cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=on,full-grab=on,immersive=on,swap-opt-cmd=off'
 
 run_scenario hvf-trace 0 '' OMARCHY_QEMU_GPU_HVF_TRACE_LOG=/private/tmp/omarchy-hvf-trace.log
 assert_line_pair "$test_root/hvf-trace/qemu.log" -trace hvf_vm_map

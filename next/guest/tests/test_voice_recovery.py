@@ -13,7 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 cli = types.ModuleType('wam.cli')
 cli.STORE = 'wizardapps'
-wam = types.ModuleType('wam'); wam.cli = cli
+wam = types.ModuleType('wam'); wam.cli = cli; wam.fresh_agent = types.ModuleType('wam.fresh_agent')
 with patch.dict(sys.modules, {'wam': wam, 'wam.cli': cli}):
     loader = importlib.machinery.SourceFileLoader('wizard_apps_test', str(ROOT/'overlay/opt/wizard/bin/wizard-apps'))
     spec = importlib.util.spec_from_loader(loader.name, loader)

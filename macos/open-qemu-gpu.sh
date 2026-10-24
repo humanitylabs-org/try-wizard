@@ -42,7 +42,7 @@ if (($#)); then
 fi
 
 repo_dir=$(cd "$macos_dir/.." && pwd -P)
-app="$repo_dir/dist/app.noindex/Try Omarchy.app"
+app="$repo_dir/dist/app.noindex/Wizard.app"
 helper="$app/Contents/MacOS/omarchy-vm-helper"
 info_plist="$app/Contents/Info.plist"
 [[ -d $app && ! -L $app ]] || {
@@ -60,7 +60,7 @@ info_plist="$app/Contents/Info.plist"
 bundle_identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist" 2>/dev/null) || {
   fail "built app has no bundle identifier"
 }
-[[ $bundle_identifier == dev.tryomarchy.native.development ]] || {
+[[ $bundle_identifier == com.aiwizards.desktop.development ]] || {
   fail "built app has an unexpected bundle identifier: $bundle_identifier"
 }
 bundle_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist" 2>/dev/null) || {
