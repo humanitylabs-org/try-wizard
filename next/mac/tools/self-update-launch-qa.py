@@ -87,9 +87,9 @@ try:
     assert 'HIDKeyboardModifierMappingSrc' not in mappings, 'Existing keyboard remapping belongs to another owner; not running native QA'
     key=root/'update-key'; signer=a.sparkle/'bin/sign_update'
     # Exporting a dedicated keychain item could touch the production signer. Use a
-    # fresh CryptoKit key instead, in sign_update's documented private+public format.
+    # fresh CryptoKit key instead, as the 32-byte seed this sign_update accepts.
     generator=root/'key.swift'
-    generator.write_text('import Foundation\nimport CryptoKit\nlet k=Curve25519.Signing.PrivateKey(); let d=k.rawRepresentation+k.publicKey.rawRepresentation\ntry d.base64EncodedString().write(toFile:CommandLine.arguments[1],atomically:true,encoding:.utf8)\nprint(k.publicKey.rawRepresentation.base64EncodedString())\n')
+    generator.write_text('import Foundation\nimport CryptoKit\nlet k=Curve25519.Signing.PrivateKey(); let d=k.rawRepresentation\ntry d.base64EncodedString().write(toFile:CommandLine.arguments[1],atomically:true,encoding:.utf8)\nprint(k.publicKey.rawRepresentation.base64EncodedString())\n')
     public=subprocess.check_output(['swift',generator,key],text=True).strip()
     os.chmod(key,0o600)
     run(['swiftc',source/'tools/update-qa-notify.swift','-o',root/'notify'])
@@ -185,6 +185,8 @@ finally:
     if preference_backup is not None:
         try: quit_app()
         finally:
+            # `defaults import` merges, so clear QA-written keys before restoring.
+            subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             if preference_backup:
                 backup=root/'restore.plist'; backup.write_bytes(preference_backup); run(['defaults','import','org.humanitylabs.wizard.mvp',backup])
             else: subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
