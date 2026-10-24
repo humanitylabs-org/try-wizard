@@ -34,6 +34,14 @@ class StockBuilderFactory(unittest.TestCase):
                 return int(fail)
             wam = types.ModuleType('wam')
             wam.cli = cli
+            # Current main also connects the product runtime before the builder.
+            # Keep that lifecycle boundary isolated without hiding its ordering.
+            def connect(config, action):
+                self.assertIs(config, cfg)
+                self.assertEqual(action, 'connect')
+                events.append('product')
+                return {'ok': True}
+            wam.fresh_agent = types.SimpleNamespace(main=connect)
             wam.builder_bundle = types.SimpleNamespace(main=fresh)
             loader = importlib.machinery.SourceFileLoader('factory_under_test', str(SCRIPT))
             spec = importlib.util.spec_from_loader(loader.name, loader)
