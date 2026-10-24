@@ -98,8 +98,35 @@ def patch_uv():
                 target.write_bytes(data[name]);target.chmod(0o755);patched.append(str(target))
     return patched
 
+def browser_certificates(evidence):
+    rows=json.loads(evidence.read_text())['roots']['data'];found=set();certs=[]
+    for row in rows:
+        fingerprint=hashlib.sha256(ssl.PEM_cert_to_DER_cert(row['pem'])).hexdigest()
+        assert fingerprint==row['sha256'].lower() and fingerprint in BLOCKED
+        assert fingerprint not in found
+        found.add(fingerprint);certs.append((fingerprint,row['pem']))
+    assert found==BLOCKED,'incomplete advisory distrust set'
+    return certs
+
+def patch_browser(evidence):
+    certs=browser_certificates(evidence)
+    modules=[p for root in [Path('/usr/lib'),Path('/lib')] for p in [root/'pkcs11/p11-kit-trust.so',*root.glob('*/pkcs11/p11-kit-trust.so')] if p.is_file()]
+    modules=sorted({p.resolve() for p in modules});assert len(modules)==1,modules
+    module=modules[0];target=module.parent.parent/'libnssckbi.so'
+    # NSS_InitReadWrite silently falls back to no DB on read-only rootfs. A user
+    # ~/.pki/nssdb therefore is NOT sufficient. Chromium loads this system module
+    # even in no-DB mode and honours its explicit CKT_NSS_NOT_TRUSTED records.
+    target.unlink(missing_ok=True);target.symlink_to(module)
+    bundle=Path('/etc/ssl/certs/ca-certificates.crt');assert bundle.is_file()
+    rejected=''.join(subprocess.check_output(['openssl','x509','-addreject','serverAuth','-trustout'],input=pem,text=True) for _,pem in certs)
+    marker='# WIZARD BROWSER DISTRUST\n'
+    bundle.write_text(bundle.read_text().split(marker)[0]+marker+rejected)
+    listed=subprocess.check_output(['trust','list','--filter=blocklist'],text=True)
+    assert listed.count('trust: distrusted')==len(BLOCKED),listed
+    return {'mechanism':'NSS p11-kit explicit serverAuth distrust','module':str(module),'nssModule':str(target),'fingerprints':sorted(f for f,_ in certs),'blocklist':listed}
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--wheel',type=Path,required=True);p.add_argument('--pip-wheel',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--wheel',type=Path,required=True);p.add_argument('--pip-wheel',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--browser-evidence',type=Path);a=p.parse_args()
     assert os.geteuid()==0
     config=Path('/etc/ca-certificates.conf')
     if config.exists():
@@ -121,7 +148,8 @@ def main():
     copies=patch_certifi(a.wheel,ROOTS)
     uv=patch_uv()
     for f in candidates(ROOTS):assert not clean(f.read_bytes())[1],str(f)
+    browser=patch_browser(a.browser_evidence) if a.browser_evidence else None
     a.output.parent.mkdir(parents=True,exist_ok=True)
-    a.output.write_text(json.dumps({'certifiVersion':'2026.10.19','certifiCopies':copies,'removedRoots':removed,'pipRemediation':pip,'uvBinaryCopies':uv},indent=2)+'\n')
+    a.output.write_text(json.dumps({'certifiVersion':'2026.10.19','certifiCopies':copies,'removedRoots':removed,'pipRemediation':pip,'uvBinaryCopies':uv,'browserTrust':browser},indent=2)+'\n')
 
 if __name__=='__main__':main()

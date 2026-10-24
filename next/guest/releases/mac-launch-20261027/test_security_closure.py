@@ -79,6 +79,30 @@ class SecurityTests(unittest.TestCase):
         base=next(t['base'] for t in plan['targets'] if t['key']=='files')
         source=package.recipe(base,{'User':'user'},{'minimal':True},plan)
         self.assertIn('AS security_tools',source);self.assertNotIn('apt-get',source);self.assertNotIn('apk add',source)
+        self.assertNotIn('p11-kit',source);self.assertNotIn('--browser-evidence',source)
+    def test_any_discovered_browser_gets_system_nss_distrust(self):
+        plan=json.loads((HERE/'security-image-plan.json').read_text())
+        for alpine,packages in [(False,'p11-kit p11-kit-modules'),(True,'p11-kit p11-kit-trust')]:
+            source=package.recipe('unit.invalid/not-named-browser@sha256:'+'a'*64,{'User':'1000'}, {'nodeMajor':0,'alpine':alpine,'claude':False,'browser':True},plan)
+            self.assertIn(packages,source);self.assertIn('COPY security-primary-evidence.json',source)
+            self.assertIn('--browser-evidence /opt/wizard-security/security-primary-evidence.json',source)
+            self.assertTrue(source.endswith('USER 1000\n'));self.assertNotIn('ENTRYPOINT',source)
+        subprocess.run(['sh','-n'],input=package.INVENTORY,text=True,check=True)
+        for binary in ['headless-shell','headless_shell','chromium','chromium-browser','google-chrome']:
+            self.assertIn(binary,package.INVENTORY)
+    def test_browser_distrust_validates_real_der_and_complete_advisory_set(self):
+        evidence=HERE/'security-primary-evidence.json'
+        self.assertEqual({f for f,_ in remediate.browser_certificates(evidence)},remediate.BLOCKED)
+        original=json.loads(evidence.read_text())
+        with tempfile.TemporaryDirectory() as t:
+            path=Path(t)/'evidence.json'
+            for change in ['fingerprint','missing','duplicate']:
+                data=json.loads(json.dumps(original))
+                if change=='fingerprint':data['roots']['data'][0]['sha256']='0'*64
+                elif change=='missing':data['roots']['data'].pop()
+                else:data['roots']['data'].append(data['roots']['data'][0])
+                path.write_text(json.dumps(data))
+                with self.assertRaises(AssertionError):remediate.browser_certificates(path)
         self.assertIn('--output /opt/wizard-security/remediation.json',source)
     def test_unknown_minimal_image_is_not_exempted(self):
         with self.assertRaises(AssertionError):package.recipe('unit.invalid/unknown@sha256:'+'f'*64,{}, {'minimal':True},{})

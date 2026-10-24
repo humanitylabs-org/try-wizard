@@ -67,3 +67,33 @@ errors still fail it. Docker Hub returned 429 on Thales during metadata discover
 control-plane registry retrieval verified the pins instead. Parent packaging must
 have working registry access (or wait for the limit/authenticated route), not bypass
 TLS or treat a pull error as security closure.
+
+## Browser trust closure (local Thales proof, not an 04s/05 receipt)
+
+Chromium 155's Chrome Root Store still admitted the eMudhra chains after the OS
+bundle was fixed. `CADistrustedCertificates` policy was ignored by headless-shell
+(`chrome://policy` returned `ERR_INVALID_URL`). A pinned arm64 Chromium 157.0.8103.15
+also admitted the bad chain. A per-user NSS distrust database worked only on a
+writable rootfs and silently failed under the real read-only container flags.
+
+The packaging inventory now detects Chromium binaries regardless of target name.
+For those images it installs the system **p11-kit NSS trust module**, replaces
+`libnssckbi.so` with that module, and writes explicit OpenSSL `serverAuth` rejection
+records for all four advisory certificates. Actual DER SHA-256 values must match
+the complete fixed `BLOCKED` set; no fingerprint, certificate or issuer is guessed.
+Chromium honours these NSS negative-trust records even without a writable user DB.
+No verification-disabling flags, host blocklists, custom launcher or probe relaxation
+is used. Existing image entrypoint, command, user and Chromium version are preserved.
+
+The actual generated Dockerfile was built locally on Thales from the original
+arm64 Chromium 155.0.8059.40 base. With read-only rootfs, all capabilities dropped,
+no-new-privileges and a writable `/tmp`, the unchanged DevTools-pipe probe accepted
+the GOOD host and rejected **all 14 BAD hosts** with
+`net::ERR_CERT_AUTHORITY_INVALID`. Python's system context also accepted its healthy
+controls and rejected all 14 BAD chains. `browser-trust-evidence.json` records the
+actual local image identity, Dockerfile/probe hashes, runtime flags and probe rows.
+
+This local build/probe supersedes the earlier “no image build” statement for browser
+development only. It is not a packaging receipt or a release publication. The parent
+must resubmit `04s-07-browser`, then run the existing full 05 gate; `complete` remains
+false until that gate genuinely passes.

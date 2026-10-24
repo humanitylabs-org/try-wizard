@@ -1,0 +1,213 @@
+{
+  "approach": "System NSS p11-kit trust module plus explicit serverAuth rejection for the four advisory DER-verified certificates",
+  "base": "mirror.gcr.io/chromedp/headless-shell@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+  "chromiumVersion": "155.0.8059.40",
+  "localThalesImageId": "sha256:a6b567c33bdf56ef66b0ab5c47398f0c61e1005fb42e5c090d23439388bb211b",
+  "architecture": "arm64",
+  "inheritedConfiguration": {
+    "Entrypoint": [
+      "/headless-shell/run.sh"
+    ],
+    "Cmd": null,
+    "User": "0"
+  },
+  "probeUnchanged": true,
+  "probeSha256": "d74ecc1b9acf04de6c27e1940f300d915197c9dd24379d1fe0e0651fac2e4108",
+  "dockerfileSha256": "c9eaa15ed4f83ec70fc741cfbe78c79e21a37dcf291d6d14e832da701b89bd8a",
+  "runtimeFlags": [
+    "--read-only",
+    "--tmpfs /tmp:rw,nosuid,nodev,size=256m",
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges"
+  ],
+  "browserGoodCount": 1,
+  "browserBadCount": 14,
+  "checks": [
+    {
+      "python": "/usr/bin/python3",
+      "version": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+      "contexts": [
+        "system"
+      ],
+      "checks": [
+        {
+          "context": "system",
+          "url": "https://example.com/",
+          "certificateRejected": false
+        },
+        {
+          "context": "system",
+          "url": "https://probe-emudhra.we-have-a-problem.com/",
+          "certificateRejected": false
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ov-g3b-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ev-g3b-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3c-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ov-g3c-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ev-g3c-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ov-g3b-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ev-g3b-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3c-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ov-g3c-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://ev-g3c-aaa-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3b-noct-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        },
+        {
+          "context": "system",
+          "url": "https://dv-g3b-aaa-noct-emudhra.we-have-a-problem.com/",
+          "certificateRejected": true
+        }
+      ]
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "probe-emudhra.we-have-a-problem.com",
+      "certificateRejected": false,
+      "netError": ""
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3b-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ov-g3b-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ev-g3b-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3c-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ov-g3c-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ev-g3c-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3b-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ov-g3b-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ev-g3b-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3c-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ov-g3c-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "ev-g3c-aaa-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3b-noct-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    },
+    {
+      "browser": "/headless-shell/headless-shell",
+      "host": "dv-g3b-aaa-noct-emudhra.we-have-a-problem.com",
+      "certificateRejected": true,
+      "netError": "net::ERR_CERT_AUTHORITY_INVALID"
+    }
+  ],
+  "notPublished": true,
+  "notPackagingReceipt": true,
+  "unsuccessfulAlternatives": [
+    "CADistrustedCertificates policy: headless-shell chrome://policy ERR_INVALID_URL; BAD chain still accepted",
+    "Pinned arm64 Chromium 157.0.8103.15: BAD chain still accepted",
+    "NSS user DB negative trust works writable but silently fails read-only; not used"
+  ]
+}
