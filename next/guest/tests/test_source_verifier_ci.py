@@ -14,6 +14,10 @@ SCRIPT = VERIFIER['linux_script']()
 
 
 class SourceVerifierCI(unittest.TestCase):
+    def test_managed_interpreter_regression_runs_on_selected_native_source(self):
+        source = (RELEASE / 'verify-sources-v5.py').read_text()
+        self.assertIn("('managed-interpreters',['-m','unittest','discover','-s','next/guest/tests','-p','test_managed_interpreters.py'])", source)
+
     def test_rendered_shell_is_valid(self):
         self.assertIsNotNone(shutil.which('bash'))
         subprocess.run(['bash', '-n'], input=SCRIPT, text=True, check=True)

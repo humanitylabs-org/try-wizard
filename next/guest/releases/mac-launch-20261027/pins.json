@@ -12,8 +12,8 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
-      "ref": "release/mac-guest-launch-20261027"
+      "commit": "a0b042f092284da3e41903377d473e6842dafaf6",
+      "ref": "fix/mac-managed-interpreter-discovery"
     },
     "ux": {
       "repo": "humanitylabs-org/wizard-ux",
@@ -244,7 +244,7 @@
     }
   },
   "finalPins": {
-    "native": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+    "native": "a0b042f092284da3e41903377d473e6842dafaf6",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
     "wam": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "0de7c42db87510a8ef6e42e4e34034c2ae1916b71b1bc94f5c345286a1102d88",
+      "sha256": "88ec9355b0dcc11b7084e8e240ab9b8dee3b3193234d8362758d0d9ff0bffcf9",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
