@@ -33,14 +33,15 @@ def python_checks():
         if key not in seen:ctxs.append((str(f),ssl.create_default_context(cafile=str(f))));seen.add(key)
     def request(row):
         name,ctx,url,bad=row
-        # Retry only transport failures (EOF, bad record MAC, resets, timeouts); an accepted chain fails at once.
-        for attempt in range(3):
+        # Retry only transport failures (EOF, bad record MAC, record layer, resets, timeouts) on good and bad
+        # hosts alike; an accepted bad chain or a rejected good chain is a verdict and fails at once.
+        for attempt in range(5):
             try:return attempt_request(name,ctx,url,bad)
             except AssertionError as e:
                 detail=e.args[0] if e.args else None
-                transient=bad and isinstance(detail,tuple) and str(detail[-1]).startswith('<urlopen error') and 'CERTIFICATE_VERIFY_FAILED' not in str(detail[-1])
-                if not transient or attempt==2:raise
-                time.sleep(2)
+                transient=isinstance(detail,tuple) and str(detail[-1]).startswith('<urlopen error') and 'CERTIFICATE_VERIFY_FAILED' not in str(detail[-1])
+                if not transient or attempt==4:raise
+                time.sleep(2**(attempt+1))
     def attempt_request(name,ctx,url,bad):
         try:
             with urllib.request.urlopen(url,context=ctx,timeout=20) as r:
