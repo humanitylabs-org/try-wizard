@@ -38,6 +38,8 @@ def main():
     pins=json.loads((ROOT/'preparation/pins.json').read_text());release=json.loads((WORK/'runtime-release.json').read_text())
     release_dir=Path('/var/lib/wizard/frozen-release');release_dir.mkdir(parents=True,exist_ok=True)
     target=release_dir/(release['version']+'.json');shutil.copy2(WORK/'runtime-release.json',target);assert sha(target)==sha(WORK/'runtime-release.json')
+    # get.sh drops to the wizard user before fetching file:// releases; the manifest is public pin data.
+    release_dir.chmod(0o755);target.chmod(0o644)
     # Debian workaround from the primary advisory; do not use the retained stale roots to bootstrap HTTPS.
     config=Path('/etc/ca-certificates.conf')
     roots={'mozilla/emSign_ECC_Root_CA_-_G3.crt','mozilla/Comodo_AAA_Services_root.crt'}

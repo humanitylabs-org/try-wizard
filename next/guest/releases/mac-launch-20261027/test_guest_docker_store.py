@@ -74,4 +74,11 @@ class StoreTests(unittest.TestCase):
     def test_seal_only_recreated_container_configs(self):
         source=(HERE/'seal-factory.py').read_text();self.assertIn('for identity in sorted(active)',source);self.assertIn('docker-seal-resolution.json',source)
 
+class FrozenReleaseTests(unittest.TestCase):
+    def test_manifest_is_world_readable_for_the_unprivileged_installer(self):
+        src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
+        self.assertIn("release_dir.chmod(0o755);target.chmod(0o644)",src)
+        self.assertLess(src.index("target.chmod(0o644)"),src.index("run(['bash',installer]"))
+
 if __name__=='__main__':unittest.main()
+
