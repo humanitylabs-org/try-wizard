@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "queueSha256": "d8d4f8aab1bcf9a26238a27f4892560ddb2f8d2709bac1a3f0c76bf08d90a53b",
-  "sourceSelectionSha256": "904fd493788fec4181680cbf6f28c059366158d56244f3e09247efe6a810f9a8",
+  "sourceSelectionSha256": "f54ee0a8e8e4bb4fe2bdc5be352cee9bb51c71fdee90f3cac3ba583eb906c793",
   "entryCount": 84,
   "counts": {
     "source-carried": 61,
@@ -71,7 +71,7 @@
       "components": [
         {
           "component": "wam",
-          "pinnedCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+          "pinnedCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
           "ancestry": [
             {
               "queueReference": "b51e7b42",
@@ -112,7 +112,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+          "pinnedCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
           "ancestry": [
             {
               "queueReference": "850cfe32",
@@ -315,7 +315,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+          "pinnedCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
           "ancestry": [
             {
               "queueReference": "850cfe32",
@@ -1326,7 +1326,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+          "pinnedCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
           "ancestry": [
             {
               "queueReference": "cd3d0593",
@@ -1769,7 +1769,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+          "pinnedCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
           "ancestry": [
             {
               "queueReference": "850cfe32",

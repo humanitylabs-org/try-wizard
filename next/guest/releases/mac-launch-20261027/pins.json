@@ -77,7 +77,7 @@
     "wam-reconciled": {
       "repo": "humanitylabs-org/wizard-app-manager",
       "ref": "fix/mac-factory-private-data-owner",
-      "commit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+      "commit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "ux-reconciled": {
@@ -247,7 +247,7 @@
     "native": "43c7d9b4677b3f54a17e5ca3ffb68ec549acbf6b",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
-    "wam": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+    "wam": "84bb2da30660a311fb39fab375b5e22fbbd085df",
     "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "01834ce2955f7223161f381d473a38fd78b1f438feaa672dda2d64a226bdbe9e",
+      "sha256": "c39636abeb169d057caa3cc76ef64ca9983156f22bbf6b094dff3a91154404eb",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
@@ -281,7 +281,7 @@
     {
       "id": "wam-release",
       "status": "source-candidate-light-verified",
-      "detail": "WAM c4fd55ed2cc280a3b29184ef436b9a15094fd928 prepares only the root of a non-root main service private data bind before startup, using existing confinement; no recursive chown, shared-tree takeover, credential, app privilege or trust-policy exemption. Targeted Thales unit, hook and real Recorder image regressions passed; exact-pin full source/image/security/factory admission remains required."
+      "detail": "WAM 84bb2da30660a311fb39fab375b5e22fbbd085df prepares only the root of a non-root main service private data bind before startup, using existing confinement; no recursive chown, shared-tree takeover, credential, app privilege or trust-policy exemption. Targeted Thales unit, hook and real Recorder image regressions passed; exact-pin full source/image/security/factory admission remains required."
     },
     {
       "id": "phone-source",
@@ -367,7 +367,7 @@
     "ux": "ux-reconciled"
   },
   "osInstaller": {
-    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/c4fd55ed2cc280a3b29184ef436b9a15094fd928/get.sh",
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/84bb2da30660a311fb39fab375b5e22fbbd085df/get.sh",
     "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
     "filename": "os.sh"
   },
@@ -390,7 +390,7 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "0676f27f2ae2ce5b6ad433b65ef7af1881e70cdbaa1d1c8ec3b98ae7da5c1c7d",
+    "sha256": "4110e3e92cdc2381f6124f294d29c3bf8fa5dcbc6cc23e687333661da67c80d0",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
   },
   "assembly": {
@@ -419,7 +419,7 @@
     "images": {
       "wam": {
         "ref": "ghcr.io/humanitylabs-org/wizard-app-manager",
-        "sourceCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+        "sourceCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
         "digest": "TODO_BUILD_OUTPUT_WAM"
       },
       "service": {

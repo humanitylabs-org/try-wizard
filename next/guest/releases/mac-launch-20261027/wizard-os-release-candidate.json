@@ -17,7 +17,7 @@
   "components": {
     "wizard-app-manager": {
       "repo": "humanitylabs-org/wizard-app-manager",
-      "commit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+      "commit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
       "review": "draft candidate; not promoted"
     },
     "wizard-troubleshooter": {
@@ -169,7 +169,7 @@
   "candidateImagePolicy": {
     "wizard-app-manager": {
       "mode": "build-from-pinned-source-with-trust-remediation",
-      "sourceCommit": "c4fd55ed2cc280a3b29184ef436b9a15094fd928",
+      "sourceCommit": "84bb2da30660a311fb39fab375b5e22fbbd085df",
       "digest": null
     },
     "wizard-agent-service": {
@@ -189,7 +189,7 @@
     "mustEmitValidatedRuntimeReleaseBeforeBootstrap": true,
     "getShInput": "generated get.sh release record with built candidate image digests; not this source RC",
     "installer": {
-      "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/c4fd55ed2cc280a3b29184ef436b9a15094fd928/get.sh",
+      "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/84bb2da30660a311fb39fab375b5e22fbbd085df/get.sh",
       "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
       "filename": "os.sh"
     },
