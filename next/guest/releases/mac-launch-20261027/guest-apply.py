@@ -94,6 +94,10 @@ def main():
     env.update(WIZARD_RELEASE=release['version'],WIZARD_RELEASE_BASE='file://'+str(release_dir),WIZARD_STRICT='1',WIZARD_MODE='fresh',WIZARD_PRIVATE_ACCESS='tailscale')
     for component,key in [('wizard-app-manager','WAM_IMAGE'),('wizard-ux','WIZARD_UX_IMAGE'),('wizard-agent-service','WIZARD_AGENT_SERVICE_IMAGE')]:
         item=release['images'][component];env[key]=item['ref']+'@'+item['digest']
+    # The retained base's store tree was written by root (Runtipi's own clone); the pinned WAM runs as
+    # wizard and stages private app definitions there. Hand over only store definitions, never app data.
+    store_apps=Path('/home/wizard/runtipi/repos/wizardapps/apps')
+    if store_apps.is_dir():run(['chown','-R','--no-dereference','wizard:wizard',store_apps])
     reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'),evidence=WORK/'sealed-wam-drift.json')
     run(['bash',installer],env=env,stdin=subprocess.DEVNULL,timeout=3600)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']

@@ -118,5 +118,12 @@ class SealStampTests(unittest.TestCase):
         self.assertLess(src.index("'App Manager tracked tree differs from the pinned commit'"),src.index("SOURCE_COMMIT').write_text"))
         self.assertLess(src.index("'App Manager HEAD is not the pinned commit'"),src.index("shutil.rmtree('/home/wizard/wizard-app-manager/.git')"))
 
+class StoreDefinitionOwnershipTests(unittest.TestCase):
+    def test_only_store_definitions_are_handed_to_wizard_before_the_installer(self):
+        src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
+        self.assertIn("store_apps=Path('/home/wizard/runtipi/repos/wizardapps/apps')",src)
+        self.assertLess(src.index("'wizard:wizard',store_apps"),src.index("run(['bash',installer]"))
+        self.assertNotIn("app-data/wizardapps'),",src.split("store_apps=")[1].split("run(['bash',installer]")[0])
+
 if __name__=='__main__':unittest.main()
 
