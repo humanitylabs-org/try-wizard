@@ -74,6 +74,10 @@ def main():
     run(['apt-get','install','-y','--no-install-recommends','ca-certificates','curl','python3-yaml'],timeout=600)
     plan=json.loads((ROOT/'preparation/security-image-plan.json').read_text());assert plan['complete'] is True
     assert json.loads((ROOT/'security-preflight.json').read_text())['allGuestImagesEnumerated'] is True
+    import factory_migrations as migration
+    run(['systemctl','disable','--now','wizard-voice.service'])  # retire retained Parakeet; selected transcriber is Speaches
+    migration.empty_legacy_state(Path('/home/wizard/runtipi/app-data/wizardapps/wizard-shell/data'))
+    migration.clean_overlays(Path('/home/wizard/runtipi'),WORK)
     store.enable(WORK)
     for selection in plan['targets']:
         row=json.loads((ROOT/selection['receipt']).read_text())
@@ -89,9 +93,26 @@ def main():
     pip_wheel=ROOT/'security-packaging/helper-python/context/pip.whl'
     assert sha(pip_wheel)==plan['upstreamInputs']['pip']['sha256']
     run(['python3',ROOT/'preparation/remediate-trust.py','--wheel',wheel,'--pip-wheel',pip_wheel,'--output',WORK/'host-remediation.json'],timeout=600)
+    configs=Path('/home/wizard/runtipi/user-config/wizardapps');configs.mkdir(parents=True,exist_ok=True)
+    run(['chown','-R','--no-dereference','wizard:wizard',configs])
     run(['python3',ROOT/'preparation/guest-security-apply.py','--prepare'],timeout=1800)
     store.bootstrap(WORK)
     store.verify(WORK,receipt='docker-bootstrap-resolution.json')
+    migration.prepare(ROOT,Path('/home/wizard/runtipi'),WORK,run)
+    helper=Path('/usr/local/lib/wizard/factory-host-trust.py');helper.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copy2(ROOT/'preparation/factory_migrations.py',helper);helper.chmod(0o755)
+    drop=Path('/etc/systemd/system/wizard-firstboot.service.d/30-trust-local-host.conf');drop.parent.mkdir(parents=True,exist_ok=True)
+    drop.write_text('[Unit]\nBefore=docker.service\n[Service]\nExecStartPost=/usr/bin/python3 '+str(helper)+'\n')
+    run(['python3',helper]);run(['systemctl','daemon-reload'])
+    bundle=ROOT/'source-bundles/recorder.bundle'
+    expected=json.loads((ROOT/'staged-files.json').read_text())['files']['source-bundles/recorder.bundle']
+    assert sha(bundle)==expected, 'frozen recorder bundle changed'
+    frozen=Path('/var/lib/wizard/frozen-recorder.git');assert not frozen.exists()
+    run(['git','clone','--bare',bundle,frozen])
+    assert run(['git','-C',frozen,'cat-file','-t',release['default_apps']['recorder']['commit']]).strip()=='commit'
+    run(['chown','-R','--no-dereference','wizard:wizard',frozen])
+    rewrite='url.file://'+str(frozen)+'.insteadOf'
+    run(['sudo','-u','wizard','git','config','--global',rewrite,'https://github.com/humanitylabs-org/wizard-recorder'])
     installer=ROOT/'final/wam/get.sh';assert sha(installer)==pins['osInstaller']['sha256']
     env={k:v for k,v in os.environ.items() if k not in ['WAM_REF','WAM_IMAGE','WIZARD_SHELL_IMAGE','WIZARD_UX_IMAGE','WIZARD_AGENT_SERVICE_IMAGE']}
     env.update(WIZARD_RELEASE=release['version'],WIZARD_RELEASE_BASE='file://'+str(release_dir),WIZARD_STRICT='1',WIZARD_MODE='fresh',WIZARD_PRIVATE_ACCESS='tailscale')
@@ -102,7 +123,12 @@ def main():
     store_apps=Path('/home/wizard/runtipi/repos/wizardapps/apps')
     if store_apps.is_dir():run(['chown','-R','--no-dereference','wizard:wizard',store_apps])
     reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'),evidence=WORK/'sealed-wam-drift.json')
-    run(['bash',installer],stream=True,env=env,stdin=subprocess.DEVNULL,timeout=3600)
+    env.update(WIZARD_GITHUB='0',WIZARD_TAILSCALE_WAIT='0',WIZARD_APP_OWNER_LOGINS='owner@wizard.local',WIZARD_APP_MANAGER_HOSTS='127.0.0.1:48023,localhost:48023')
+    forwarded=[k+'='+env[k] for k in sorted(env) if k.startswith(('WIZARD_','WAM_'))]
+    # Run the frozen bytes directly as wizard: root get.sh re-execs a network installer
+    # and only forwards a subset of env (dropping the factory owner route).
+    run(['sudo','-iu','wizard','env',*forwarded,'bash',installer],stream=True,stdin=subprocess.DEVNULL,timeout=3600)
+    run(['sudo','-u','wizard','git','config','--global','--unset-all',rewrite]);shutil.rmtree(frozen)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']
     installed=json.loads(Path('/home/wizard/.wizard-os/release-pins.json').read_text());assert installed==release
     # Every default row is source-pinned in the release; get.sh WIZARD_STRICT reads actual installs back.
@@ -143,6 +169,10 @@ def main():
     # restart through WAM, prove actual IDs, then remove every old unused local image/cache from this clone.
     run(['python3',ROOT/'preparation/guest-security-apply.py','--finish'],timeout=3600)
     store.verify(WORK,store.inherited(WORK))
+    connection=json.loads(run(['sudo','-iu','wizard','wam','fresh-agent','status']))
+    assert connection['ok'] is True, 'fresh-agent connection failed: '+json.dumps(connection['checks'])
+    (WORK/'fresh-agent-status.json').write_text(json.dumps(connection,indent=2)+'\n')
+    run(['sudo','-iu','wizard','wam','doctor'],stream=True)
     # Mandatory on host and EVERY running container's actual mounted trust stores, not fresh docker runs.
     run(['python3',ROOT/'preparation/security-closure.py','--guest','--output',WORK/'security-guest.json'],timeout=3600)
     pristine();(WORK/'applied.json').write_text(json.dumps({'releaseSha256':sha(target),'sources':pins['finalPins'],'pristine':True,'securityClosure':True,'publishing':False},indent=2)+'\n')

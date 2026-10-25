@@ -78,7 +78,7 @@ class FrozenReleaseTests(unittest.TestCase):
     def test_manifest_is_world_readable_for_the_unprivileged_installer(self):
         src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
         self.assertIn("release_dir.chmod(0o755);target.chmod(0o644)",src)
-        self.assertLess(src.index("target.chmod(0o644)"),src.index("run(['bash',installer]"))
+        self.assertLess(src.index("target.chmod(0o644)"),src.index("run(['sudo','-iu','wizard','env',*forwarded,'bash',installer]"))
 
 class SealedWamCheckoutTests(unittest.TestCase):
     def _module(self):
@@ -110,7 +110,7 @@ class SealedWamCheckoutTests(unittest.TestCase):
             self.assertIn(' M install.sh',json.loads(ev.read_text())['trackedDrift'])
     def test_runs_before_the_installer(self):
         src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
-        self.assertLess(src.index("reattach_sealed_wam_checkout('/home/wizard"),src.index("run(['bash',installer]"))
+        self.assertLess(src.index("reattach_sealed_wam_checkout('/home/wizard"),src.index("run(['sudo','-iu','wizard','env',*forwarded,'bash',installer]"))
 
 class SealStampTests(unittest.TestCase):
     def test_seal_proves_the_wam_tree_before_stamping_source_commit(self):
@@ -122,13 +122,13 @@ class StoreDefinitionOwnershipTests(unittest.TestCase):
     def test_only_store_definitions_are_handed_to_wizard_before_the_installer(self):
         src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
         self.assertIn("store_apps=Path('/home/wizard/runtipi/repos/wizardapps/apps')",src)
-        self.assertLess(src.index("'wizard:wizard',store_apps"),src.index("run(['bash',installer]"))
-        self.assertNotIn("app-data/wizardapps'),",src.split("store_apps=")[1].split("run(['bash',installer]")[0])
+        self.assertLess(src.index("'wizard:wizard',store_apps"),src.index("run(['sudo','-iu','wizard','env',*forwarded,'bash',installer]"))
+        self.assertNotIn("app-data/wizardapps'),",src.split("store_apps=")[1].split("run(['sudo','-iu','wizard','env',*forwarded,'bash',installer]")[0])
 
 class InstallerLogTests(unittest.TestCase):
     def test_installer_output_streams_into_the_apply_log(self):
         src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
-        self.assertIn("run(['bash',installer],stream=True,",src)
+        self.assertIn("run(['sudo','-iu','wizard','env',*forwarded,'bash',installer],stream=True,",src)
 
 if __name__=='__main__':unittest.main()
 

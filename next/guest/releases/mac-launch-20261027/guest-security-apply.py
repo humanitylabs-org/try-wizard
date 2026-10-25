@@ -30,7 +30,10 @@ def merge(path,updates):
     assert not path.is_symlink()
     doc=yaml.load(path.read_text(),Loader=Loader) if path.exists() else {};doc=doc or {}
     for service,image in updates.items():doc.setdefault('services',{}).setdefault(service,{}).update(image=image,pull_policy='if_not_present')
-    path.parent.mkdir(parents=True,exist_ok=True);path.write_text(yaml.dump(doc,Dumper=Dumper,sort_keys=False));os.chown(path,1000,1000)
+    owned = path.parent.name in {'hermes-agent','wizard-ux','wizard-agent-service'}
+    if owned and path.exists():assert path.read_text().startswith('# Written by wam'), 'foreign fresh overlay refused'
+    marker = '# Written by wam (fresh mode): factory-selected immutable image bindings' if owned else ''
+    path.parent.mkdir(parents=True,exist_ok=True);path.write_text((marker+'\n' if marker else '')+yaml.dump(doc,Dumper=Dumper,sort_keys=False));os.chown(path.parent,1000,1000);os.chown(path,1000,1000)
     read=yaml.load(path.read_text(),Loader=Loader)
     assert all(read['services'][s]['image']==v for s,v in updates.items())
     return {'path':str(path),'images':updates}
@@ -41,10 +44,9 @@ def prepare(plan,managed=None):
         image=plan['resolutions'][b['target']]['image']
         if managed and b['service']=='hermes-agent-engine':image=managed
         byapp.setdefault(b['app'],{})[b['service']]=image
-    # The retained shell predates the default-app bindings; replace its local-only tag too.
-    shells=[c for c in store.inherited(ROOT/'assembly-work') if (c['Config'].get('Labels') or {}).get('com.docker.compose.service')=='wizard-shell']
-    assert len(shells)==1,'retained shell service missing/ambiguous'
-    byapp.setdefault('wizard-shell',{})['wizard-shell']=plan['resolutions']['ux']['image']
+    # The combined shell is retired through the lifecycle API, never rebound to a UX-only image.
+    assert (ROOT/'assembly-work/factory-overlays.json').is_file(), 'factory migration gate missing'
+    assert 'wizard-shell' not in byapp, 'legacy shell unexpectedly selected'
     writes=[merge(RT/'user-config/wizardapps'/app/'docker-compose.yml',updates) for app,updates in byapp.items()]
     # Read service names from actual retained compose labels, matched by immutable image ID.
     containers=store.containers() or store.inherited(ROOT/'assembly-work');infra={}
@@ -68,9 +70,9 @@ def finish(plan):
     writes=prepare(plan,managed)
     bindings=json.loads((PREP/'security-compose-bindings.json').read_text())['bindings']
     before=json.loads(run(['docker','inspect',*run(['docker','ps','-q']).split()]))
-    running_services={c['Config'].get('Labels',{}).get('com.docker.compose.service') for c in before+store.inherited(ROOT/'assembly-work')}
+    running_services={c['Config'].get('Labels',{}).get('com.docker.compose.service') for c in before}
+    assert 'wizard-shell' not in running_services, 'retired combined shell still running'
     apps={b['app'] for b in bindings if b['service'] in running_services}
-    if 'wizard-shell' in running_services:apps.add('wizard-shell')
     for app in sorted(apps):
         run(['sudo','-iu','wizard','wam','app','restart',app],timeout=900)
     current=json.loads(run(['docker','inspect',*run(['docker','ps','-q']).split()]))

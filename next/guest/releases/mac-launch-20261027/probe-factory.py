@@ -135,6 +135,12 @@ def execute(root, workaround):
         receipt.update(phase='seal-and-offline-identity-passed', sealPassed=True, offlineIdentityPassed=True)
     except Exception as error:
         receipt.update(phase='failed', error=type(error).__name__ + ': ' + str(error))
+        if proc and proc.poll() is None:
+            try:
+                assembly.guest("umask 077; { docker ps -a --no-trunc; for service in runtipi transcriber transcriber-engine hermes-agent-engine wizard-agent-service wizard-ux; do for cid in $(docker ps -aq --filter label=com.docker.compose.service=$service); do echo SERVICE=$service CID=$cid; docker inspect --format '{{json .State}}' $cid; docker logs --tail 200 $cid 2>&1; done; done; journalctl -u wizard-voice --no-pager -n 80; } > /mnt/launch/assembly-work/failure-runtime.log 2>&1", 120)
+                receipt['failureRuntimeEvidence'] = 'failure-runtime.log'
+            except (OSError, RuntimeError) as evidence_error:
+                receipt['failureRuntimeEvidenceError'] = str(evidence_error)
         raise
     finally:
         if proc and proc.poll() is None:

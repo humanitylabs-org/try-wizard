@@ -82,6 +82,10 @@ def verify(work,rows=None,receipt='docker-image-resolution.json'):
     """Resolve effective compose and every container's ref/ID, including stopped containers."""
     assert_store();current=containers();assert current,'no recreated factory containers'
     refs={};errors=[]
+    if (work/'factory-migrations.json').is_file():
+        assert json.loads((work/'factory-migrations.json').read_text())['legacyUninstalled'] is True
+        assert not any((c['Config'].get('Labels') or {}).get('com.docker.compose.service')=='wizard-shell' for c in current),'retired shell container present'
+        rows=[c for c in (rows or []) if (c['Config'].get('Labels') or {}).get('com.docker.compose.service')!='wizard-shell']
     projects=compose_projects(current+(rows or []))
     for p in projects:
         for ref in run([*compose_argv(p),'config','--images'],cwd=p['directory']).split():refs.setdefault(ref,set()).add('compose:'+p['name'])

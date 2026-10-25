@@ -92,9 +92,12 @@ class RecorderPackagingTests(unittest.TestCase):
         image='ghcr.io/humanitylabs-org/wizard-mac-security-recorder@sha256:'+'a'*64
         plan['resolutions']={t['key']:{'image':image} for t in plan['targets']}
         inherited=[{'Config':{'Labels':{'com.docker.compose.service':service}}} for service in ['wizard-shell','runtipi']]
-        with patch.object(apply,'PREP',HERE),patch.object(apply.store,'containers',return_value=[]),patch.object(apply.store,'inherited',return_value=inherited),patch.object(apply,'merge',side_effect=lambda path,updates:{'path':str(path),'images':updates}):
+        with tempfile.TemporaryDirectory() as td,patch.object(apply,'ROOT',Path(td)),patch.object(apply,'PREP',HERE),patch.object(apply.store,'containers',return_value=[]),patch.object(apply.store,'inherited',return_value=inherited),patch.object(apply,'merge',side_effect=lambda path,updates:{'path':str(path),'images':updates}):
+            root=Path(td)
             # No retained infrastructure containers in this synthetic fixture; test only app writes.
             plan['targets']=[t for t in plan['targets'] if t['key'] not in {'postgres','rabbitmq','traefik'}]
+            (root/'assembly-work').mkdir(exist_ok=True)
+            (root/'assembly-work/factory-overlays.json').write_text(json.dumps({'removed':[]}))
             writes=apply.prepare(plan)
         recorder=next(w for w in writes if '/wizard-recorder/' in w['path'])
         self.assertEqual(recorder['images'],{'wizard-recorder':image})

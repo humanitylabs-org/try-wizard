@@ -30,7 +30,7 @@ for identity in sorted(active):
 # Newly-added runtime stores/tokens must be recipient-owned, empty in the factory.
 for p in [OS/'runtime-secrets',OS/'agents',S/'wizard-os/app-tokens',S/'wizard-os/agents',S/'upload-staging',Path('/home/wizard/.wizard-os/agent-ssh'),Path('/home/wizard/.ssh'),H/'.ssh-vm',H/'backups',Path('/var/lib/wizard/patches')]:
  if p.exists():shutil.rmtree(p)
-for p in [S/'wizard-os/app-bindings.json',S/'wizard-os/agent-grants.json',S/'uploads.sqlite3',S/'uploads.sqlite3-wal',S/'uploads.sqlite3-shm',S/'user-files.json',Path('/var/lib/wizard/portrait'),Path('/var/lib/wizard/voice.json'),Path('/home/wizard/.wizard-os/private-access.json'),Path('/var/lib/dbus/machine-id'),Path('/home/wizard/.bash_history'),Path('/root/.bash_history')]:p.unlink(missing_ok=True)
+for p in [H/'.ssh/known_hosts',S/'wizard-os/app-bindings.json',S/'wizard-os/agent-grants.json',S/'uploads.sqlite3',S/'uploads.sqlite3-wal',S/'uploads.sqlite3-shm',S/'user-files.json',Path('/var/lib/wizard/portrait'),Path('/var/lib/wizard/voice.json'),Path('/home/wizard/.wizard-os/private-access.json'),Path('/var/lib/dbus/machine-id'),Path('/home/wizard/.bash_history'),Path('/root/.bash_history')]:p.unlink(missing_ok=True)
 for p in Path('/etc/ssh').glob('ssh_host_*'):p.unlink()
 for p in Path('/var/lib/tailscale').glob('*.state'):p.unlink()
 Path('/etc/machine-id').write_text('')
