@@ -17,6 +17,10 @@ rm -rf "$OUT/Wizard.app" "$OUT/obj"; mkdir -p "$OUT/obj"
 
 TARGET="arm64-apple-macos14.0"
 SWIFTC=(xcrun swiftc -O -target "$TARGET" -swift-version 5)
+# This flag is never enabled for a release. It admits the disposable loopback
+# transport and native update fault-injection controls, not production defaults.
+if [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]]; then SWIFTC+=(-D WIZARD_UPDATE_QA); fi
+export WIZARD_UPDATE_QA
 
 APP=$OUT/Wizard.app
 HOST=$APP/Contents/Library/LoginItems/"Wizard Host.app"
@@ -59,8 +63,8 @@ import hashlib,json,os,pathlib,plistlib,struct
 a=pathlib.Path(os.environ['APP']); p=a/'Contents/Info.plist'
 import urllib.parse
 feed=urllib.parse.urlsplit(os.environ['SPARKLE_FEED'])
-assert feed.scheme=='https' or (feed.scheme=='http' and feed.hostname in ('127.0.0.1','::1','localhost')), 'Only HTTPS distribution or loopback developer feeds are allowed'
-d=plistlib.loads(p.read_bytes()); d.update(SUFeedURL=os.environ['SPARKLE_FEED'],SUPublicEDKey=os.environ['SPARKLE_PUBLIC_KEY'],SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUSendProfileInfo=False,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUUpdateCheckInterval=3600)
+assert feed.scheme=='https' or (os.environ.get('WIZARD_UPDATE_QA')=='1' and feed.scheme=='http' and feed.hostname in ('127.0.0.1','::1','localhost')), 'Only HTTPS distribution (or compile-time QA loopback) feeds are allowed'
+d=plistlib.loads(p.read_bytes()); d.update(SUFeedURL=os.environ['SPARKLE_FEED'],SUPublicEDKey=os.environ['SPARKLE_PUBLIC_KEY'],SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUAllowsAutomaticUpdates=False,SUSendProfileInfo=False,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUUpdateCheckInterval=3600)
 p.write_bytes(plistlib.dumps(d))
 files=['Contents/MacOS/Wizard','Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host']
 guest=os.environ.get('GUEST_UPDATE_PAYLOAD')

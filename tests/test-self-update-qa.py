@@ -21,6 +21,42 @@ def harness_functions():
     return namespace
 
 
+class AdmissionTests(unittest.TestCase):
+    def test_source_identity_records_actual_clean_head_and_refuses_dirty_or_mismatch(self):
+        with tempfile.TemporaryDirectory(prefix='self-update-source.') as tmp:
+            repo = Path(tmp)
+            subprocess.run(['git','init','-q',str(repo)],check=True)
+            subprocess.run(['git','-C',tmp,'config','core.hooksPath','/dev/null'],check=True)
+            (repo/'source.txt').write_text('pinned source\n')
+            subprocess.run(['git','-C',tmp,'add','.'],check=True)
+            subprocess.run(['git','-C',tmp,'-c','user.name=QA','-c','user.email=qa@example.invalid',
+                            'commit','-qm','fixture'],check=True)
+            head = subprocess.check_output(['git','-C',tmp,'rev-parse','HEAD'],text=True).strip()
+            identify = harness_functions()['source_identity']
+            self.assertEqual(identify(repo,head),{'head':head,'statusPorcelain':''})
+            with self.assertRaisesRegex(AssertionError,'head mismatch'):
+                identify(repo,'0'*40)
+            (repo/'source.txt').write_text('dirty\n')
+            with self.assertRaisesRegex(AssertionError,'clean source tree'):
+                identify(repo,head)
+            subprocess.run(['git','-C',tmp,'checkout','--','source.txt'],check=True)
+            (repo/'untracked.txt').write_text('untracked\n')
+            with self.assertRaisesRegex(AssertionError,'untracked.txt'):
+                identify(repo,head)
+
+    def test_copied_progress_helper_requires_exact_host_bundle_argument(self):
+        ns = harness_functions()
+        bundle = Path('/qa space/Wizard.app')
+        text = '\n'.join([
+            '101 /cache/Launcher/abc/Updater.app/Contents/MacOS/Updater /qa space/Wizard.app 0',
+            '102 /cache/Launcher/abc/Updater.app/Contents/MacOS/Updater /qa space/WizardXapp 0',
+            '103 /other/Autoupdate org.humanitylabs.wizard.mvp /Users/owner owner',
+            '104 /qa space/Wizard.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate org.humanitylabs.wizard.mvp /Users/owner owner',
+            '105 /qa space/Wizard.app/Contentsfake/MacOS/Wizard',
+        ])
+        self.assertEqual(ns['helper_pid_rows'](text,bundle,'org.humanitylabs.wizard.mvp'),[101,104])
+
+
 class CleanupTests(unittest.TestCase):
     def test_failed_notification_and_ignored_term_escalate_to_kill(self):
         child = subprocess.Popen([sys.executable, '-c',

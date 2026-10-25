@@ -1,13 +1,51 @@
 # Mac self-update launch — issue #18
 
-Outcome: the next native Mac build updates in-app to its successor, whose own updater remains usable; unsigned/ad-hoc builds work before Apple enrollment. Do not publish a release or change the public feed in this PR.
+Outcome: an unsigned/ad-hoc native Mac build updates in-app to its successor,
+whose updater remains usable. No release or public feed is published by this PR.
 
-REUSE: Sparkle 2.10 signed feeds, Ed25519 archive signatures, release contract, native update bar, deliberate-restart/maintenance-lease path.
-EXTEND: feed generator includes whole-ZIP SHA-256; native updater verifies it before Sparkle extraction; disposable Thales native QA covers two consecutive hops and rejection paths.
-NEW: private native artifact transport (`App/UpdateArtifact.swift`), not a second UI or Wizard web capability. No applicable web/core module exists for Sparkle's native download callback. The shared Wizard web COMPONENTS registry was checked; no shell changes.
+REUSE: Sparkle 2.10 Ed25519 signed-feed/archive validation, release contract,
+existing native update bar and explicit restart/Host maintenance lease.
+EXTEND: signed feed includes raw-ZIP SHA-256, private staging/relay, crash-safe
+cancellation and a disposable native two-hop QA suite.
+NEW: native artifact transport only; no web/shell capability or replacement UI.
 
-Implementation: Sparkle's public delegate exposes no archive path. Download once to a mode-0700 staging directory, verify raw SHA-256 and signed byte size, expose those exact immutable bytes at an unguessable loopback-only endpoint, and redirect only Sparkle's mutable download request. The authenticated appcast item stays unchanged; Sparkle still validates Ed25519 signatures and bundles. Network traffic is one ZIP; loopback performs a second local read. Do not use Mach-O canonicalization for archive hashing.
+**Ed25519 is the integrity gate. SHA-256 is an early-failure check.** Download
+once into mode-0700 private staging, check the signed length and raw ZIP digest,
+and serve those bytes through an unguessable loopback endpoint. Bind that endpoint
+to the exact appcast version and source URL; reject delta-bearing items. Keep the
+authenticated item unchanged and retain Sparkle's Ed25519-before-extraction and
+bundle checks. No app-imposed one-hour resource deadline; URLSession's platform
+default remains, with a 60-second request stall timer and signed size cap. Unknown
+or insufficient free space (<3× signed length) refuses the download.
 
-Verification lane: Thales native Swift build and disposable AppKit/Sparkle test. Three ad-hoc Apple-signed app bundles (no Developer ID; no production update-key access), ephemeral Ed25519 key, private loopback feed, isolated data root, exact preferences backup/restore, no guest boot/rebuild. Two explicit restart hops, Later, busy defer, ordinary Quit, missing/wrong digest, corrupt ZIP, cleanup. Native UI uses existing update bar unchanged. Full real-guest shutdown/activation regression is outside this app-only proof and remains its existing separate gate.
+**Ready is private staging, not an armed Sparkle installer.** Pinned Sparkle
+2.10.0 can finish stage 1 on host death without a stage-2 resume. Therefore only
+explicit Update and restart, after Host/capture/lease admission, starts Sparkle
+extraction/installation. A crash at ordinary Ready discards stale staging on the
+next launch and requires a fresh download. Ordinary Quit requests cancellation
+with visible deferral bounded to 45 seconds; workspace power-off/logout requests
+teardown without waiting for that deadline. See `SELF-UPDATE-REVIEW.md` for the
+pinned source evidence and why an actual stage-1 SIGKILL/unchanged-build oracle
+would be false.
 
-Release operator gate: merge only by PR after review/CI and James's clean-install acceptance. Build/package with an explicit increasing `BUILD`. Stage the ZIP with `make-update-feed.py`, verify SHA/signatures and storage readback, then separately approve publishing immutable archive + signed appcast (feed last). Existing public build 306 feed must not be mistaken for launch readiness. A build introducing SHA enforcement needs a subsequent feed generated with SHA metadata. Developer ID signing/notarization becomes an additional packaging gate after enrollment, not an updater transport rewrite.
+Verification: production and QA-flag native typechecks, portable cleanup/source
+identity regressions, and a new hash-bound r5 on Thales. r4's 19/19 applies only
+to `8039651`, not this revision. r5 must run full `make test-contracts`, compiled
+artifact unit fixtures in both flag configurations, three disposable ad-hoc
+bundles, two actual replacement/relaunch hops, quit/later/busy/crash/reoffer
+cases, precise Ed25519 failure codes, signed-feed tampering/downgrade, oversize,
+HTTP redirect, disk precheck, cleanup and exact preference restoration. The
+harness alone enables `WIZARD_UPDATE_QA`; production rejects HTTP distribution
+and omits notification QA hooks. No real guest is booted or rebuilt. Keys and
+backup preference plists are deleted at harness exit.
+
+Release gate: PR review/CI, fresh native acceptance and James's clean-install
+acceptance before merge. Repo notes describe **public 306** and separate **307
+candidates** (`Tests/HeadlessCold/README.md:15–19`); the owner reports testers on
+307. Do not confuse those populations or claim this PR changes either one.
+Bootstrap a newer build containing these fixes (> every installed tester build,
+at least >307), then stage a monotonically newer successor with the SHA-bearing
+Ed25519-signed appcast. Re-check actual public/tester builds before publishing.
+Use `make-update-feed.py`, verify stored bytes/signatures and obtain separate
+publication approval (immutable archive first, feed last). Developer ID signing
+and notarization remain additional packaging gates after Apple enrollment.

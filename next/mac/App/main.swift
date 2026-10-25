@@ -1815,11 +1815,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
     func installQAHooks() {
+        #if WIZARD_UPDATE_QA
         guard UserDefaults.standard.bool(forKey: "QAHooks") else { return }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(qa(_:)),
             name: Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: nil, suspensionBehavior: .deliverImmediately)
+        #endif
     }
 
+    #if WIZARD_UPDATE_QA
     @MainActor @objc func qa(_ n: Notification) {
         guard let cmd = n.object as? String else { return }
         let parts = cmd.split(separator: " ", maxSplits: 1).map(String.init)
@@ -1832,6 +1835,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "update-state": try? WizardUpdate.write(WizardUpdater.shared.snapshot, WizardUpdate.dir.appendingPathComponent("qa.json"))
         case "update-host-start": HostControl.ensureRunning()
         case "update-quit": NSApp.terminate(nil)
+        case "update-power-off": NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willPowerOffNotification, object: nil); NSApp.terminate(nil)
+        case "update-no-space": UserDefaults.standard.set(arg == "on", forKey: "QAUpdateNoSpace")
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
@@ -2058,6 +2063,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         default: break
         }
     }
+    #endif
 
     func snapshot(to path: String) {
         let write: (NSImage) -> Void = { img in

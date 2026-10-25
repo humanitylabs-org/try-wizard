@@ -2,9 +2,10 @@ import Foundation
 import CryptoKit
 import Network
 
-/// Verify the whole archive named by the signed feed before Sparkle sees it.
-/// Sparkle's public delegate does not expose its download file. Hand it our verified
-/// bytes through a token-bound loopback URL instead of fetching a large ZIP twice.
+/// SHA-256 is an early-failure check over raw archive bytes; Sparkle's Ed25519
+/// verification remains the integrity gate before extraction. Its public delegate
+/// does not expose its download file, so serve the checked bytes over a private
+/// token-bound loopback endpoint instead of fetching the large ZIP twice.
 final class UpdateArtifact: NSObject, URLSessionDownloadDelegate {
     private let queue = DispatchQueue(label: "Wizard.update-artifact")
     private var session: URLSession?
@@ -21,7 +22,24 @@ final class UpdateArtifact: NSObject, URLSessionDownloadDelegate {
 
     static func allowed(_ url: URL) -> Bool {
         guard url.user == nil, url.password == nil, url.fragment == nil else { return false }
-        return url.scheme == "https" || (url.scheme == "http" && ["127.0.0.1", "::1", "localhost"].contains(url.host ?? ""))
+        if url.scheme == "https" { return true }
+        #if WIZARD_UPDATE_QA
+        return url.scheme == "http" && ["127.0.0.1", "::1", "localhost"].contains(url.host ?? "")
+        #else
+        return false
+        #endif
+    }
+    static func sweepStaleDownloads() throws {
+        guard FileManager.default.fileExists(atPath: WizardUpdate.dir.path) else { return }
+        for url in try FileManager.default.contentsOfDirectory(at: WizardUpdate.dir, includingPropertiesForKeys: nil)
+            where url.lastPathComponent.hasPrefix("download-") {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+    static func requireCapacity(_ available: UInt64?, bytes: UInt64) throws {
+        guard bytes > 0, bytes <= UInt64.max / 3, let available, available >= bytes * 3 else {
+            throw WizardUpdate.error("Insufficient or unknown free disk space — update needs at least 3× the archive size; installed app unchanged")
+        }
     }
     static func verify(_ file: URL, hash: String, bytes: UInt64) throws {
         guard hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, bytes > 0 else {
@@ -41,12 +59,23 @@ final class UpdateArtifact: NSObject, URLSessionDownloadDelegate {
         guard Self.allowed(url), hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, bytes > 0 else {
             throw WizardUpdate.error("Update requires an HTTPS archive with SHA-256 and size")
         }
+        try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let attributes = try FileManager.default.attributesOfFileSystem(forPath: WizardUpdate.dir.path)
+        var capacity = (attributes[.systemFreeSize] as? NSNumber)?.uint64Value
+        #if WIZARD_UPDATE_QA
+        if UserDefaults.standard.bool(forKey: "QAHooks"), UserDefaults.standard.bool(forKey: "QAUpdateNoSpace") { capacity = 0 }
+        #endif
+        try Self.requireCapacity(capacity, bytes: bytes)
         expectedHash = hash; expectedBytes = bytes; self.progress = progress; self.completion = completion
         let dir = WizardUpdate.dir.appendingPathComponent("download-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         directory = dir
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 60; config.timeoutIntervalForResource = 3600
+        // Bound inactivity, not total transfer time: slow progressing downloads
+        // must not fail at one hour. The signed byte count bounds the body.
+        config.timeoutIntervalForRequest = 60
+        // No app-imposed absolute deadline; retain URLSession's platform
+        // resource default and reset its 60-second request timer on progress.
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         self.session = session
         var request = URLRequest(url: url); request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -68,7 +97,10 @@ final class UpdateArtifact: NSObject, URLSessionDownloadDelegate {
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(request.url.map(Self.allowed) == true ? request : nil)
+        // Never permit a TLS downgrade (including in QA's loopback lane).
+        let allowed = request.url.map(Self.allowed) == true && request.url?.scheme == "https"
+        if !allowed { queue.async { self.finish(.failure(WizardUpdate.error("Insecure update archive redirect refused"))) } }
+        completionHandler(allowed ? request : nil)
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
@@ -115,7 +147,15 @@ final class UpdateArtifact: NSObject, URLSessionDownloadDelegate {
         }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self, !self.completed, self.connections.count < 4 else { connection.cancel(); return }
-            self.connections.append(connection); connection.start(queue: self.queue)
+            self.connections.append(connection)
+            connection.stateUpdateHandler = { [weak self, weak connection] state in
+                guard let self, let connection else { return }
+                switch state {
+                case .cancelled, .failed: self.connections.removeAll { $0 === connection }
+                default: break
+                }
+            }
+            connection.start(queue: self.queue)
             self.receive(connection, file: file, header: Data())
         }
         listener.start(queue: queue)
