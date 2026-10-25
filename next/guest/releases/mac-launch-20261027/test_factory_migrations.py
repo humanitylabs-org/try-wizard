@@ -123,6 +123,7 @@ class FactoryMigrationTests(unittest.TestCase):
         self.assertLess(src.index('migration.prepare('),src.index("'bash',installer]"))
         self.assertIn("WIZARD_STRICT='1'",src)
         self.assertIn("assert connection['ok'] is True",src)
+        self.assertIn("assert store_data['state']=='ready'",src)
         self.assertIn("'wam','doctor'],stream=True",src)
         self.assertIn("'WIZARD_TAILSCALE_WAIT'",src.replace("WIZARD_TAILSCALE_WAIT=", "'WIZARD_TAILSCALE_WAIT'="))
         self.assertIn('source-bundles/recorder.bundle',src)
