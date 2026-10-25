@@ -77,7 +77,7 @@
     "wam-reconciled": {
       "repo": "humanitylabs-org/wizard-app-manager",
       "ref": "fix/mac-default-install-completion",
-      "commit": "84a745bd9e50571943c7ab62782d47d56cce9f5a",
+      "commit": "366caf86e16560bcad0f33ddf41b451bc899f23e",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "ux-reconciled": {
@@ -247,7 +247,7 @@
     "native": "43c7d9b4677b3f54a17e5ca3ffb68ec549acbf6b",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
-    "wam": "84a745bd9e50571943c7ab62782d47d56cce9f5a",
+    "wam": "366caf86e16560bcad0f33ddf41b451bc899f23e",
     "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "a4abb27ac8cd26f9faae61cf3234c34bac9d37df7bc7922c8fbda4b6707f836b",
+      "sha256": "f08b7bcc0110f6f449b1c8eda16e1f18627cedd01d53503974fb02eda6cd17f1",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
@@ -281,7 +281,7 @@
     {
       "id": "wam-release",
       "status": "source-candidate-light-verified",
-      "detail": "Exact WAM install-completion/optional-Claude candidate 84a745b selected on fix/mac-default-install-completion (descends from adapter-overlay 7e8a2ab). New candidate image packaging and fresh full source/security/factory receipts remain required; intermittent original pre-up cause is not attributed to a deterministic timeout."
+      "detail": "Exact WAM install-completion/optional-Claude candidate 366caf8 (84a745b plus test-double kwargs repair) selected on fix/mac-default-install-completion (descends from adapter-overlay 7e8a2ab). New candidate image packaging and fresh full source/security/factory receipts remain required; intermittent original pre-up cause is not attributed to a deterministic timeout."
     },
     {
       "id": "phone-source",
@@ -367,7 +367,7 @@
     "ux": "ux-reconciled"
   },
   "osInstaller": {
-    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/84a745bd9e50571943c7ab62782d47d56cce9f5a/get.sh",
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/366caf86e16560bcad0f33ddf41b451bc899f23e/get.sh",
     "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
     "filename": "os.sh"
   },
@@ -390,7 +390,7 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "25c2a220279f551e47a3cf0f399546bbc439fef7db98a1243bfb24a343a1ca6c",
+    "sha256": "19e7a5d8b0c700e1c554078ef94f034f166e0e7913f1111a59b51ced7357f6aa",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
   },
   "assembly": {
@@ -419,7 +419,7 @@
     "images": {
       "wam": {
         "ref": "ghcr.io/humanitylabs-org/wizard-app-manager",
-        "sourceCommit": "84a745bd9e50571943c7ab62782d47d56cce9f5a",
+        "sourceCommit": "366caf86e16560bcad0f33ddf41b451bc899f23e",
         "digest": "TODO_BUILD_OUTPUT_WAM"
       },
       "service": {
