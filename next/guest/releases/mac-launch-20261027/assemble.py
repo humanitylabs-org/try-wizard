@@ -142,6 +142,9 @@ def main():
         with socket.socket() as sock:sock.bind(('127.0.0.1',port))
     boot=work/'data/os/boot';boot.mkdir(parents=True)
     run(['cp','-c',original,work/'data/os/disk.img']);(work/'data/os/disk.img').chmod(0o600)
+    # 17 imported images need compressed content + unpacked snapshots, while hidden
+    # classic data is retained. Grow ONLY the sparse disposable clone, never its base.
+    with (work/'data/os/disk.img').open('r+b') as disk:disk.truncate(48*1024**3)
     for name,item in base['boot'].items():
         assert sha(Path(os.path.expandvars(item['path'])))==item['sha256'];shutil.copy2(os.path.expandvars(item['path']),boot/name)
     host=Path(os.path.expandvars(pins['assembly']['host']['path']));assert sha(host)==pins['assembly']['host']['sha256']

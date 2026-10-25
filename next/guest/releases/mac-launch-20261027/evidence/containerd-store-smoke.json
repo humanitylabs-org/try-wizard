@@ -1,0 +1,137 @@
+{
+  "scope": "Thales disposable retained-factory clone; store-only smoke, not full job-07 acceptance",
+  "baseSha256": "64ddc2b8123b3185668aab666cd93843a228d769a2ab55c68e64e00a4c1f1366",
+  "baseUnchanged": true,
+  "cloneDeleted": true,
+  "store": {
+    "Driver": "overlayfs",
+    "DriverStatus": [
+      [
+        "driver-type",
+        "io.containerd.snapshotter.v1"
+      ]
+    ],
+    "DockerRootDir": "/var/lib/docker"
+  },
+  "imagesLoaded": [
+    {
+      "target": "helper-python",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-helper-python@sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c",
+      "imageId": "sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c"
+    },
+    {
+      "target": "hermes-app",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-hermes-app@sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab",
+      "imageId": "sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab"
+    },
+    {
+      "target": "chatgpt",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-chatgpt@sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5",
+      "imageId": "sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5"
+    },
+    {
+      "target": "claude",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-claude@sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2",
+      "imageId": "sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2"
+    },
+    {
+      "target": "files",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-files@sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092",
+      "imageId": "sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092"
+    },
+    {
+      "target": "transcriber",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber@sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6",
+      "imageId": "sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6"
+    },
+    {
+      "target": "browser",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-browser@sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797",
+      "imageId": "sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797"
+    },
+    {
+      "target": "secrets",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-secrets@sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050",
+      "imageId": "sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050"
+    },
+    {
+      "target": "notifications",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-notifications@sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9",
+      "imageId": "sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9"
+    },
+    {
+      "target": "recorder",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-recorder@sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+      "imageId": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789"
+    },
+    {
+      "target": "stock",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-stock@sha256:b2235ce42931ea67b907b8271d22bf9f5e52e85068922b39d43af9d097920901",
+      "imageId": "sha256:b2235ce42931ea67b907b8271d22bf9f5e52e85068922b39d43af9d097920901"
+    },
+    {
+      "target": "postgres",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-postgres@sha256:1a8877b3740fffc2ff87595f2df9cff3f12d9c00b59732825abca3d35b301553",
+      "imageId": "sha256:1a8877b3740fffc2ff87595f2df9cff3f12d9c00b59732825abca3d35b301553"
+    },
+    {
+      "target": "rabbitmq",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-rabbitmq@sha256:8fb80bd17d392a6b9ddf4b9fbbf39a9e6a59603c4a1f209fe7a573a1cc8ffedb",
+      "imageId": "sha256:8fb80bd17d392a6b9ddf4b9fbbf39a9e6a59603c4a1f209fe7a573a1cc8ffedb"
+    },
+    {
+      "target": "traefik",
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-traefik@sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964",
+      "imageId": "sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964"
+    },
+    {
+      "target": "wam",
+      "ref": "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+      "imageId": "sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40"
+    },
+    {
+      "target": "service",
+      "ref": "ghcr.io/humanitylabs-org/wizard-agent-service@sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
+      "imageId": "sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35"
+    },
+    {
+      "target": "ux",
+      "ref": "ghcr.io/humanitylabs-org/wizard-ux@sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97",
+      "imageId": "sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97"
+    }
+  ],
+  "composeProjects": 6,
+  "recreatedInfrastructureContainers": 4,
+  "unresolved": [],
+  "stoppedContainerResolution": {
+    "containers": 5,
+    "unresolved": [],
+    "helperStartedAndRemoved": true
+  },
+  "diskBefore": {
+    "totalBytes": 50408087552,
+    "usedBytes": 5438767104,
+    "availableBytes": 44943159296,
+    "classicPathsBytes": {
+      "/var/lib/docker/overlay2": 3978346496,
+      "/var/lib/docker/image": 9342976,
+      "/var/lib/docker/containers": 925696
+    },
+    "classicDataReclaimed": false,
+    "reason": "Hidden classic containers/layers retained; do not delete or switch back."
+  },
+  "diskAfter": {
+    "totalBytes": 50408087552,
+    "usedBytes": 22403035136,
+    "availableBytes": 27978891264,
+    "classicPathsBytes": {
+      "/var/lib/docker/overlay2": 3978432512,
+      "/var/lib/docker/image": 9392128,
+      "/var/lib/docker/containers": 1146880
+    },
+    "classicDataReclaimed": false,
+    "reason": "Hidden classic containers/layers retained; do not delete or switch back."
+  },
+  "fullStrictInstallExecuted": false,
+  "publishing": false
+}

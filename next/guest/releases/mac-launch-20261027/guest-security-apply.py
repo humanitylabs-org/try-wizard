@@ -4,6 +4,7 @@ Does not touch owner/live VMs. Source recipes remain pinned and unmodified.
 """
 import argparse, json, os, subprocess
 from pathlib import Path
+import guest_docker_store as store
 ROOT=Path('/mnt/launch');PREP=ROOT/'preparation';RT=Path('/home/wizard/runtipi')
 
 def run(argv,**kw):return subprocess.check_output(list(map(str,argv)),text=True,timeout=kw.pop('timeout',300),**kw)
@@ -40,18 +41,25 @@ def prepare(plan,managed=None):
         image=plan['resolutions'][b['target']]['image']
         if managed and b['service']=='hermes-agent-engine':image=managed
         byapp.setdefault(b['app'],{})[b['service']]=image
+    # The retained shell predates the default-app bindings; replace its local-only tag too.
+    shells=[c for c in store.inherited(ROOT/'assembly-work') if (c['Config'].get('Labels') or {}).get('com.docker.compose.service')=='wizard-shell']
+    assert len(shells)==1,'retained shell service missing/ambiguous'
+    byapp.setdefault('wizard-shell',{})['wizard-shell']=plan['resolutions']['ux']['image']
     writes=[merge(RT/'user-config/wizardapps'/app/'docker-compose.yml',updates) for app,updates in byapp.items()]
     # Read service names from actual retained compose labels, matched by immutable image ID.
-    ids=run(['docker','ps','-q']).split();containers=json.loads(run(['docker','inspect',*ids]));infra={}
+    containers=store.containers() or store.inherited(ROOT/'assembly-work');infra={}
     for target in plan['targets']:
         if target['key'] not in {'postgres','rabbitmq','traefik'}:continue
-        old=subprocess.run(['docker','image','inspect',target['base']],capture_output=True,text=True,timeout=60)
-        old_id=json.loads(old.stdout)[0]['Id'] if old.returncode==0 else None
-        # After final writers the old source reference may already be pruned; match the patched identity too.
+        # The classic store is now hidden. Its captured RepoDigests, not tag guesses,
+        # identify the retained infrastructure service for the first bootstrap.
+        old_ids={c['Image'] for c in store.inherited(ROOT/'assembly-work') if target['base'] in c['FactoryImage'].get('RepoDigests',[])}
         patched=json.loads(run(['docker','image','inspect',plan['resolutions'][target['key']]['image']]))[0]
-        hits=[c for c in containers if c['Image'] in {old_id,patched['Id']}]
+        hits=[c for c in containers if c['Image'] in old_ids|{patched['Id']}]
         assert len(hits)==1,(target['key'],len(hits))
         service=hits[0]['Config']['Labels']['com.docker.compose.service'];infra[service]=plan['resolutions'][target['key']]['image']
+    manager=[c for c in store.inherited(ROOT/'assembly-work') if (c['Config'].get('Labels') or {}).get('com.docker.compose.service')=='runtipi']
+    assert len(manager)==1,'retained manager service missing/ambiguous'
+    infra['runtipi']=plan['resolutions']['wam']['image']
     writes.append(merge(RT/'user-config/tipi-compose.yml',infra))
     return writes
 
@@ -60,8 +68,10 @@ def finish(plan):
     writes=prepare(plan,managed)
     bindings=json.loads((PREP/'security-compose-bindings.json').read_text())['bindings']
     before=json.loads(run(['docker','inspect',*run(['docker','ps','-q']).split()]))
-    running_services={c['Config'].get('Labels',{}).get('com.docker.compose.service') for c in before}
-    for app in sorted({b['app'] for b in bindings if b['service'] in running_services}):
+    running_services={c['Config'].get('Labels',{}).get('com.docker.compose.service') for c in before+store.inherited(ROOT/'assembly-work')}
+    apps={b['app'] for b in bindings if b['service'] in running_services}
+    if 'wizard-shell' in running_services:apps.add('wizard-shell')
+    for app in sorted(apps):
         run(['sudo','-iu','wizard','wam','app','restart',app],timeout=900)
     current=json.loads(run(['docker','inspect',*run(['docker','ps','-q']).split()]))
     expected={key:json.loads(run(['docker','image','inspect',value['image']]))[0]['Id'] for key,value in plan['resolutions'].items()}
@@ -75,10 +85,14 @@ def finish(plan):
     # Remove obsolete local-image families rather than inventing upstream digests for them.
     stopped=run(['docker','ps','-aq','--filter','status=exited']).split()
     if stopped:run(['docker','rm',*stopped])
-    run(['docker','image','prune','-a','-f'],timeout=300);run(['docker','builder','prune','-a','-f'],timeout=300)
+    # Keep every selected OCI image: optional/stopped compose services must remain recreatable offline.
+    retained_before=set(run(['docker','image','ls','-q','--no-trunc']).split())
+    for image in sorted(retained_before-set(expected.values())):run(['docker','image','rm',image])
+    run(['docker','builder','prune','-a','-f'],timeout=300)
     retained=run(['docker','image','ls','-q','--no-trunc']).split()
     assert set(retained)<=set(expected.values()),'unplanned inherited/cached image retained'
-    receipt={'writes':writes,'running':[{'name':c['Name'],'image':c['Image']} for c in current],'retainedImageIds':sorted(set(retained)),'expectedImageIds':expected,'oldLocalImagesRemoved':True}
+    assert set(expected.values())<=set(retained),'selected OCI image missing after cleanup'
+    receipt={'writes':writes,'running':[{'name':c['Name'],'image':c['Image']} for c in current],'retainedImageIds':sorted(set(retained)),'expectedImageIds':expected,'oldLocalImagesRemoved':True,'cleanupScope':'active containerd store only','classicStore':store.disk()}
     (ROOT/'assembly-work/security-application.json').write_text(json.dumps(receipt,indent=2)+'\n')
 
 def main():

@@ -27,7 +27,19 @@ old compatibility pins, or set the status to admitted to get past a gate.
 - The assembly guest imports all 17 byte-verified archives, then inspects each
   exact `ref@digest` before any installer/configuration writer. It never pulls
   these unpublished outputs. A guest daemon unable to preserve imported OCI
-  digest references fails closed (containerd-backed image store required).
+  digest references fails closed. Inside the disposable clone only, `guest-apply.py`
+  merges `features.containerd-snapshotter=true` into the daemon configuration,
+  restarts Docker and verifies `io.containerd.snapshotter.v1` before any load.
+  Switching hides classic containers too: capture immutable image identities first,
+  write security overrides and bootstrap the manager/DB/queue/proxy without pulls.
+  Recreate inherited app services via WAM; verify effective compose images and
+  every running/stopped container ref and ID again after final writers and at seal.
+  Keep all selected images, including optional services, for offline recreation.
+  Hidden classic layer/container data is deliberately retained (size and guest
+  filesystem before/after recorded); no raw layer deletion or switch-back is safe.
+  The clone's sparse disk grows from 16 to 48 GiB before boot (`resize2fs` inside
+  the guest). All 17 imports plus hidden classic data exceeded the original 16
+  GiB filesystem in the Thales smoke; the retained base bytes/hash are unchanged.
 - Stage a **new** freeze and inventory. Never rewrite a v5 input underneath a
   source-verification job. Keep source verification first, then 17 packaging
   jobs, 05 security closure, 06 resolve, and finally 07 admission/rebuild.

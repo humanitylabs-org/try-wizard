@@ -91,7 +91,8 @@ class RecorderPackagingTests(unittest.TestCase):
         plan=json.loads((HERE/'security-image-plan.json').read_text())
         image='ghcr.io/humanitylabs-org/wizard-mac-security-recorder@sha256:'+'a'*64
         plan['resolutions']={t['key']:{'image':image} for t in plan['targets']}
-        with patch.object(apply,'PREP',HERE),patch.object(apply,'run',side_effect=['unit',json.dumps([]),json.dumps([{'Id':'fixture'}]),json.dumps([{'Id':'fixture'}]),json.dumps([{'Id':'fixture'}])]),patch.object(apply.subprocess,'run',return_value=types.SimpleNamespace(returncode=1)),patch.object(apply,'merge',side_effect=lambda path,updates:{'path':str(path),'images':updates}):
+        inherited=[{'Config':{'Labels':{'com.docker.compose.service':service}}} for service in ['wizard-shell','runtipi']]
+        with patch.object(apply,'PREP',HERE),patch.object(apply.store,'containers',return_value=[]),patch.object(apply.store,'inherited',return_value=inherited),patch.object(apply,'merge',side_effect=lambda path,updates:{'path':str(path),'images':updates}):
             # No retained infrastructure containers in this synthetic fixture; test only app writes.
             plan['targets']=[t for t in plan['targets'] if t['key'] not in {'postgres','rabbitmq','traefik'}]
             writes=apply.prepare(plan)

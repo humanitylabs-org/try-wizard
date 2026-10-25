@@ -3,6 +3,7 @@
 import argparse, hashlib, json, os, shutil, sqlite3, subprocess
 from pathlib import Path
 import local_oci as oci
+import guest_docker_store as store
 ROOT=Path('/mnt/launch');WORK=ROOT/'assembly-work'
 
 def run(argv,**kw):return subprocess.check_output(list(map(str,argv)),text=True,timeout=kw.pop('timeout',600),**kw)
@@ -45,6 +46,8 @@ def main():
     run(['apt-get','update'],timeout=300)
     run(['apt-get','install','-y','--no-install-recommends','ca-certificates','curl','python3-yaml'],timeout=600)
     plan=json.loads((ROOT/'preparation/security-image-plan.json').read_text());assert plan['complete'] is True
+    assert json.loads((ROOT/'security-preflight.json').read_text())['allGuestImagesEnumerated'] is True
+    store.enable(WORK)
     for selection in plan['targets']:
         row=json.loads((ROOT/selection['receipt']).read_text())
         assert plan['resolutions'][selection['key']]['image']==row['ref']+'@'+row['digest']
@@ -60,6 +63,8 @@ def main():
     assert sha(pip_wheel)==plan['upstreamInputs']['pip']['sha256']
     run(['python3',ROOT/'preparation/remediate-trust.py','--wheel',wheel,'--pip-wheel',pip_wheel,'--output',WORK/'host-remediation.json'],timeout=600)
     run(['python3',ROOT/'preparation/guest-security-apply.py','--prepare'],timeout=1800)
+    store.bootstrap(WORK)
+    store.verify(WORK,receipt='docker-bootstrap-resolution.json')
     installer=ROOT/'final/wam/get.sh';assert sha(installer)==pins['osInstaller']['sha256']
     env={k:v for k,v in os.environ.items() if k not in ['WAM_REF','WAM_IMAGE','WIZARD_SHELL_IMAGE','WIZARD_UX_IMAGE','WIZARD_AGENT_SERVICE_IMAGE']}
     env.update(WIZARD_RELEASE=release['version'],WIZARD_RELEASE_BASE='file://'+str(release_dir),WIZARD_STRICT='1',WIZARD_MODE='fresh',WIZARD_PRIVATE_ACCESS='tailscale')
@@ -105,6 +110,7 @@ def main():
     # Final configuration writers can replace overrides; restore them preserving the managed guard image,
     # restart through WAM, prove actual IDs, then remove every old unused local image/cache from this clone.
     run(['python3',ROOT/'preparation/guest-security-apply.py','--finish'],timeout=3600)
+    store.verify(WORK,store.inherited(WORK))
     # Mandatory on host and EVERY running container's actual mounted trust stores, not fresh docker runs.
     run(['python3',ROOT/'preparation/security-closure.py','--guest','--output',WORK/'security-guest.json'],timeout=3600)
     pristine();(WORK/'applied.json').write_text(json.dumps({'releaseSha256':sha(target),'sources':pins['finalPins'],'pristine':True,'securityClosure':True,'publishing':False},indent=2)+'\n')

@@ -3,6 +3,7 @@
 This refuses a used guest before changing anything. Archive/compression is external.
 """
 import hashlib,json,os,shutil,sqlite3,subprocess,time
+import guest_docker_store as store
 from pathlib import Path
 R=Path('/mnt/launch/assembly-work');H=Path('/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data');OS=Path('/home/wizard/runtipi/app-data/wizard-os');S=Path('/home/wizard/runtipi/app-data/wizardapps/wizard-shell/data')
 assert os.geteuid()==0
@@ -17,12 +18,15 @@ assert not list((OS/'agents').glob('*/agent.json')),'Factory has created agents'
 units=['wizard-agent-runtime','wizard-runtime-proxy','wizard-runtime-secrets','wizard-setup','wizard-local-proxy','wizard-ux-bridge','wizard-voice']
 subprocess.run(['systemctl','stop',*units],check=True)
 subprocess.run(['sudo','-u','wizard','env','XDG_RUNTIME_DIR=/run/user/1000','systemctl','--user','stop','wizard-app-manager-api','wizard-app-lifecycle','wizard-app-lifecycle-containers'],check=True)
+store.verify(R,store.inherited(R),receipt='docker-seal-resolution.json')
+active={c['Id'] for c in store.containers()}
 ids=subprocess.check_output(['docker','ps','-q'],text=True).split()
 if ids:subprocess.run(['docker','stop',*ids],check=True,stdout=subprocess.DEVNULL)
 subprocess.run(['systemctl','stop','docker.service','docker.socket','containerd.service'],check=True)
 containers=[]
-for p in Path('/var/lib/docker/containers').glob('*/config.v2.json'):
- d=json.loads(p.read_text());d['HasBeenManuallyStopped']=False;p.write_text(json.dumps(d));containers.append({'name':d['Name'],'image':d['Image']})
+for identity in sorted(active):
+ p=Path('/var/lib/docker/containers')/identity/'config.v2.json';assert p.is_file(),'active container config missing'
+ d=json.loads(p.read_text());assert d['Driver']!='overlay2','classic container refused at seal';d['HasBeenManuallyStopped']=False;p.write_text(json.dumps(d));containers.append({'name':d['Name'],'image':d['Image']})
 # Newly-added runtime stores/tokens must be recipient-owned, empty in the factory.
 for p in [OS/'runtime-secrets',OS/'agents',S/'wizard-os/app-tokens',S/'wizard-os/agents',S/'upload-staging',Path('/home/wizard/.wizard-os/agent-ssh'),Path('/home/wizard/.ssh'),H/'.ssh-vm',H/'backups',Path('/var/lib/wizard/patches')]:
  if p.exists():shutil.rmtree(p)
