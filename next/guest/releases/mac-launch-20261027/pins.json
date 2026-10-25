@@ -77,7 +77,7 @@
     "wam-reconciled": {
       "repo": "humanitylabs-org/wizard-app-manager",
       "ref": "reconcile/mac-launch-wam-20261027",
-      "commit": "c4987a126698d515783372f8a277723a7afecfcb",
+      "commit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
       "role": "candidate reconciliation; review gate remains explicit"
     },
     "ux-reconciled": {
@@ -247,7 +247,7 @@
     "native": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
-    "wam": "c4987a126698d515783372f8a277723a7afecfcb",
+    "wam": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
     "recorder": "0f31e272a9c25b975cb677f1221f28892993e4b1"
   },
   "factory": {
@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "22f880a574cd26307b8ee6ed668214571b2dfb03de099c2e1f0b13aea3204706",
+      "sha256": "b54f30a24a0e7c917d9ea95c9f0a4b4983422aaef421a6692fae3dbfae133b2b",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
@@ -281,7 +281,7 @@
     {
       "id": "wam-release",
       "status": "resolved-source-ci",
-      "detail": "Exact reconciled WAM #204 c4987a1 retained. New candidate image packaging is required, including patched trust/Node/Bun; old stable image provenance remains historical, not attributed to new output."
+      "detail": "Exact reconciled WAM #204 ae6a2ba retained. New candidate image packaging is required, including patched trust/Node/Bun; old stable image provenance remains historical, not attributed to new output."
     },
     {
       "id": "phone-source",
@@ -367,7 +367,7 @@
     "ux": "ux-reconciled"
   },
   "osInstaller": {
-    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/c4987a126698d515783372f8a277723a7afecfcb/get.sh",
+    "url": "https://raw.githubusercontent.com/humanitylabs-org/wizard-app-manager/ae6a2ba582dac1733d577cc6996e95cbb55683c9/get.sh",
     "sha256": "8375737a32431cbc529c415c926f16718b59487563ea3ee4e046a82c6b1065c1",
     "filename": "os.sh"
   },
@@ -390,7 +390,7 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "a8c2cd5fca0dbf9db1c21807947d040e98199e135a33e731180e6b585f43ac25",
+    "sha256": "90bdb9ec8e355d0c7641a9bb604dc65d81fcb328ba1931be37fef1be23da5251",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
   },
   "assembly": {
@@ -419,7 +419,7 @@
     "images": {
       "wam": {
         "ref": "ghcr.io/humanitylabs-org/wizard-app-manager",
-        "sourceCommit": "c4987a126698d515783372f8a277723a7afecfcb",
+        "sourceCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
         "digest": "TODO_BUILD_OUTPUT_WAM"
       },
       "service": {
