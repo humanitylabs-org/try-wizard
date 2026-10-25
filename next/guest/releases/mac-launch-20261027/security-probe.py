@@ -2,7 +2,7 @@
 """Actual runtime TLS checks, also fed on stdin into each discovered interpreter.
 A DNS error, proxy block, timeout or HTTP failure is never certificate rejection.
 """
-import concurrent.futures, hashlib, json, os, re, shutil, ssl, subprocess, sys, urllib.error, urllib.request
+import concurrent.futures, hashlib, time, json, os, re, shutil, ssl, subprocess, sys, urllib.error, urllib.request
 from pathlib import Path
 BAD=[kind+'-'+suffix+'-emudhra' for suffix in ['g3b','g3c','g3b-aaa','g3c-aaa'] for kind in ['dv','ov','ev']]+['dv-g3b-noct-emudhra','dv-g3b-aaa-noct-emudhra']
 GOOD=['https://example.com/','https://probe-emudhra.we-have-a-problem.com/']
@@ -33,6 +33,15 @@ def python_checks():
         if key not in seen:ctxs.append((str(f),ssl.create_default_context(cafile=str(f))));seen.add(key)
     def request(row):
         name,ctx,url,bad=row
+        # Retry only transport failures (EOF, bad record MAC, resets, timeouts); an accepted chain fails at once.
+        for attempt in range(3):
+            try:return attempt_request(name,ctx,url,bad)
+            except AssertionError as e:
+                detail=e.args[0] if e.args else None
+                transient=bad and isinstance(detail,tuple) and str(detail[-1]).startswith('<urlopen error') and 'CERTIFICATE_VERIFY_FAILED' not in str(detail[-1])
+                if not transient or attempt==2:raise
+                time.sleep(2)
+    def attempt_request(name,ctx,url,bad):
         try:
             with urllib.request.urlopen(url,context=ctx,timeout=20) as r:
                 body=r.read(4096)

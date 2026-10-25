@@ -52,7 +52,8 @@ command -v curl >/dev/null
 curl -fsS --max-time 20 https://example.com/ >/dev/null
 curl -fsS --max-time 20 https://probe-emudhra.we-have-a-problem.com/ | grep -q 'Your client successfully connected to the site.'
 for h in HOSTS; do
- rc=0; curl -fsS --max-time 20 https://$h.we-have-a-problem.com/ >/dev/null || rc=$?
+ # Up to 3 attempts only for transport failures (35/52/56/28); acceptance (rc 0) fails at once.
+ for try in 1 2 3; do rc=0; curl -fsS --max-time 20 https://$h.we-have-a-problem.com/ >/dev/null || rc=$?; case $rc in 35|52|56|28) sleep 2;; *) break;; esac; done
  test "$rc" = 60 || exit 41
 done
 if command -v node >/dev/null; then
@@ -61,7 +62,8 @@ if command -v node >/dev/null; then
  node -e 'const h=require("https");let r=h.get("https://"+process.argv[1]+"/",r=>{r.resume();if(r.statusCode!==200)process.exit(43)});r.setTimeout(20000,()=>process.exit(46));r.on("error",()=>process.exit(44))' $h
  done
  for h in HOSTS; do
- node -e 'const h=require("https");let r=h.get(process.argv[1],()=>process.exit(45));r.setTimeout(20000,()=>process.exit(46));r.on("error",e=>{if(!/^(CERT_|UNABLE_TO_|SELF_SIGNED_|DEPTH_ZERO_SELF_SIGNED_CERT|ERR_TLS_CERT_ALTNAME_INVALID)/.test(e.code||""))process.exit(47)})' https://$h.we-have-a-problem.com/
+ for try in 1 2 3; do rc=0; node -e 'const h=require("https");let r=h.get(process.argv[1],()=>process.exit(45));r.setTimeout(20000,()=>process.exit(46));r.on("error",e=>{if(!/^(CERT_|UNABLE_TO_|SELF_SIGNED_|DEPTH_ZERO_SELF_SIGNED_CERT|ERR_TLS_CERT_ALTNAME_INVALID)/.test(e.code||""))process.exit(47)})' https://$h.we-have-a-problem.com/ || rc=$?; case $rc in 46|47) sleep 2;; *) break;; esac; done
+ test "$rc" = 0 || exit $rc
  done
 fi
 # Native vendored roots need their own patched binaries; an OS store bump is not sufficient.
