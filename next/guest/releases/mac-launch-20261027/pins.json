@@ -268,7 +268,7 @@
     "entryCount": 84,
     "mapping": {
       "path": "queue-mapping.json",
-      "sha256": "ab9c29dcc8a7c17fbeb03f285be66e7f46a3d3642ce46f0dbed4fc4a7b1b4ce6",
+      "sha256": "496dc66d0f4cd040beb99b3ad50d7b636f19f5f9f285e7cc0b05829e2663452b",
       "semantics": "explicit carry/defer decisions + source provenance; final guest acceptance remains not-run"
     }
   },
@@ -390,7 +390,7 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "b52c86a8c37dd7b56876b539a767f2b72d42d85c36406b9cd697423b19e0ebf5",
+    "sha256": "09b4757418f1f133a1f37da6f4009462d7ae46d2bb0675ef2a39940cc68ba0d5",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
   },
   "assembly": {
