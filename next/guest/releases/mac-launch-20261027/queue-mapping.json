@@ -71,7 +71,7 @@
       "components": [
         {
           "component": "wam",
-          "pinnedCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8",
+          "pinnedCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4",
           "ancestry": [
             {
               "queueReference": "b51e7b42",
@@ -112,7 +112,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8",
+          "pinnedCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4",
           "ancestry": [
             {
               "queueReference": "850cfe32",
@@ -315,7 +315,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8",
+          "pinnedCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4",
           "ancestry": [
             {
               "queueReference": "850cfe32",
@@ -1326,7 +1326,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8",
+          "pinnedCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4",
           "ancestry": [
             {
               "queueReference": "cd3d0593",
@@ -1769,7 +1769,7 @@
         },
         {
           "component": "wam",
-          "pinnedCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8",
+          "pinnedCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4",
           "ancestry": [
             {
               "queueReference": "850cfe32",

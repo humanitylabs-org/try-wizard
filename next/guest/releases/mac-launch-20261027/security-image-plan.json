@@ -149,7 +149,7 @@
       "key": "wam",
       "resolution": "selected-core-image",
       "receipt": "image-packaging/wam/result.json",
-      "sourceCommit": "235d867701b1946f5dc64b2e20e99fc54513f4c8"
+      "sourceCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4"
     },
     {
       "key": "service",
