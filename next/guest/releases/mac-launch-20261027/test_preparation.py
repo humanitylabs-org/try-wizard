@@ -72,6 +72,15 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(decisions[23]['decision'],'carry')
         self.assertFalse(any('digest mismatch' in e for e in errors))
 
+    def test_recorder_release_version_survives_freeze(self):
+        raw=(HERE/'wizard-os-current-stable.json').read_bytes()
+        generated=freeze.freeze(self.pins,json.loads(raw),raw,{})
+        selected=json.loads((HERE/'wizard-os-release-candidate.json').read_text())
+        for release in (generated,selected):
+            recorder=release['default_apps']['recorder']
+            self.assertEqual(recorder['commit'],'0f31e272a9c25b975cb677f1221f28892993e4b1')
+            self.assertEqual(recorder['index_version'],'0.3.5')
+
     def test_freeze_does_not_relabel_stable_images(self):
         raw=(HERE/'wizard-os-current-stable.json').read_bytes();stable=json.loads(raw)
         rc=freeze.freeze(self.pins,stable,raw,{})

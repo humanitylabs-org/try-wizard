@@ -21,6 +21,7 @@ def freeze(pins,stable,stable_bytes,origin):
         defaults[slot]['commit']=pins['finalPins'][key]
         defaults[slot]['note']='RC source selection; replacement candidate image must be built before provisioning'
     defaults['recorder']={'app':pins['recorderImage']['appId'],'repo':pins['sourceInputs']['recorder']['repo'],
+                         'index_version':'0.3.5', # runtipi/config.json at frozen Recorder 0f31e272
                          'commit':pins['finalPins']['recorder'],'install':'portable-app',
                          'image':pins['recorderImage']['arm64Image'],'note':'optional hardware access explicit; no capture permission implied'}
     for row in defaults.values():
