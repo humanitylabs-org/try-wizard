@@ -46,6 +46,37 @@ def clean_overlays(rt, work):
     (work / 'factory-overlays.json').write_text(json.dumps({'removed': removed}, indent=2) + '\n')
 
 
+def retire_hidden_managed_runtime(work, inherited, active_ids,
+                                  manifest=Path('/opt/wizard/managed-runtime.json')):
+    """Retire only the captured factory image's stale, now-hidden selection.
+
+    The pristine gate runs before store.enable. WAM's managed renderer outranks
+    security digest overlays, so this manifest must not survive into get.sh.
+    guest-apply rebuilds and re-publishes it from the selected stock image after
+    strict install; never copy the obsolete image into the new Docker store.
+    """
+    assert not manifest.is_symlink(), 'managed runtime manifest symlink refused'
+    if not manifest.exists():
+        return None
+    data = json.loads(manifest.read_text())
+    engines = [c for c in inherited if (c['Config'].get('Labels') or {}).get(
+        'com.docker.compose.service') == 'hermes-agent-engine']
+    assert len(engines) == 1, 'retained managed engine missing/ambiguous'
+    engine = engines[0]
+    labels = engine['FactoryImage']['Config'].get('Labels') or {}
+    stock = 'f97608f178d1ffeca59860195ab7da295f7c8e5f'
+    assert data == {'image': engine['Image'], 'stock': stock}, 'unknown factory managed manifest'
+    assert labels.get('ai.wizards.managed-launch') == '1', 'unmanaged retained engine'
+    assert labels.get('ai.wizards.stock-revision') == stock, 'unknown retained stock contract'
+    assert data['image'] not in active_ids, 'retained managed image still active'
+    archived = work / 'retired-managed-runtime.json'
+    assert not archived.exists() and not archived.is_symlink(), 'retirement evidence already exists'
+    archived.write_bytes(manifest.read_bytes())
+    archived.chmod(0o600)
+    manifest.unlink()
+    return data
+
+
 def factory_manager(root, rt):
     import sys
     sys.path.insert(0, str(root / 'final/wam'))

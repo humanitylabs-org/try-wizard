@@ -78,7 +78,8 @@ def main():
     run(['systemctl','disable','--now','wizard-voice.service'])  # retire retained Parakeet; selected transcriber is Speaches
     migration.empty_legacy_state(Path('/home/wizard/runtipi/app-data/wizardapps/wizard-shell/data'))
     migration.clean_overlays(Path('/home/wizard/runtipi'),WORK)
-    store.enable(WORK)
+    inherited=store.enable(WORK)
+    migration.retire_hidden_managed_runtime(WORK,inherited,run(['docker','image','ls','-q','--no-trunc']).split())
     for selection in plan['targets']:
         row=json.loads((ROOT/selection['receipt']).read_text())
         assert plan['resolutions'][selection['key']]['image']==row['ref']+'@'+row['digest']
