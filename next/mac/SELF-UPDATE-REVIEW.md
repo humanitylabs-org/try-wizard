@@ -203,3 +203,44 @@ Open before launch: a release-sized archive over HTTPS from real R2/CDN,
 including production HTTPS admission, redirects/status and origin behaviour.
 This hop is explicitly outside r6 scope. Full contracts and native harness,
 visual/runtime inspection and fresh independent review remain pending gates.
+
+## r7: negative-feed setup and evidence repair
+
+r6 (`heavy_8ff2ada7f5da440b9bb0e9b822556c92`, head
+`57246597ad8f1870930a8a6bc26336d60629cc8f`) passed `make test-contracts` and
+reached the edited-feed case after passing the first native replacement,
+post-admission bad-signature Host recovery and Quit-during-stopping recovery.
+It then failed the required fresh-feed request assertion; this is not a native
+signed-feed rejection pass.
+
+The retained `data/updates/qa.json` has `phase: ready`, `freshDownloadReady: true`,
+`build: 18002`, `version: 18003` and no errors. Its PID matches the final
+`ui.json` (cleanup then changed that UI to `quit-dismissed`). The last appcast
+and 18003 ZIP requests in `evidence/http.log` precede the final fixture connection.
+The cause is the harness's ordinary `launch()` after stopping the fixture Host:
+`WizardUpdater.start()` automatically checks the still-valid feed before the
+harness edits it. `checkForUpdates()` intentionally reopens an existing Ready
+item without fetching a new feed. The edited feed was therefore **not checked**;
+there is no evidence that it was rejected before the HTTP observer.
+
+r7 changes the harness, not production updater behaviour. Only this remaining
+negative suite launches with the process-local `-SUEnableAutomaticChecks NO`
+argument. It requires an idle, non-Ready app and no pre-mutation feed request;
+earlier automatic-reoffer tests retain normal startup behaviour. Every negative
+case refuses cached Ready, requires a newly served feed matching the current
+feed's SHA-256, and waits for a fresh failure phase history. Signed-feed cases
+still require outer `SUSparkleErrorDomain/1000`, inner `3002`, the signature
+message, no Ready, no archive request and an unchanged installed build. The HTTP
+handler records hashes of the exact bytes it serves in `feed-requests.json` and
+each successful negative result retains its request evidence. No fetch or
+signature assertion was removed or converted into an optional check.
+
+Portable regressions exercise the real harness functions with explicit protocol
+fixtures, plus its actual HTTP handler over loopback. They reject missing/wrong
+feed bytes, wrong errors, stale failure state, Ready, archive fetches and build
+replacement. The startup and call-site regressions fail against r6. These are
+harness tests, **not native Sparkle runtime proof**. Full r7 must still pass both
+signed-feed cases, both native update hops and final cleanup at its exact pushed
+head. It is staged for the parent to submit, not run or queued by this helper.
+No merge, tag, production signing, release, feed publication or guest rebuild
+is part of this repair.

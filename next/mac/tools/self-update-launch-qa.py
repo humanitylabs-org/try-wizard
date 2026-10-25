@@ -17,7 +17,7 @@ feed = root/'feed'; feed.mkdir(exist_ok=True)
 data = root/'data'; runtime = None
 installed = root/'installed/Wizard.app'; installed.parent.mkdir(exist_ok=True)
 builds=list(range(a.first_build,a.first_build+3))
-results = []; requests = []; server = None; preference_backup = None; passed = False
+results = []; requests = []; feed_requests = []; server = None; preference_backup = None; passed = False
 
 def run(argv, **kw): return subprocess.run(list(map(str, argv)), check=True, **kw)
 def source_identity(directory, expected):
@@ -121,11 +121,22 @@ def cleanup_app(grace=5):
     assert not owned_processes(), 'Owned Wizard/helper survived cleanup SIGKILL'
     return cleanup
 
-def launch():
-    run(['open','-n','-a',installed,'--args','--wizard-data-home',data])
+def launch(*, automatic_checks=True):
+    command=['open','-n','-a',installed,'--args','--wizard-data-home',data]
+    # A negative feed case must start without a previously authenticated Ready
+    # item. Use NSUserDefaults' process-local argument domain, not a production
+    # behaviour change or a persistent preference that alters the earlier
+    # automatic-reoffer cases.
+    count=len(requests)
+    if not automatic_checks: command+=['-SUEnableAutomaticChecks','NO']
+    run(command)
     wait_state(lambda s: s.get('build') == version())
     notify('connect '+base+'/wizard/')
     time.sleep(2)
+    if not automatic_checks:
+        state=snapshot()
+        assert state.get('phase')=='idle' and not state.get('ready'), state
+        assert '/appcast.xml' not in requests[count:], 'Manual-check launch fetched a feed before mutation'
 def stage(build, mutate=None, signing_key=None):
     # QA artifacts are deliberately refused by the release feed tool. Construct
     # this disposable, loopback-only feed here, never through that release path.
@@ -183,22 +194,32 @@ def ready():
     notify('update-check')
     return wait_state(lambda s: s.get('phase')=='ready' and s.get('ready'),180)
 def fail_without_replacement(name, message, archive=True, signature=False, install=False, outer_code=None):
-    before=version(); request_count=len(requests); notify('update-check')
+    initial=snapshot()
+    assert not initial.get('ready'), 'Negative case started with a cached Ready item: '+name
+    before=version(); request_count=len(requests); feed_count=len(feed_requests)
+    expected_feed=hashlib.sha256((feed/'appcast.xml').read_bytes()).hexdigest()
+    notify('update-check')
     end=time.time()+90
     while time.time()<end:
         seen=requests[request_count:]
-        if '/appcast.xml' in seen and (not archive or any(x.endswith('.zip') for x in seen)): break
+        fetched=feed_requests[feed_count:]
+        if '/appcast.xml' in seen and any(r['sha256']==expected_feed for r in fetched) and (not archive or any(x.endswith('.zip') for x in seen)): break
         time.sleep(.1)
-    else: raise AssertionError('Negative case never reached its feed/archive: '+name)
+    else: raise AssertionError('Negative case never reached its exact feed/archive: '+name)
     if install:
         wait_state(lambda s:s.get('phase')=='ready' and s.get('ready'),90)
         notify('update-restart')
-    s=wait_state(lambda s:s.get('phase')=='failed' and message in s.get('message',''),90)
+    # Adjacent signature cases have the same message/code. A previous failed
+    # snapshot must not satisfy this case while the new request is in flight.
+    s=wait_state(lambda s:s.get('phase')=='failed' and message in s.get('message','') and s.get('phaseHistory')!=initial.get('phaseHistory'),90)
     if signature:
         assert {'domain':'SUSparkleErrorDomain','code':3002} in s.get('errors',[]), s
     if outer_code is not None:
         assert s.get('errors',[None])[0] == {'domain':'SUSparkleErrorDomain','code':outer_code}, s
-    assert not s.get('ready') and version()==before
+    assert not s.get('ready') and not s.get('freshDownloadReady') and version()==before
+    seen=requests[request_count:]
+    if not archive: assert not any(x.endswith('.zip') for x in seen), (name,seen)
+    s['requestEvidence']={'paths':seen,'feedSHA256':expected_feed,'fetchedFeeds':feed_requests[feed_count:]}
     record(name,s)
 
 try:
@@ -262,7 +283,18 @@ try:
     record('three-native-builds-ad-hoc-no-Developer-ID-signed-feed-required',list(builds))
     class Handler(http.server.SimpleHTTPRequestHandler):
         def do_GET(self):
-            requests.append(self.path.split('?',1)[0])
+            path=self.path.split('?',1)[0]
+            if path == '/appcast.xml':
+                # Serve and retain the exact bytes whose digest the case expects,
+                # not just a path that might belong to a prior automatic check.
+                body=(feed/'appcast.xml').read_bytes()
+                receipt={'sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body)}
+                feed_requests.append(receipt)
+                (evidence/'feed-requests.json').write_text(json.dumps(feed_requests,indent=2)+'\n')
+                requests.append(path)
+                self.send_response(200); self.send_header('Content-Type','application/rss+xml'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+                return
+            requests.append(path)
             if self.path == '/redirect.zip':
                 self.send_response(302); self.send_header('Location',base+'/redirect-target.zip'); self.end_headers()
             elif self.path.startswith('/wizard'):
@@ -383,7 +415,11 @@ try:
     assert host_pids(), 'Quit during stopping left Host down'
     assert json.loads((data/'updates/transaction.json').read_text())['phase']=='install-failed'
     record('quit-during-stopping-rolls-back-host-before-exit')
-    host_stop(); launch()
+    # Ordinary launch auto-checks the still-valid feed and can reach Ready
+    # before the next mutation. A menu check then reopens that cached item
+    # instead of fetching the edited feed (r6). Keep earlier automatic-reoffer
+    # acceptance intact, but make this remaining negative suite manual-only.
+    host_stop(); launch(automatic_checks=False)
 
     stage(first+2)
     path=feed/'appcast.xml'

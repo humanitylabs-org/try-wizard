@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from unittest.mock import Mock
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / 'next/mac/tools/self-update-launch-qa.py'
@@ -57,6 +58,158 @@ class AdmissionTests(unittest.TestCase):
             '105 /qa space/Wizard.app/Contentsfake/MacOS/Wizard',
         ])
         self.assertEqual(ns['helper_pid_rows'](text,bundle,'org.humanitylabs.wizard.mvp'),[101,104])
+
+
+class NegativeFeedTests(unittest.TestCase):
+    """Protocol fixtures exercise the real harness functions, not native Sparkle."""
+    def launch_fixture(self):
+        ns=harness_functions()
+        ns.update(installed=Path('/fixture/Wizard.app'), data=Path('/fixture/data'),
+                  base='http://127.0.0.1:1234', requests=[], version=lambda:'18002')
+        state={'build':'18002','phase':'idle','ready':False}
+        def open_app(command):
+            if '-SUEnableAutomaticChecks' not in command:
+                ns['requests'].append('/appcast.xml')
+                state.update(phase='ready',ready=True)
+        ns['run']=Mock(side_effect=open_app)
+        ns['notify']=Mock()
+        ns['wait_state']=lambda check: self.assertTrue(check(state))
+        ns['snapshot']=lambda:state.copy()
+        ns['time']=Mock()
+        return ns,state
+
+    def test_manual_launch_prevents_r6_cached_ready_without_changing_default_launch(self):
+        ns,state=self.launch_fixture()
+        ns['launch'](automatic_checks=False)
+        self.assertEqual(ns['run'].call_args.args[0][-2:],['-SUEnableAutomaticChecks','NO'])
+        self.assertEqual(ns['requests'],[])
+        self.assertEqual(state['phase'],'idle')
+        ns['launch']()
+        self.assertNotIn('-SUEnableAutomaticChecks',ns['run'].call_args.args[0])
+        self.assertEqual(state['phase'],'ready')
+
+    def test_manual_launch_refuses_unexpected_ready_or_early_feed_fetch(self):
+        for ready in (False,True):
+            with self.subTest(ready=ready):
+                ns,state=self.launch_fixture()
+                def premature_check(command):
+                    ns['requests'].append('/appcast.xml')
+                    if ready: state.update(phase='ready',ready=True)
+                ns['run'].side_effect=premature_check
+                with self.assertRaises(AssertionError): ns['launch'](automatic_checks=False)
+
+    def case_fixture(self, root, **changes):
+        ns=harness_functions()
+        path=Path(root)/'appcast.xml'; path.write_bytes(b'edited signed feed fixture')
+        digest=ns['hashlib'].sha256(path.read_bytes()).hexdigest()
+        initial={'phase':'idle','ready':False,'phaseHistory':[]}
+        final={'phase':'failed','message':'improperly signed','ready':False,'freshDownloadReady':False,
+               'phaseHistory':['checking','failed'],
+               'errors':[{'domain':'SUSparkleErrorDomain','code':1000},
+                         {'domain':'SUSparkleErrorDomain','code':3002}]}
+        final.update(changes)
+        ns.update(feed=Path(root),requests=[],feed_requests=[],snapshot=lambda:initial.copy(),
+                  version=lambda:'18002')
+        def check(command):
+            self.assertEqual(command,'update-check')
+            ns['requests'].append('/appcast.xml')
+            ns['feed_requests'].append({'sha256':digest,'bytes':path.stat().st_size})
+        ns['notify']=Mock(side_effect=check)
+        def wait(predicate, seconds):
+            self.assertTrue(predicate(final),'Negative oracle did not accept fresh failure')
+            return final
+        ns['wait_state']=wait
+        ns['record']=Mock()
+        ns['time']=Mock()
+        ns['time'].time.side_effect=[0,0,91]
+        return ns,initial,final,digest
+
+    def test_signed_feed_failure_requires_exact_fetched_bytes_and_error_chain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ns,_,final,digest=self.case_fixture(tmp)
+            ns['fail_without_replacement']('edited-feed','improperly signed',archive=False,signature=True,outer_code=1000)
+            ns['record'].assert_called_once_with('edited-feed',final)
+            self.assertEqual(final['requestEvidence']['feedSHA256'],digest)
+            self.assertEqual(final['requestEvidence']['paths'],['/appcast.xml'])
+
+    def test_negative_case_refuses_cached_ready_before_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ns,initial,_,_=self.case_fixture(tmp)
+            initial.update(phase='ready',ready=True)
+            with self.assertRaisesRegex(AssertionError,'cached Ready'):
+                ns['fail_without_replacement']('edited-feed','improperly signed',archive=False)
+            ns['notify'].assert_not_called()
+            ns['record'].assert_not_called()
+
+    def test_missing_or_wrong_feed_cannot_pass_even_with_signature_error(self):
+        for paths,receipt in [([],None),(['/appcast.xml'],None),(['/appcast.xml'],'wrong-digest')]:
+            with self.subTest(paths=paths,receipt=receipt), tempfile.TemporaryDirectory() as tmp:
+                ns,_,_,_=self.case_fixture(tmp)
+                def check(command):
+                    ns['requests'].extend(paths)
+                    if receipt: ns['feed_requests'].append({'sha256':receipt})
+                ns['notify'].side_effect=check
+                with self.assertRaisesRegex(AssertionError,'never reached its exact feed/archive'):
+                    ns['fail_without_replacement']('edited-feed','improperly signed',archive=False,signature=True,outer_code=1000)
+                ns['record'].assert_not_called()
+
+    def test_wrong_error_stale_failure_or_ready_cannot_pass(self):
+        changes=[{'errors':[]}, {'errors':[{'domain':'SUSparkleErrorDomain','code':4005},
+                                         {'domain':'SUSparkleErrorDomain','code':3002}]},
+                 {'message':'unrelated failure'}, {'phaseHistory':[]},
+                 {'ready':True}, {'freshDownloadReady':True}]
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                ns,_,_,_=self.case_fixture(tmp,**change)
+                with self.assertRaises(AssertionError):
+                    ns['fail_without_replacement']('edited-feed','improperly signed',archive=False,signature=True,outer_code=1000)
+                ns['record'].assert_not_called()
+
+    def test_feed_rejection_cannot_download_archive_or_replace_installed_build(self):
+        for replacement in (False,True):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as tmp:
+                ns,_,_,_=self.case_fixture(tmp)
+                if replacement: ns['version']=Mock(side_effect=['18002','18003'])
+                else:
+                    check=ns['notify'].side_effect
+                    def with_archive(command):
+                        check(command); ns['requests'].append('/Wizard-18003.zip')
+                    ns['notify'].side_effect=with_archive
+                with self.assertRaises(AssertionError):
+                    ns['fail_without_replacement']('edited-feed','improperly signed',archive=False,signature=True,outer_code=1000)
+                ns['record'].assert_not_called()
+
+    def test_http_receipt_hashes_the_exact_edited_feed_bytes_served(self):
+        # Exercise the actual native harness's Handler with real loopback HTTP;
+        # app/Sparkle callbacks remain outside this portable test's claim.
+        ns=harness_functions()
+        handler=next(n for n in ast.walk(ast.parse(SOURCE.read_text())) if isinstance(n,ast.ClassDef) and n.name=='Handler')
+        exec(compile(ast.Module(body=[handler],type_ignores=[]),str(SOURCE),'exec'),ns)
+        import urllib.request
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            ns.update(feed=root,evidence=root,feed_requests=[],requests=[])
+            server=ns['http'].server.ThreadingHTTPServer(('127.0.0.1',0),ns['Handler'])
+            thread=ns['threading'].Thread(target=server.serve_forever,daemon=True); thread.start()
+            try:
+                for body in [b'original signed feed',b'edited after signing']:
+                    (root/'appcast.xml').write_bytes(body)
+                    with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}/appcast.xml') as response:
+                        self.assertEqual(response.read(),body)
+                    self.assertEqual(ns['feed_requests'][-1],{'sha256':ns['hashlib'].sha256(body).hexdigest(),'bytes':len(body)})
+                self.assertEqual(ns['requests'],['/appcast.xml','/appcast.xml'])
+                self.assertEqual(json.loads((root/'feed-requests.json').read_text()),ns['feed_requests'])
+            finally:
+                server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+    def test_native_negative_suite_uses_manual_launch_after_host_stop(self):
+        text=SOURCE.read_text()
+        boundary=text.index("record('quit-during-stopping-rolls-back-host-before-exit')")
+        negative=text.index("fail_without_replacement('feed-edited-after-signing-rejected'",boundary)
+        tree=ast.parse(text[boundary:negative].split('\n',1)[1].replace('\n    ','\n').lstrip())
+        launches=[node for node in ast.walk(tree) if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='launch']
+        self.assertEqual(len(launches),1)
+        self.assertEqual([(kw.arg,ast.literal_eval(kw.value)) for kw in launches[0].keywords],[('automatic_checks',False)])
 
 
 class ReleaseMetadataTests(unittest.TestCase):
