@@ -27,6 +27,10 @@ def merge(path,updates):
     def represent(dumper,value):
         node=dumper.represent_data(value.value);node.tag=value.tag;return node
     Loader.add_multi_constructor('!',tagged);Dumper.add_representer(Tagged,represent)
+    # Preserve WAM's generated quoted loopback listen while merging image pins.
+    def represent_string(dumper,value):
+        return dumper.represent_scalar('tag:yaml.org,2002:str',value,style='"' if value.startswith('127.0.0.1:') else None)
+    Dumper.add_representer(str,represent_string)
     assert not path.is_symlink()
     doc=yaml.load(path.read_text(),Loader=Loader) if path.exists() else {};doc=doc or {}
     for service,image in updates.items():doc.setdefault('services',{}).setdefault(service,{}).update(image=image,pull_policy='if_not_present')

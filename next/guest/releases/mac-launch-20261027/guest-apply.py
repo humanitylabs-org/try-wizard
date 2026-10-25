@@ -169,6 +169,8 @@ def main():
     # restart through WAM, prove actual IDs, then remove every old unused local image/cache from this clone.
     run(['python3',ROOT/'preparation/guest-security-apply.py','--finish'],timeout=3600)
     store.verify(WORK,store.inherited(WORK))
+    states=migration.default_states(migration.factory_manager(ROOT,Path('/home/wizard/runtipi')),release)
+    (WORK/'default-app-states.json').write_text(json.dumps(states,indent=2)+'\n')
     connection=json.loads(run(['sudo','-iu','wizard','wam','fresh-agent','status']))
     assert connection['ok'] is True, 'fresh-agent connection failed: '+json.dumps(connection['checks'])
     (WORK/'fresh-agent-status.json').write_text(json.dumps(connection,indent=2)+'\n')

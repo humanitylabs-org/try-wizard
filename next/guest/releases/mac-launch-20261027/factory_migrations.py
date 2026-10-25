@@ -46,22 +46,37 @@ def clean_overlays(rt, work):
     (work / 'factory-overlays.json').write_text(json.dumps({'removed': removed}, indent=2) + '\n')
 
 
-def prepare(root, rt, work, invoke):
-    """Remove precisely the known factory leftovers, not arbitrary owner overrides."""
+def factory_manager(root, rt):
     import sys
     sys.path.insert(0, str(root / 'final/wam'))
     from wam.cli import Config, installed_ids
     os.environ['WIZARD_OS_HOME'] = '/home/wizard/.wizard-os'
     c = Config()
     c.runtipi_root = rt
-    manager = c.runtipi()
-    legacy = 'wizard-shell'
+    return c.runtipi()
+
+
+def prepare(root, rt, work, invoke):
+    """Retire only the gated pristine legacy install, through its lifecycle API."""
+    manager = factory_manager(root, rt)
     empty_legacy_state(rt / 'app-data/wizardapps/wizard-shell/data')
     # Authenticated lifecycle API; no database surgery and no second gateway writer.
+    from wam.cli import installed_ids
     retire_legacy(manager, lambda: installed_ids(manager))
     receipt = {'legacyUninstalled': True, 'ownerMigration': 'wam shell-split (not a factory reset)'}
     (work / 'factory-migrations.json').write_text(json.dumps(receipt, indent=2) + '\n')
     return receipt
+
+
+def default_states(manager, release):
+    states = {}
+    for row in release['default_apps'].values():
+        if row and row.get('app'):
+            app = row['app']
+            state = manager.wait_status(app + ':wizardapps', {'running'}, timeout=300)
+            states[app] = state
+            assert state == 'running', 'factory default not running: ' + app + ': ' + str(state)
+    return states
 
 
 def retire_legacy(manager, installed):

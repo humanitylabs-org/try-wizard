@@ -33,6 +33,21 @@ class FactoryMigrationTests(unittest.TestCase):
             migrations.retire_legacy(manager,lambda:{'wizard-shell'})
         manager.uninstall.assert_not_called()
 
+    def test_stopped_default_is_fatal_not_a_factory_exception(self):
+        from unittest.mock import Mock
+        manager=Mock();manager.wait_status.return_value='stopped'
+        release={'default_apps':{'transcription':{'app':'transcriber'}}}
+        with self.assertRaisesRegex(AssertionError,'default not running: transcriber'):
+            migrations.default_states(manager,release)
+
+    def test_all_declared_default_apps_are_checked(self):
+        from unittest.mock import Mock
+        manager=Mock();manager.wait_status.return_value='running'
+        release={'default_apps':{'a':{'app':'wizard-ux'},'b':{'app':'wizard-agent-service'},'c':None}}
+        result=migrations.default_states(manager,release)
+        self.assertEqual(result,{'wizard-ux':'running','wizard-agent-service':'running'})
+        self.assertEqual(manager.wait_status.call_count,2)
+
     def test_unknown_overlay_refused_and_retained(self):
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/'docker-compose.yml';path.write_text('services: {}\n')
@@ -85,11 +100,12 @@ class FactoryMigrationTests(unittest.TestCase):
         security=module('guest-security-apply')
         with tempfile.TemporaryDirectory() as td,patch.object(security.os,'chown'):
             path=Path(td)/'wizard-ux/docker-compose.yml';path.parent.mkdir()
-            path.write_text('# Written by wam (fresh mode)\nservices:\n  wizard-ux:\n    ports: !reset []\n')
+            path.write_text('# Written by wam (fresh mode)\nservices:\n  wizard-ux:\n    ports: !reset []\n    environment:\n      WIZARD_SHELL_LISTEN: \"127.0.0.1:8801\"\n')
             pin='ghcr.io/example/ux@sha256:'+'a'*64
             security.merge(path,{'wizard-ux':pin})
             self.assertTrue(path.read_text().startswith('# Written by wam'))
             self.assertIn('!reset',path.read_text())
+            self.assertIn('\"127.0.0.1:8801\"',path.read_text())
             self.assertIn(pin,path.read_text())
 
     def test_foreign_overlay_is_not_laundered_as_wam_owned(self):
