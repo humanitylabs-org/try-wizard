@@ -31,10 +31,11 @@ def install_package(source,dest):
         if member.is_dir():target.mkdir(parents=True,exist_ok=True);target.chmod(0o755)
         else:target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(member,target);target.chmod(0o755 if member.stat().st_mode&0o111 else 0o644)
 
-def reattach_sealed_wam_checkout(directory,repo,as_user=('sudo','-u','wizard')):
+def reattach_sealed_wam_checkout(directory,repo,as_user=('sudo','-u','wizard'),evidence=None):
     """The retained factory was sealed with .git stripped and SOURCE_COMMIT written (seal-factory.py).
     get.sh's pinned path needs a git checkout to upgrade in place, so rebuild .git at the sealed
-    commit without touching the work tree, and fail closed if any tracked file differs from it."""
+    commit without touching the work tree. If any tracked file differs from the stamp, the tree is
+    discarded (with drift evidence) so the installer clones the pinned commit fresh."""
     directory=Path(directory)
     if not directory.exists() or (directory/'.git').exists():return None
     old=(directory/'SOURCE_COMMIT').read_text().strip()
@@ -43,9 +44,14 @@ def reattach_sealed_wam_checkout(directory,repo,as_user=('sudo','-u','wizard')):
     run([*g,'init','-q']);run([*g,'remote','add','origin',repo])
     run([*g,'fetch','-q','origin',old],timeout=900);run([*g,'reset','-q','--mixed','FETCH_HEAD'])
     assert run([*g,'rev-parse','HEAD']).strip()==old
-    drift=run([*g,'status','--porcelain','--untracked-files=no']).strip()
-    assert not drift,'sealed App Manager tree differs from SOURCE_COMMIT '+old+': '+drift[:2000]
-    return old
+    drift=run([*g,'status','--porcelain','--untracked-files=no']).rstrip()
+    if not drift:return old
+    # The stamp does not describe the tree, so nothing in it is trusted: record the drift, then remove the
+    # tree so get.sh clones the pinned App Manager fresh. Nothing from the unverified tree is reused.
+    if evidence is not None:
+        Path(evidence).write_text(json.dumps({'sourceCommit':old,'trackedDrift':drift.splitlines(),'action':'removed; pinned installer clones fresh'},indent=2)+'\n')
+    shutil.rmtree(directory);assert not directory.exists()
+    return 'removed'
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--check-pristine',action='store_true');p.add_argument('--apply',action='store_true');a=p.parse_args();pristine()
@@ -88,7 +94,7 @@ def main():
     env.update(WIZARD_RELEASE=release['version'],WIZARD_RELEASE_BASE='file://'+str(release_dir),WIZARD_STRICT='1',WIZARD_MODE='fresh',WIZARD_PRIVATE_ACCESS='tailscale')
     for component,key in [('wizard-app-manager','WAM_IMAGE'),('wizard-ux','WIZARD_UX_IMAGE'),('wizard-agent-service','WIZARD_AGENT_SERVICE_IMAGE')]:
         item=release['images'][component];env[key]=item['ref']+'@'+item['digest']
-    reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'))
+    reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'),evidence=WORK/'sealed-wam-drift.json')
     run(['bash',installer],env=env,stdin=subprocess.DEVNULL,timeout=3600)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']
     installed=json.loads(Path('/home/wizard/.wizard-os/release-pins.json').read_text());assert installed==release

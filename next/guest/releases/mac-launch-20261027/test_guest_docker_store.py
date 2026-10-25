@@ -100,14 +100,23 @@ class SealedWamCheckoutTests(unittest.TestCase):
             self.assertEqual(m.reattach_sealed_wam_checkout(box,str(repo),as_user=()),sha)
             self.assertTrue((box/'.git').is_dir());self.assertTrue((box/'.venv').is_dir())
             self.assertIsNone(m.reattach_sealed_wam_checkout(box,str(repo),as_user=()))
-    def test_tracked_drift_in_the_sealed_tree_fails_closed(self):
+    def test_tracked_drift_discards_the_unverified_tree_with_evidence(self):
         m=self._module()
         with tempfile.TemporaryDirectory() as tmp:
             repo,box,sha=self._sealed(tmp);(box/'install.sh').write_text('echo tampered\n')
-            with self.assertRaises(AssertionError):m.reattach_sealed_wam_checkout(box,str(repo),as_user=())
+            ev=Path(tmp)/'drift.json'
+            self.assertEqual(m.reattach_sealed_wam_checkout(box,str(repo),as_user=(),evidence=ev),'removed')
+            self.assertFalse(box.exists())
+            self.assertIn(' M install.sh',json.loads(ev.read_text())['trackedDrift'])
     def test_runs_before_the_installer(self):
         src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
         self.assertLess(src.index("reattach_sealed_wam_checkout('/home/wizard"),src.index("run(['bash',installer]"))
+
+class SealStampTests(unittest.TestCase):
+    def test_seal_proves_the_wam_tree_before_stamping_source_commit(self):
+        src=(Path(__file__).resolve().parent/'seal-factory.py').read_text()
+        self.assertLess(src.index("'App Manager tracked tree differs from the pinned commit'"),src.index("SOURCE_COMMIT').write_text"))
+        self.assertLess(src.index("'App Manager HEAD is not the pinned commit'"),src.index("shutil.rmtree('/home/wizard/wizard-app-manager/.git')"))
 
 if __name__=='__main__':unittest.main()
 

@@ -35,8 +35,13 @@ for p in Path('/etc/ssh').glob('ssh_host_*'):p.unlink()
 for p in Path('/var/lib/tailscale').glob('*.state'):p.unlink()
 Path('/etc/machine-id').write_text('')
 # No developer checkout history is included.
-if Path('/home/wizard/wizard-app-manager/.git').exists():shutil.rmtree('/home/wizard/wizard-app-manager/.git')
-pins=json.loads((R/'source-pins.json').read_text());Path('/home/wizard/wizard-app-manager/SOURCE_COMMIT').write_text(pins['wam']+'\n')
+pins=json.loads((R/'source-pins.json').read_text())
+# The SOURCE_COMMIT stamp must describe the tree: prove HEAD and a clean tracked tree before dropping history.
+_wam=['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager']
+assert subprocess.run([*_wam,'rev-parse','HEAD'],capture_output=True,text=True,check=True).stdout.strip()==pins['wam'],'App Manager HEAD is not the pinned commit'
+assert not subprocess.run([*_wam,'status','--porcelain','--untracked-files=no'],capture_output=True,text=True,check=True).stdout.strip(),'App Manager tracked tree differs from the pinned commit'
+shutil.rmtree('/home/wizard/wizard-app-manager/.git')
+Path('/home/wizard/wizard-app-manager/SOURCE_COMMIT').write_text(pins['wam']+'\n')
 receipt={'schema':1,'pristine':True,'sources':pins,'containers':containers,'runtime_secrets_absent':not (OS/'runtime-secrets').exists(),'agent_stores_empty':not (OS/'agents').exists(),'account_identity_absent':True,'sessions_empty':True,'ssh_and_machine_identity_absent':True,'factory_runtime_secrets_unit_enabled':Path('/etc/systemd/system/multi-user.target.wants/wizard-runtime-secrets.service').is_symlink()}
 (R/'factory-sanitization.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt,indent=2),flush=True)
 subprocess.run(['journalctl','--rotate'],check=True);subprocess.run(['journalctl','--vacuum-time=1s'],check=True)
