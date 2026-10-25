@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Inside only the disposable retained-factory clone. Frozen RC first, Mac layers second."""
-import argparse, hashlib, json, os, shutil, sqlite3, subprocess
+import argparse, hashlib, json, os, re, shutil, sqlite3, subprocess
 from pathlib import Path
 import local_oci as oci
 import guest_docker_store as store
@@ -30,6 +30,22 @@ def install_package(source,dest):
         assert not any(x.is_symlink() for x in [target,*target.parents]),'redirected overlay refused'
         if member.is_dir():target.mkdir(parents=True,exist_ok=True);target.chmod(0o755)
         else:target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(member,target);target.chmod(0o755 if member.stat().st_mode&0o111 else 0o644)
+
+def reattach_sealed_wam_checkout(directory,repo,as_user=('sudo','-u','wizard')):
+    """The retained factory was sealed with .git stripped and SOURCE_COMMIT written (seal-factory.py).
+    get.sh's pinned path needs a git checkout to upgrade in place, so rebuild .git at the sealed
+    commit without touching the work tree, and fail closed if any tracked file differs from it."""
+    directory=Path(directory)
+    if not directory.exists() or (directory/'.git').exists():return None
+    old=(directory/'SOURCE_COMMIT').read_text().strip()
+    assert re.fullmatch(r'[0-9a-f]{40}',old),'sealed App Manager has no exact SOURCE_COMMIT'
+    g=[*as_user,'git','-C',str(directory)]
+    run([*g,'init','-q']);run([*g,'remote','add','origin',repo])
+    run([*g,'fetch','-q','origin',old],timeout=900);run([*g,'reset','-q','--mixed','FETCH_HEAD'])
+    assert run([*g,'rev-parse','HEAD']).strip()==old
+    drift=run([*g,'status','--porcelain','--untracked-files=no']).strip()
+    assert not drift,'sealed App Manager tree differs from SOURCE_COMMIT '+old+': '+drift[:2000]
+    return old
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--check-pristine',action='store_true');p.add_argument('--apply',action='store_true');a=p.parse_args();pristine()
@@ -72,6 +88,7 @@ def main():
     env.update(WIZARD_RELEASE=release['version'],WIZARD_RELEASE_BASE='file://'+str(release_dir),WIZARD_STRICT='1',WIZARD_MODE='fresh',WIZARD_PRIVATE_ACCESS='tailscale')
     for component,key in [('wizard-app-manager','WAM_IMAGE'),('wizard-ux','WIZARD_UX_IMAGE'),('wizard-agent-service','WIZARD_AGENT_SERVICE_IMAGE')]:
         item=release['images'][component];env[key]=item['ref']+'@'+item['digest']
+    reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'))
     run(['bash',installer],env=env,stdin=subprocess.DEVNULL,timeout=3600)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']
     installed=json.loads(Path('/home/wizard/.wizard-os/release-pins.json').read_text());assert installed==release
