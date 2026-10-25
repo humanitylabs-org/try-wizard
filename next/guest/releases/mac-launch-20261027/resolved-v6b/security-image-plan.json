@@ -4,7 +4,7 @@
   "mandatoryQueueId": 81,
   "images": [
     "ghcr.io/humanitylabs-org/wizard-agent-service@sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
-    "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+    "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:5c629b1bbcc885ae744a23132b24d3ad28ac2ead1d6d8b9efa573611f98a85d8",
     "ghcr.io/humanitylabs-org/wizard-mac-security-browser@sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797",
     "ghcr.io/humanitylabs-org/wizard-mac-security-chatgpt@sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5",
     "ghcr.io/humanitylabs-org/wizard-mac-security-claude@sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2",
@@ -167,7 +167,7 @@
       "key": "wam",
       "resolution": "selected-core-image",
       "receipt": "image-packaging/wam/result.json",
-      "sourceCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4"
+      "sourceCommit": "f5cb1d0ee4d4e9cbfe69360e9fb12df953c47958"
     },
     {
       "key": "service",
@@ -405,10 +405,10 @@
       "imageId": "sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964"
     },
     "wam": {
-      "image": "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+      "image": "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:5c629b1bbcc885ae744a23132b24d3ad28ac2ead1d6d8b9efa573611f98a85d8",
       "receipt": "image-packaging/wam/result.json",
-      "receiptSha256": "bbea488e11220ca678cf39161fdbc800a71bfdd6e735ad66fca34d41c200519c",
-      "imageId": "sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40"
+      "receiptSha256": "f656a280e1239d3cf02d13bbb4c10b9d39a4b0ca9d4b8f7db98d67db101ae474",
+      "imageId": "sha256:5c629b1bbcc885ae744a23132b24d3ad28ac2ead1d6d8b9efa573611f98a85d8"
     },
     "service": {
       "image": "ghcr.io/humanitylabs-org/wizard-agent-service@sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
