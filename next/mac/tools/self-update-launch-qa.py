@@ -127,8 +127,27 @@ def launch():
     notify('connect '+base+'/wizard/')
     time.sleep(2)
 def stage(build, mutate=None, signing_key=None):
-    run(['python3',source/'tools/make-update-feed.py',root/f'build-{build}/Wizard.app',feed,
-         '--base-url',base,'--sign-tool',signer,'--key-file',key], stdout=subprocess.DEVNULL)
+    # QA artifacts are deliberately refused by the release feed tool. Construct
+    # this disposable, loopback-only feed here, never through that release path.
+    import xml.etree.ElementTree as X
+    bundle=root/f'build-{build}/Wizard.app'
+    metadata=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
+    manifest=json.loads((bundle/'Contents/Resources/wizard-release.json').read_text())
+    assert manifest['qa'] is True and metadata['WizardUpdateQA'] is True
+    archive=feed/f'Wizard-{build}.zip'
+    run(['ditto','-c','-k','--sequesterRsrc','--keepParent',bundle,archive])
+    signature=subprocess.check_output([signer,'--ed-key-file',key,'-p',archive],text=True).strip()
+    ns='http://www.andymatuschak.org/xml-namespaces/sparkle'; wn='https://humanitylabs.co/wizard-updates/v1'
+    X.register_namespace('sparkle',ns); X.register_namespace('wizard',wn)
+    rss=X.Element('rss',version='2.0'); channel=X.SubElement(rss,'channel'); item=X.SubElement(channel,'item')
+    X.SubElement(item,'title').text='Wizard '+metadata['CFBundleShortVersionString']
+    for k,v in [('version',str(build)),('shortVersionString',metadata['CFBundleShortVersionString']),('minimumSystemVersion','14.0.0'),('hardwareRequirements','arm64')]:
+        X.SubElement(item,'{'+ns+'}'+k).text=v
+    X.SubElement(item,'{'+wn+'}contract').text=json.dumps(manifest)
+    X.SubElement(item,'{'+wn+'}sha256').text=hashlib.sha256(archive.read_bytes()).hexdigest()
+    X.SubElement(item,'enclosure',{'url':base+'/'+archive.name,'type':'application/octet-stream','length':str(archive.stat().st_size),'{'+ns+'}edSignature':signature})
+    path=feed/'appcast.xml'; X.ElementTree(rss).write(path,encoding='utf-8',xml_declaration=True)
+    run([signer,'--ed-key-file',key,path],stdout=subprocess.DEVNULL)
     if mutate or signing_key:
         import xml.etree.ElementTree as X
         X.register_namespace('sparkle','http://www.andymatuschak.org/xml-namespaces/sparkle')
@@ -143,6 +162,22 @@ def add_delta(item):
     ns='{http://www.andymatuschak.org/xml-namespaces/sparkle}'
     delta=copy.deepcopy(item.find('enclosure')); delta.set(ns+'deltaFrom',str(first+1))
     X.SubElement(item,ns+'deltas').append(delta)
+
+def host_pids():
+    executable=installed/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'
+    rows=subprocess.check_output(['ps','-axo','pid=,command='],text=True)
+    return [int(line.split(None,1)[0]) for line in rows.splitlines() if len(line.split(None,1))==2 and line.split(None,1)[1].startswith(str(executable)+' ')]
+def host_start():
+    notify('update-host-start')
+    end=time.monotonic()+15
+    while not host_pids() and time.monotonic()<end: time.sleep(.1)
+    assert host_pids(), 'Fixture Host did not start'
+def host_stop():
+    # Only this installation's fixture; never broadcast a quit to another lane.
+    for pid in host_pids(): os.kill(pid,signal.SIGTERM)
+    end=time.monotonic()+10
+    while host_pids() and time.monotonic()<end: time.sleep(.1)
+    assert not host_pids()
 
 def ready():
     notify('update-check')
@@ -207,7 +242,7 @@ try:
     run(['swiftc',source/'tools/update-qa-notify.swift','-o',root/'notify'])
     env=os.environ|{'SPARKLE_DIR':str(a.sparkle),'SPARKLE_PUBLIC_KEY':public,
                     'SPARKLE_FEED':'http://127.0.0.1:1/appcast.xml','RELEASE_ID':a.source_head,
-                    'DMG':'0','SIGN_IDENTITY':'-','GUEST_UPDATE_PAYLOAD':'','WIZARD_UPDATE_QA':'1'}
+                    'DMG':'0','SIGN_IDENTITY':'-','GUEST_UPDATE_PAYLOAD':'','WIZARD_UPDATE_QA':'1','WIZARD_UPDATE_HOST_FIXTURE':'1'}
     for build in builds:
         with (evidence/f'build-{build}.log').open('w') as log:
             run(['bash',source/'build.sh'],env=env|{'BUILD':str(build),'VER':f'0.7.1-qa.{build}'},stdout=log,stderr=subprocess.STDOUT)
@@ -221,6 +256,8 @@ try:
         assert metadata['SURequireSignedFeed'] and metadata['SUVerifyUpdateBeforeExtraction'] and metadata['SUPublicEDKey']==public
         assert metadata.get('SUSignedFeedFailureExpirationInterval') == 0
         assert metadata.get('SUAllowsAutomaticUpdates') is False
+        assert metadata.get('WizardUpdateQA') is True
+        assert json.loads((bundle/'Contents/Resources/wizard-release.json').read_text())['qa'] is True
         (evidence/f'signing-{build}.txt').write_text(info)
     record('three-native-builds-ad-hoc-no-Developer-ID-signed-feed-required',list(builds))
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -330,7 +367,24 @@ try:
     fail_without_replacement('validly-signed-wrong-SHA256-rejected','Archive SHA-256 or size mismatch')
     import base64
     stage(first+2,lambda item:item.find('enclosure').set('{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature',base64.b64encode(bytes(64)).decode()))
+    fail_without_replacement('private-Ed25519-rejected-before-ready','Ed25519 signature is invalid')
+    # Force only this QA private precheck off, so Sparkle's post-admission
+    # failure still proves rollback with a running isolated Host.
+    run(['defaults','write',domain,'QAUpdateSkipPrivateSignature','-bool','true'])
+    time.sleep(.5); host_start()
     fail_without_replacement('valid-SHA256-invalid-Ed25519-rejected','improperly signed',signature=True,install=True,outer_code=4005)
+    rollback=wait_state(lambda s:s.get('phase')=='failed' and s.get('hostRunning') and not s.get('restartAuthorized') and not s.get('preparing'))
+    assert json.loads((data/'updates/transaction.json').read_text())['phase']=='install-failed'
+    record('post-admission-signature-failure-restarts-host-unfreezes-releases-lease',rollback)
+    run(['defaults','delete',domain,'QAUpdateSkipPrivateSignature']); host_stop()
+    stage(first+2); ready(); host_start(); notify('update-restart')
+    wait_state(lambda s:s.get('phase')=='stopping' and s.get('preparing'))
+    quit_app()
+    assert host_pids(), 'Quit during stopping left Host down'
+    assert json.loads((data/'updates/transaction.json').read_text())['phase']=='install-failed'
+    record('quit-during-stopping-rolls-back-host-before-exit')
+    host_stop(); launch()
+
     stage(first+2)
     path=feed/'appcast.xml'
     signed=path.read_bytes(); assert b'Wizard ' in signed
@@ -374,6 +428,7 @@ finally:
         if preference_backup is not None:
             try:
                 cleanup = cleanup_app()
+                host_stop()
                 (evidence/'process-cleanup.json').write_text(json.dumps(cleanup, indent=2)+'\n')
             finally:
                 # `defaults import` merges, so clear QA-written keys before restoring.

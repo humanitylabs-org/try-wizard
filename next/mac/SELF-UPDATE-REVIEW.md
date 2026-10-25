@@ -146,3 +146,60 @@ Ed25519-signed feed/archive exercises its successor. Existing testers do not gai
 this new updater merely because the PR merges. Feed publication/readback and any
 manual bootstrap are separate approved release operations; re-check the actual
 public/tester builds at that time.
+
+## Round 2 / r6 (supersedes r5 pending status above)
+
+N1 (P1): `didAbortWithError` calls the idempotent rollback when preparing or
+admitted. Before Host stop, require a live relay/file and recheck APFS important
+usage capacity against the installed rollback app plus twice the ZIP's expanded
+size (zipinfo metadata only, no extraction). A later listener failure invalidates
+Ready. Admission removes the stale-stage marker. Public `propertiesDictionary`
+contains `enclosure["sparkle:edSignature"]` (Sparkle 2.10 `SUAppcastItem.m:506,635`);
+CryptoKit now checks that signature over mapped private bytes before Ready.
+Sparkle still repeats verification after explicit restart admission.
+
+N2 (P2): power-off intent expires after three seconds; cancelled shutdown cannot
+poison future attempts. Guard exits roll back rather than silently freezing.
+Power-off does not release an activation/admitted lease. Interrupted guest
+activation retains its existing durable `guest-activating` recovery path.
+
+N3 (P2): Quit during stopping cancels restart, waits for the bounded stop response,
+rolls back, then waits for Host restart before asking to quit again. If restart
+cannot be confirmed in 15 seconds, Quit stays cancelled with a visible message.
+The guest-activation Quit refusal remains ahead of preparation handling.
+
+N4 (P2): always reply `.skip`, even if persisting the cancellation snapshot fails;
+the in-memory snapshot remains available to dismissal restoration.
+
+P3s: clear the quit deadline on fire; keep Installing throughout admitted
+callbacks; sweep stale directories with per-entry best-effort deletion and skip
+flock-held directories; hold the directory lock for the artifact lifetime;
+expire incomplete relay headers after ten seconds. Use APFS important-usage
+capacity. QA builds stamp `qa:true` in release metadata and `WizardUpdateQA:true`
+in Info.plist; the release feed tool refuses either stamp. The disposable harness
+constructs its own loopback feed and cannot use that release tool.
+
+r6 adds private bad-Ed25519 refusal and an explicitly QA-only private-check bypass
+to reach the real Sparkle bad-signature rollback with a running Host fixture.
+It requires Host running, no restart authorization, no preparation freeze and
+`install-failed`. Another case quits during stopping and requires the fixture
+Host to be running after app exit. The fixture has no VM/disk operations and is
+selected only by both QA build and explicit fixture flags. Native results remain
+pending until r6 completes; typechecks alone do not validate those cases.
+
+r5 failed before preference export/mutation or application launch. The removed
+`SUSignedFeedFailureExpirationInterval=0` was a build regression, not a bad harness
+assertion: Sparkle `SUAppcastDriver.m:136–151` uses a default expiration if absent,
+while zero disables recovery from invalid signed feeds. Restore zero and retain
+the assertion. The focused metadata regression fails on the r5 source and passes
+with this fix. Both QA-stamp refusal cases likewise fail on r5 and pass here.
+There were no r5 preference backups to restore or r5 app processes. Existing
+preferences and the active app/Host belonged to the separate mac-308 live lane;
+they were left untouched. The harness refuses to start while they run. Preference
+restoration already uses nested try/finally, including cleanup failures, and still
+clears the domain before importing the exact backup and comparing it.
+
+Open before launch: a release-sized archive over HTTPS from real R2/CDN,
+including production HTTPS admission, redirects/status and origin behaviour.
+This hop is explicitly outside r6 scope. Full contracts and native harness,
+visual/runtime inspection and fresh independent review remain pending gates.

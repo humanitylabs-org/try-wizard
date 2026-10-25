@@ -3,6 +3,7 @@
 import Foundation
 import CryptoKit
 import Network
+import Darwin
 
 enum WizardUpdate {
     static var dir: URL {
@@ -41,11 +42,26 @@ try Data("preserve".utf8).write(to: preserved)
 try UpdateArtifact.sweepStaleDownloads()
 check(!manager.fileExists(atPath: stale.path), "abandoned stage removed")
 check(manager.fileExists(atPath: preserved.path), "non-download state preserved")
+let held = WizardUpdate.dir.appendingPathComponent("download-held")
+try manager.createDirectory(at: held, withIntermediateDirectories: true)
+let heldFD = open(held.appendingPathComponent("lock").path, O_CREAT | O_RDWR, 0o600)
+check(heldFD >= 0 && flock(heldFD, LOCK_EX | LOCK_NB) == 0, "fixture lock")
+try UpdateArtifact.sweepStaleDownloads()
+check(manager.fileExists(atPath: held.path), "live stage preserved")
+flock(heldFD, LOCK_UN); close(heldFD)
+try UpdateArtifact.sweepStaleDownloads()
+check(!manager.fileExists(atPath: held.path), "unlocked stage removed")
 let file = WizardUpdate.dir.appendingPathComponent("fixture.zip")
 let bytes = Data("verified archive fixture".utf8)
 try bytes.write(to: file)
 let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
 try UpdateArtifact.verify(file, hash: digest, bytes: UInt64(bytes.count))
+let signingKey = Curve25519.Signing.PrivateKey()
+let signature = try signingKey.signature(for: bytes).base64EncodedString()
+let publicKey = signingKey.publicKey.rawRepresentation.base64EncodedString()
+try UpdateArtifact.verifySignature(file, signature: signature, publicKey: publicKey)
+mustRefuse("bad Ed25519") { try UpdateArtifact.verifySignature(file, signature: Data(repeating: 0, count: 64).base64EncodedString(), publicKey: publicKey) }
+mustRefuse("wrong Ed25519 key") { try UpdateArtifact.verifySignature(file, signature: signature, publicKey: Curve25519.Signing.PrivateKey().publicKey.rawRepresentation.base64EncodedString()) }
 mustRefuse("wrong size") { try UpdateArtifact.verify(file, hash: digest, bytes: UInt64(bytes.count + 1)) }
 mustRefuse("wrong SHA") { try UpdateArtifact.verify(file, hash: String(repeating: "0", count: 64), bytes: UInt64(bytes.count)) }
 print("UpdateArtifact capacity, scheme, stale-sweep, size and digest contracts: PASS")

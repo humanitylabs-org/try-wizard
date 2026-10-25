@@ -28,7 +28,9 @@ final class NoticeBarView: NSView {
     private var phaseHistory: [String] = []
     private var errorChain: [[String: Any]] = []
     private var quitDeadline: DispatchWorkItem?
-    private var powerOff = false
+    private var powerOffUntil = Date.distantPast
+    private var powerOff: Bool { Date() < powerOffUntil }
+    private var quitAfterStop = false
     private var powerOffObserver: NSObjectProtocol?
     private var cancellationSnapshot: URL { WizardUpdate.dir.appendingPathComponent("cancelled-release.json") }
     private var stagedSnapshot: URL { WizardUpdate.dir.appendingPathComponent("staged-release.json") }
@@ -198,6 +200,8 @@ final class NoticeBarView: NSView {
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
     private var noticeToken = UUID()
     private func show(_ state: String, _ text: String, retry: Bool = false) {
+        let state = restartAuthorized && ["downloading", "verifying"].contains(state) ? "installing" : state
+        let text = restartAuthorized && state == "installing" ? "Installing update and restarting…" : text
         phase = state; message = text; label.stringValue = text
         if phaseHistory.last != state { phaseHistory.append(state); phaseHistory = Array(phaseHistory.suffix(64)) }
         view.isHidden = false; height?.constant = 94
@@ -218,10 +222,11 @@ final class NoticeBarView: NSView {
     }
     var snapshot: [String: Any] {
         let installed = NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String ?? "unconfirmed"
-        return ["phaseHistory": phaseHistory, "errors": errorChain, "freshDownloadReady": freshDownloadReady, "pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden]
+        return ["phaseHistory": phaseHistory, "errors": errorChain, "freshDownloadReady": freshDownloadReady, "pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "preparing": preparing, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden]
     }
     private func requestPowerOff() {
-        powerOff = true
+        powerOffUntil = Date().addingTimeInterval(3)
+        guard !activatingGuest, !restartAuthorized else { return }
         artifact?.cancel()
         // Production never creates a Sparkle installer before explicit restart
         // admission. A pre-installer reply only cancels the download cycle.
@@ -234,7 +239,9 @@ final class NoticeBarView: NSView {
         show("quit-deferring", "Finishing update preparation before quitting… (up to 45 seconds)")
         guard quitDeadline == nil else { return }
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.ordinaryQuitPending else { return }
+            guard let self else { return }
+            self.quitDeadline = nil
+            guard self.ordinaryQuitPending else { return }
             self.show("quit-timeout", "Update preparation stopped — quitting Wizard")
             self.ordinaryQuitPending = false
             self.installCycleActive = false
@@ -248,13 +255,18 @@ final class NoticeBarView: NSView {
     func shouldTerminate() -> NSApplication.TerminateReply {
         if restartAuthorized { return .terminateNow }
         if powerOff { requestPowerOff(); return .terminateNow }
+        if activatingGuest { return .terminateCancel }
+        if preparing {
+            quitAfterStop = true
+            show("stopping", "Finishing safe Host shutdown before quitting… (up to 105 seconds)")
+            return .terminateCancel
+        }
         if let reply = ready {
             deferQuit(); ready = nil; discardStagedUpdate(reply); return .terminateCancel
         }
         if let cancel {
             deferQuit(); self.cancel = nil; cancel(); return .terminateCancel
         }
-        if activatingGuest { return .terminateCancel }
         if preparing { releaseLease() }
         if installCycleActive { deferQuit(); return .terminateCancel }
         return .terminateNow
@@ -265,6 +277,7 @@ final class NoticeBarView: NSView {
         if isRecording() || qaBusy { show("busy", "Recording or agent work is active — update after it finishes"); return }
         if HostControl.hasForeignRunner { show("busy", "Another candidate's Wizard Host is running — close that candidate before updating"); return }
         plannedGuestActivation = incomingGuest && Store.active?.kind == .thisMac && WizardShared.osInstalled
+        stoppedHost = false; quitAfterStop = false
         preparing = true
         admitWebRestart { [weak self] idle in
             guard let self, self.preparing else { return }
@@ -273,18 +286,24 @@ final class NoticeBarView: NSView {
                 self.show("busy", "Finish recording or let the chat finish loading before updating")
                 return
             }
+            if self.quitAfterStop { self.fail("Restart cancelled by Quit"); return }
             self.onFreeze(true)
             self.prepareIdleHost()
         }
     }
     private func prepareIdleHost() {
         WizardUpdate.idle { [weak self] reason in
-            guard let self, self.preparing, self.ready != nil, !self.ordinaryQuitPending, !self.powerOff else { return }
+            guard let self else { return }
+            guard self.preparing, self.ready != nil, !self.ordinaryQuitPending, !self.powerOff else { self.fail("Restart preparation cancelled"); return }
+            if self.quitAfterStop { self.fail("Restart cancelled by Quit"); return }
             if let reason { self.preparing = false; self.onFreeze(false); self.show("busy", reason); return }
             do {
                 try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 self.leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
                 guard self.leaseFD >= 0, flock(self.leaseFD, LOCK_EX | LOCK_NB) == 0 else { throw WizardUpdate.error("Another update is already active") }
+                try self.artifact?.requireLive()
+                guard self.artifact != nil else { throw WizardUpdate.error("Verified archive is unavailable") }
+                try self.artifact?.requireAdmissionCapacity(Bundle.main.bundleURL)
                 let prior = WizardUpdate.dir.appendingPathComponent("previous.app")
                 try? FileManager.default.removeItem(at: prior)
                 try WizardUpdate.run("/usr/bin/ditto", [Bundle.main.bundleURL.path, prior.path])
@@ -292,7 +311,9 @@ final class NoticeBarView: NSView {
                 self.stoppedHost = HostControl.isRunning
                 try WizardUpdate.write(["nonce": nonce, "pid": getpid(), "peer": WizardRelease.peer, "expires": Date().timeIntervalSince1970 + 110, "appPath": Bundle.main.bundleURL.standardizedFileURL.path], WizardUpdate.request)
                 try WizardUpdate.write(["nonce": nonce, "from": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "to": self.version, "releaseID": self.incomingReleaseID, "guestPatch": self.incomingGuest, "applyGuest": self.plannedGuestActivation, "phase": "prepared", "appPath": Bundle.main.bundleURL.path, "restartHost": self.stoppedHost, "dataHome": WizardShared.supportDir.path, "previous": prior.path], WizardUpdate.journal)
-                if !self.stoppedHost { self.install(); return }
+                if !self.stoppedHost {
+                    if self.quitAfterStop { self.fail("Restart cancelled by Quit") } else { self.install() }; return
+                }
                 guard WizardUpdate.json(WizardShared.statusFile)["hostProtocol"] as? Int == WizardRelease.peer else { throw WizardUpdate.error("Installed Host needs the updater bootstrap first") }
                 HostControl.send("prepare-update")
                 self.show("stopping", "Stopping local Wizard OS safely before restarting…")
@@ -301,12 +322,14 @@ final class NoticeBarView: NSView {
         }
     }
     private func waitForHost(nonce: String, deadline: Date) {
-        guard preparing, ready != nil, !ordinaryQuitPending, !powerOff else { return }
+        guard preparing, ready != nil, !ordinaryQuitPending, !powerOff else { fail("Restart preparation cancelled"); return }
         let response = WizardUpdate.json(WizardUpdate.response)
         if response["nonce"] as? String == nonce {
             let state = response["state"] as? String
             if state == "failed" || state == "busy" { fail(response["error"] as? String ?? "Host could not stop safely"); return }
-            if state == "stopped", !HostControl.isRunning { install(); return }
+            if state == "stopped", !HostControl.isRunning {
+                if quitAfterStop { fail("Restart cancelled by Quit") } else { install() }; return
+            }
         }
         guard Date() < deadline else { fail("Host shutdown was not confirmed — prior app remains installed"); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.waitForHost(nonce: nonce, deadline: deadline) }
@@ -324,6 +347,7 @@ final class NoticeBarView: NSView {
         do {
             if plannedGuestActivation { try WizardGuestActivation.snapshotStoppedDisk() }
         } catch { fail(error.localizedDescription); return }
+        try? FileManager.default.removeItem(at: stagedSnapshot)
         restartAuthorized = true; ready = nil; cancel = nil; freshDownloadReady = false
         var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "installing"
         do { try WizardUpdate.write(journal, WizardUpdate.journal) } catch { restartAuthorized = false; ready = reply; fail(error.localizedDescription); return }
@@ -341,6 +365,15 @@ final class NoticeBarView: NSView {
         if journal["phase"] as? String == "prepared" || journal["phase"] as? String == "installing" { journal["phase"] = "install-failed"; try? WizardUpdate.write(journal, WizardUpdate.journal) }
         if stoppedHost && !HostControl.isRunning { HostControl.ensureRunning() }
         show("failed", "Update failed — \(text). Previous installed app or retained recovery bundle remains available.", retry: ready == nil)
+        if quitAfterStop {
+            quitAfterStop = false
+            finishRollbackQuit(deadline: Date().addingTimeInterval(15))
+        }
+    }
+    private func finishRollbackQuit(deadline: Date) {
+        if !stoppedHost || HostControl.isRunning { NSApp.terminate(nil); return }
+        guard Date() < deadline else { show("failed", "Host restart was not confirmed — Quit cancelled"); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.finishRollbackQuit(deadline: deadline) }
     }
     private func recoverActivation() {
         var journal = WizardUpdate.json(WizardUpdate.journal)
@@ -451,6 +484,7 @@ final class NoticeBarView: NSView {
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         artifact?.cancel(); artifact = nil; verifiedArchive = nil
         captureError(error)
+        if restartAuthorized || preparing { fail(error.localizedDescription); return }
         if (error as NSError).code != 1001 { show("failed", "Update access unavailable or validation failed — \(error.localizedDescription)", retry: true) }
     }
     private func captureError(_ error: Error) {
@@ -477,6 +511,11 @@ final class NoticeBarView: NSView {
         // Keep the authenticated item unchanged. Only Sparkle's download request is
         // redirected to the verified bytes; its Ed25519 and bundle checks still run.
         let download = UpdateArtifact(); artifact = download
+        download.onInvalidated = { [weak self, weak download] error in
+            guard let self, self.artifact === download else { return }
+            let reply = self.ready; self.ready = nil; self.verifiedArchive = nil
+            self.fail(error.localizedDescription); reply?(.dismiss)
+        }
         cancel = { [weak self] in
             download.cancel(); self?.artifact = nil; self?.verifiedArchive = nil; reply(.dismiss)
         }
@@ -484,6 +523,15 @@ final class NoticeBarView: NSView {
             guard let url = item.fileURL, let hash = item.propertiesDictionary["wizard:sha256"] as? String else {
                 throw WizardUpdate.error("Missing archive digest")
             }
+            let enclosure = item.propertiesDictionary["enclosure"] as? [String: Any]
+            guard let signature = enclosure?["sparkle:edSignature"] as? String,
+                  let publicKey = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String else {
+                throw WizardUpdate.error("Missing archive Ed25519 signature or public key")
+            }
+            download.signature = signature; download.publicKey = publicKey
+            #if WIZARD_UPDATE_QA
+            download.skipPrivateSignature = UserDefaults.standard.bool(forKey: "QAHooks") && UserDefaults.standard.bool(forKey: "QAUpdateSkipPrivateSignature")
+            #endif
             try download.fetch(url, hash: hash, bytes: item.contentLength, progress: { [weak self] received, expected in
                 guard let self, self.artifact === download else { return }
                 self.show("downloading", "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%")
@@ -565,10 +613,10 @@ final class NoticeBarView: NSView {
         }
         do {
             try WizardUpdate.write(["cancelledRelease": version, "skipBeforeCancellation": skipBeforeCancellation], cancellationSnapshot)
-            reply(.skip)
         } catch {
             show("failed", "Cannot persist update cancellation — \(error.localizedDescription)")
         }
+        reply(.skip)
     }
     private func restoreCancelledRelease() {
         guard let cancelledRelease else { return }

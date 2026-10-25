@@ -11,6 +11,7 @@ def digest(path):
 p=argparse.ArgumentParser(); p.add_argument('bundle',type=pathlib.Path); p.add_argument('output',type=pathlib.Path); p.add_argument('--base-url',required=True); p.add_argument('--sign-tool',required=True); p.add_argument('--key-file',required=True); a=p.parse_args()
 a.output.mkdir(parents=True,exist_ok=True)
 d=plistlib.loads((a.bundle/'Contents/Info.plist').read_bytes()); manifest=json.loads((a.bundle/'Contents/Resources/wizard-release.json').read_text())
+assert not manifest.get('qa') and not d.get('WizardUpdateQA'), 'Refusing QA build: never publish fault-injection hooks'
 assert manifest['build']==d['CFBundleVersion'] and manifest['arch']=='arm64' and manifest['hostProtocol']==1
 name=f"Wizard-{d['CFBundleVersion']}.zip"; archive=a.output/name
 subprocess.run(['/usr/bin/ditto','-c','-k','--sequesterRsrc','--keepParent',str(a.bundle),str(archive)],check=True)

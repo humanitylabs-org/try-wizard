@@ -2,6 +2,8 @@
 """Portable focused regressions for the native updater QA harness (no AppKit)."""
 import ast
 import os
+import json
+import plistlib
 from pathlib import Path
 import signal
 import subprocess
@@ -55,6 +57,42 @@ class AdmissionTests(unittest.TestCase):
             '105 /qa space/Wizard.app/Contentsfake/MacOS/Wizard',
         ])
         self.assertEqual(ns['helper_pid_rows'](text,bundle,'org.humanitylabs.wizard.mvp'),[101,104])
+
+
+class ReleaseMetadataTests(unittest.TestCase):
+    def test_release_feed_refuses_either_qa_stamp_before_archiving(self):
+        tool = SOURCE.with_name('make-update-feed.py')
+        for manifest_qa, plist_qa in [(True, False), (False, True)]:
+            with self.subTest(manifest_qa=manifest_qa, plist_qa=plist_qa), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp); contents=root/'Wizard.app/Contents'
+                (contents/'Resources').mkdir(parents=True)
+                (contents/'Info.plist').write_bytes(plistlib.dumps({'WizardUpdateQA':plist_qa}))
+                (contents/'Resources/wizard-release.json').write_text(json.dumps({'qa':manifest_qa}))
+                result=subprocess.run([sys.executable,str(tool),str(contents.parent),str(root/'feed'),
+                    '--base-url','https://example.invalid','--sign-tool','/missing/signer','--key-file','/missing/key'],capture_output=True,text=True)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn('Refusing QA build',result.stderr)
+                self.assertFalse(list((root/'feed').glob('*.zip')))
+
+    def test_build_requires_signed_feed_without_expiring_failures(self):
+        # Execute the actual build metadata block with tiny Mach-O fixtures.
+        build=SOURCE.parents[1]/'build.sh'
+        code=build.read_text().split("/usr/bin/python3 - <<'PY'\n",1)[1].split('\nPY',1)[0]
+        import struct
+        with tempfile.TemporaryDirectory() as tmp:
+            app=Path(tmp)/'Wizard.app'; (app/'Contents/Resources').mkdir(parents=True)
+            (app/'Contents/Info.plist').write_bytes(plistlib.dumps({}))
+            header=struct.pack('<8I',0xfeedfacf,0,0,0,1,152,0,0)
+            segment=bytearray(152); struct.pack_into('<II',segment,0,0x19,152); struct.pack_into('<I',segment,64,1)
+            segment[72:78]=b'__text'; struct.pack_into('<Q',segment,112,1); struct.pack_into('<I',segment,120,184)
+            for path in ['Contents/MacOS/Wizard','Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host']:
+                target=app/path; target.parent.mkdir(parents=True); target.write_bytes(header+segment+b'x')
+            env=os.environ|{'APP':str(app),'SPARKLE_PUBLIC_KEY':'fixture','SPARKLE_FEED':'https://example.invalid/appcast.xml','RELEASE_ID':'fixture','BUILD':'1','WIZARD_UPDATE_QA':'1','GUEST_UPDATE_PAYLOAD':''}
+            subprocess.run([sys.executable,'-c',code],env=env,check=True)
+            info=plistlib.loads((app/'Contents/Info.plist').read_bytes())
+            self.assertEqual(info.get('SUSignedFeedFailureExpirationInterval'),0)
+            self.assertTrue(info['WizardUpdateQA'])
+            self.assertTrue(json.loads((app/'Contents/Resources/wizard-release.json').read_text())['qa'])
 
 
 class CleanupTests(unittest.TestCase):
