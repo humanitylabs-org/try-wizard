@@ -3,7 +3,7 @@
 05 resolves actual immutable packaging receipts and tests every selected image.
 The final guest repeats this for host and each running container's real environment.
 """
-import argparse, concurrent.futures, hashlib, importlib.util, json, os, re, subprocess, sys
+import argparse, concurrent.futures, hashlib, importlib.util, json, os, re, subprocess, sys, time
 from pathlib import Path
 import local_oci as oci
 HERE=Path(__file__).resolve().parent
@@ -88,6 +88,112 @@ done
 # Kept for source contract tests and external inspection; executes no commands on import.
 PROBE=probe_shell()
 
+
+def inspect_container(docker, identity):
+    return json.loads(run([docker, 'inspect', identity], timeout=20))[0]
+
+
+def wait_stable(docker, identity, timeout=180, stable_seconds=10):
+    """Do not mistake a single 'running' sample during a restart loop for readiness."""
+    deadline=time.monotonic()+timeout; since=None; previous=None
+    while time.monotonic()<deadline:
+        row=inspect_container(docker,identity);state=row['State']
+        token=(state.get('StartedAt'),row.get('RestartCount'))
+        ready=(state.get('Running') and not any(state.get(k) for k in ['Restarting','Paused','Dead'])
+               and state.get('Health',{}).get('Status','healthy')=='healthy')
+        if ready:
+            if token!=previous or since is None:since=time.monotonic()
+            if time.monotonic()-since>=stable_seconds:return row
+        else:since=None
+        previous=token;time.sleep(min(2,max(0,deadline-time.monotonic())))
+    raise TimeoutError('container not running/healthy with unchanged start/restart count within readiness deadline')
+
+
+def internal_only(docker, row):
+    networks=row['NetworkSettings']['Networks']
+    if not networks:return False
+    rows=json.loads(run([docker,'network','inspect',*networks],timeout=20))
+    return len(rows)==len(networks) and all(n.get('Internal') is True for n in rows)
+
+
+def internal_image_proof(root, image):
+    plan=json.loads((root/'preparation/security-image-plan.json').read_text())
+    receipt=json.loads((root/'security-preflight.json').read_text())
+    assert receipt['passed'] is True and receipt['allGuestImagesEnumerated'] is True
+    assert receipt['planSha256']==sha(root/'preparation/security-image-plan.json')
+    assert receipt['resolutions']==plan['resolutions']
+    # Only these two network-isolated infrastructure targets have this proof path.
+    matches=[(key,r) for key,r in plan['resolutions'].items() if r['imageId']==image and key in {'postgres','rabbitmq'}]
+    assert len(matches)==1,'no exact online-tested infrastructure image'
+    key,resolution=matches[0]
+    assert sha(root/resolution['receipt'])==resolution['receiptSha256']
+    source=json.loads((root/resolution['receipt']).read_text())
+    assert source['imageId']==image and source['ref']+'@'+source['digest']==resolution['image']
+    checks=[c for c in receipt['checks'] if c['target']==resolution['image']]
+    assert len(checks)==1 and checks[0]['returncode']==0,'missing full positive/negative image TLS proof'
+    return {'target':key,'image':resolution['image'],'preflightSha256':sha(root/'security-preflight.json')}
+
+
+def compare_internal(reference, actual):
+    assert reference==actual,'running infrastructure trust inputs differ from the exact online-tested image'
+    assert actual['contexts'] and actual['trustFiles'] and actual['runtimes']
+    assert len(actual['rejectedAdvisoryRoots'])==4
+
+
+def check_internal(docker,root,row,env):
+    proof=internal_image_proof(root,row['Image'])
+    source=(HERE/'security-internal.py').read_text()
+    evidence=(HERE/'security-primary-evidence.json').read_text()
+    # Code via -c, evidence via stdin; neither is written into the application.
+    argv=['/bin/sh','-c', 'exec python3 -c "$1"', 'security-internal',source]
+    reference=subprocess.run([docker,'run','--pull=never','--rm','-i','--network=none','--read-only',
+        '--tmpfs','/tmp:rw,nosuid,nodev,size=64m','--cap-drop=ALL','--security-opt=no-new-privileges',
+        '--entrypoint',argv[0],row['Image'],*argv[1:]],input=evidence,text=True,capture_output=True,timeout=120,env=env)
+    actual=subprocess.run([docker,'exec','-i',row['Id'],*argv],input=evidence,text=True,capture_output=True,timeout=120,env=env)
+    assert reference.returncode==0,reference.stdout+reference.stderr
+    assert actual.returncode==0,actual.stdout+actual.stderr
+    expected=json.loads(reference.stdout);observed=json.loads(actual.stdout)
+    compare_internal(expected,observed)
+    proof.update(mode='internal-network-exact-trust-equivalence',snapshotSha256=hashlib.sha256(json.dumps(observed,sort_keys=True).encode()).hexdigest(),
+                 rejectedAdvisoryRoots=observed['rejectedAdvisoryRoots'],contexts=list(observed['contexts']))
+    return proof
+
+
+def capture_failure(docker,identity,root):
+    directory=root/'assembly-work/security-diagnostics';directory.mkdir(parents=True,exist_ok=True,mode=0o700)
+    artifacts={}
+    for key,argv in [('state',[docker,'inspect','--format','{{json .State}}',identity]),('logs',[docker,'logs','--tail','200',identity])]:
+        path=directory/(identity+'.'+key+('.json' if key=='state' else '.log'))
+        try:
+            proc=subprocess.run(argv,text=True,capture_output=True,timeout=30)
+            text=proc.stdout+proc.stderr
+        except Exception as exc:text='diagnostic capture failed: '+str(exc)
+        path.write_text(text);path.chmod(0o600);artifacts[key]=str(path.relative_to(root))
+    return artifacts
+
+
+def check_guest(docker,root,identity,image,env):
+    result={'target':image,'container':identity,'returncode':1,'log':''}
+    try:
+        before=wait_stable(docker,identity)
+        assert before['Image']==image,'container image changed'
+        if internal_only(docker,before):
+            result['proof']=check_internal(docker,root,before,env);result['returncode']=0
+        else:
+            proc=subprocess.run([docker,'exec','-i','-e','PYTHONDONTWRITEBYTECODE=1',identity,'/bin/sh','-s'],
+                                input=PROBE,text=True,capture_output=True,timeout=1200,env=env)
+            result.update(returncode=proc.returncode,log=proc.stdout+proc.stderr,mode='live-runtime-tls')
+            if proc.returncode in {5,6,7,28,35,52,56}:result['log']='inconclusive network/transport failure; not certificate rejection\n'+result['log']
+        after=inspect_container(docker,identity)
+        assert after['State']['Running'] and not after['State'].get('Restarting')
+        assert after['State'].get('Health',{}).get('Status','healthy')=='healthy'
+        assert (after['State']['StartedAt'],after['RestartCount'])==(before['State']['StartedAt'],before['RestartCount']),'container restarted during security probe'
+    except (TimeoutError,subprocess.TimeoutExpired) as exc:result.update(returncode=124,log='inconclusive: '+str(exc))
+    except Exception as exc:result.update(returncode=1,log=str(exc))
+    if result['returncode']!=0:result['diagnostics']=capture_failure(docker,identity,root)
+    return result
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--stage-root',type=Path);p.add_argument('--guest',action='store_true');p.add_argument('--output',type=Path);a=p.parse_args()
     docker='docker' if a.guest else '/opt/homebrew/bin/docker';plan={};env=os.environ.copy()
@@ -104,20 +210,29 @@ def main():
         rows=json.loads(run([docker,'inspect',*ids]));running=[(c['Id'],c['Image']) for c in rows];images=sorted({c['Image'] for c in rows});resolutions={}
         # Private-account content is never an admissible factory source.
         assert not any('private' in c['Name'] for c in rows),'private container refused'
-    output=a.output or root/'security-preflight.json'
+    output=a.output or root/('assembly-work/security-guest.json' if a.guest else 'security-preflight.json')
     result={'schema':2,'passed':False,'images':images,'checks':[],'allGuestImagesEnumerated':False,'publishing':False,'resolutions':resolutions}
     if a.guest:
         host=subprocess.run(['sh','-s'],input=PROBE,text=True,capture_output=True,timeout=1200)
         result['checks'].append({'target':'guest-host','returncode':host.returncode,'log':host.stdout+host.stderr})
     def check(row):
         identity,image=row
-        argv=([docker,'exec','-i','-e','PYTHONDONTWRITEBYTECODE=1',identity,'/bin/sh','-s'] if a.guest else [docker,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s'])
+        if a.guest:return check_guest(docker,root,identity,image,env)
+        argv=[docker,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',image,'-s']
         try:
             proc=subprocess.run(argv,input=PROBE,text=True,capture_output=True,timeout=1200,env=env)
             return {'target':image,'container':identity if a.guest else None,'returncode':proc.returncode,'log':proc.stdout+proc.stderr}
         except subprocess.TimeoutExpired:return {'target':image,'container':identity if a.guest else None,'returncode':124,'log':'inconclusive: timeout, never counted as certificate rejection'}
     # Serial images: >4 concurrent TLS handshakes through Colima corrupt records (curl 35 / bad record mac) and make rejection inconclusive.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:result['checks']+=list(pool.map(check,running))
+    if a.guest:
+        final_ids=set(run([docker,'ps','--no-trunc','-q']).split())
+        initial_ids={identity for identity,_ in running}
+        if final_ids!=initial_ids:
+            result['checks'].append({'target':'guest-container-census','returncode':1,
+                'log':'running/restarting container set changed during security checks',
+                'before':sorted(initial_ids),'after':sorted(final_ids),
+                'diagnostics':{identity:capture_failure(docker,identity,root) for identity in sorted(final_ids-initial_ids)}})
     result['passed']=bool(result['checks']) and all(x['returncode']==0 for x in result['checks'])
     result['allGuestImagesEnumerated']=result['passed'] and (a.guest or len(images)==len(plan['targets']))
     if not a.guest and result['passed']:
