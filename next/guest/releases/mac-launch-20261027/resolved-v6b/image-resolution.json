@@ -1,0 +1,68 @@
+{
+  "pinsSha256": "c801d82a19254131b85b4e7a50e397d261a5ba11019bbb6f685e58a776e48bf4",
+  "runtimeReleaseSha256": "f5e0177fa87f61db46c1b70ff8cb98be89d814aaf219d5815bb0cfa0818a71e0",
+  "preResolutionPinsSha256": "88366d0cb4fd5a3bd40231024577107de3a3ca8764bcfe01e87f2f313551da46",
+  "images": {
+    "wizard-app-manager": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-app-manager",
+      "digest": "sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+      "source_commit": "37857e3dbf60b4c14f49b02959641571d5215ca4"
+    },
+    "wizard-agent-service": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-agent-service",
+      "digest": "sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
+      "source_commit": "15d501a36a07ab24ca8409ee0be30b91446c9202"
+    },
+    "wizard-ux": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-ux",
+      "digest": "sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97",
+      "source_commit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba"
+    },
+    "hermes-agent": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-hermes-app",
+      "digest": "sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab",
+      "security_target": "hermes-app"
+    },
+    "wizard-chatgpt": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-chatgpt",
+      "digest": "sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5",
+      "security_target": "chatgpt"
+    },
+    "wizard-claude": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-claude",
+      "digest": "sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2",
+      "security_target": "claude"
+    },
+    "files": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-files",
+      "digest": "sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092",
+      "security_target": "files"
+    },
+    "transcriber": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber",
+      "digest": "sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6",
+      "security_target": "transcriber"
+    },
+    "browser": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-browser",
+      "digest": "sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797",
+      "security_target": "browser"
+    },
+    "secret-drop": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-secrets",
+      "digest": "sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050",
+      "security_target": "secrets"
+    },
+    "notifications": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-notifications",
+      "digest": "sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9",
+      "security_target": "notifications"
+    },
+    "wizard-recorder": {
+      "ref": "ghcr.io/humanitylabs-org/wizard-mac-security-recorder",
+      "digest": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+      "security_target": "recorder"
+    }
+  },
+  "publishing": false
+}

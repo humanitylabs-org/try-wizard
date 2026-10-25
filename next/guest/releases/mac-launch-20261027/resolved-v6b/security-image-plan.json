@@ -1,0 +1,426 @@
+{
+  "complete": true,
+  "status": "all-selected-images-probed",
+  "mandatoryQueueId": 81,
+  "images": [
+    "ghcr.io/humanitylabs-org/wizard-agent-service@sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
+    "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-browser@sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-chatgpt@sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-claude@sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-files@sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-helper-python@sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-hermes-app@sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-notifications@sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-postgres@sha256:1a8877b3740fffc2ff87595f2df9cff3f12d9c00b59732825abca3d35b301553",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-rabbitmq@sha256:8fb80bd17d392a6b9ddf4b9fbbf39a9e6a59603c4a1f209fe7a573a1cc8ffedb",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-recorder@sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-secrets@sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-stock@sha256:b2235ce42931ea67b907b8271d22bf9f5e52e85068922b39d43af9d097920901",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-traefik@sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964",
+    "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber@sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6",
+    "ghcr.io/humanitylabs-org/wizard-ux@sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97"
+  ],
+  "requiredCoverage": [
+    "selected Service",
+    "selected UX",
+    "selected WAM",
+    "Hermes stock and managed packaging",
+    "Recorder",
+    "every default-app recipe image",
+    "retained Runtipi DB/queue/reverse proxy",
+    "retained Files/Secret Drop/transcriber/helper images"
+  ],
+  "reason": "Concrete immutable inputs and executable remediation/application wiring selected; complete becomes true only from actual pull-verified packaging and real 05 TLS probes. No security deferrals.",
+  "discovery": {
+    "defaultRecipeEvidence": "evidence/default-image-recipes.json",
+    "defaultRecipeSha256": "ce51849ee222448602b40cc1adfe9e590672e48a447c8c72ee88c7b8bb1868b0",
+    "retainedRepositoryEvidence": "evidence/build307-image-repositories.json",
+    "retainedRepositorySha256": "2975b5db5262cae5c0191d60f40d5ab901c67cd7aea1939c2e0c4584e1a29db7",
+    "retainedFactorySha256": "64ddc2b8123b3185668aab666cd93843a228d769a2ab55c68e64e00a4c1f1366"
+  },
+  "defaultRecipeImages": [
+    "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+    "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+    "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+    "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+    "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+    "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+    "ghcr.io/humanitylabs-org/wizard-recorder:0.3.5",
+    "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+    "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4"
+  ],
+  "retainedManifestRefs": [
+    "filebrowser/filebrowser@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "ghcr.io/humanitylabs-org/secret-drop@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+    "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:8afef790d701d8bdd6728187f943c5d4de50cd09da5dc29f245f636af32c1117",
+    "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+    "python@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+    "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+    "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57"
+  ],
+  "schema": 2,
+  "selectionComplete": true,
+  "targets": [
+    {
+      "key": "helper-python",
+      "resolution": "derive-image",
+      "base": "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+      "receipt": "security-packaging/helper-python/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "hermes-app",
+      "resolution": "derive-image",
+      "base": "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+      "receipt": "security-packaging/hermes-app/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "chatgpt",
+      "resolution": "derive-image",
+      "base": "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+      "receipt": "security-packaging/chatgpt/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "claude",
+      "resolution": "derive-image",
+      "base": "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+      "receipt": "security-packaging/claude/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "files",
+      "resolution": "derive-image",
+      "base": "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+      "receipt": "security-packaging/files/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "transcriber",
+      "resolution": "derive-image",
+      "base": "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+      "receipt": "security-packaging/transcriber/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "browser",
+      "resolution": "derive-image",
+      "base": "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+      "receipt": "security-packaging/browser/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "secrets",
+      "resolution": "derive-image",
+      "base": "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+      "receipt": "security-packaging/secrets/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "notifications",
+      "resolution": "derive-image",
+      "base": "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+      "receipt": "security-packaging/notifications/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "recorder",
+      "resolution": "derive-image",
+      "baseComponent": "recorder",
+      "baseRef": "ghcr.io/humanitylabs-org/wizard-recorder",
+      "sourceCommit": "0f31e272a9c25b975cb677f1221f28892993e4b1",
+      "receipt": "security-packaging/recorder/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "stock",
+      "resolution": "derive-image",
+      "base": "docker.io/nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+      "receipt": "security-packaging/stock/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "postgres",
+      "resolution": "derive-image",
+      "base": "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+      "receipt": "security-packaging/postgres/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "rabbitmq",
+      "resolution": "derive-image",
+      "base": "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+      "receipt": "security-packaging/rabbitmq/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "traefik",
+      "resolution": "derive-image",
+      "base": "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57",
+      "receipt": "security-packaging/traefik/result.json",
+      "application": "runtime release images or persistent Runtipi user-config, plus post-config readback"
+    },
+    {
+      "key": "wam",
+      "resolution": "selected-core-image",
+      "receipt": "image-packaging/wam/result.json",
+      "sourceCommit": "37857e3dbf60b4c14f49b02959641571d5215ca4"
+    },
+    {
+      "key": "service",
+      "resolution": "selected-core-image",
+      "receipt": "image-packaging/service/result.json",
+      "sourceCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202"
+    },
+    {
+      "key": "ux",
+      "resolution": "selected-core-image",
+      "receipt": "image-packaging/ux/result.json",
+      "sourceCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba"
+    }
+  ],
+  "findings": [
+    {
+      "finding": "OS CA bundles, hashed CAPATH, Go/OpenSSL clients",
+      "resolution": "derive-image",
+      "change": "remediate-trust.py: disable Debian roots and remove four advisory certificate fingerprints from all discovered PEM/CRT stores; install curl/Python probe tooling",
+      "evidence": "Primary advisory roots.json; packaging remediation.json; 05 healthy + every affected domain network probes"
+    },
+    {
+      "finding": "Python system/venv and standalone Python 3.13 runtime",
+      "resolution": "derive-image",
+      "change": "Preserve Linux CPython interpreter ABI/paths; apply the exact upstream incident fix (pip 26.2.2 plus certifi 2026.10.19) to every installed pip, vendored bundle and ensurepip bootstrap wheel. All Linux interpreter SSL contexts use the patched CA stores.",
+      "evidence": "https://blog.python.org/2026/10/python-3151-3149-31317/: expedited releases only upgrade bundled pip/certifi. Packaging pipRemediation records each installed/ensurepip copy; 05 tests every interpreter and bundle. This is remediation, not deferral or a runtime-version exemption."
+    },
+    {
+      "finding": "certifi, pip/_vendor, requests and venv/vendor copies",
+      "resolution": "derive-image",
+      "change": "Replace every discovered certifi package, including pip/_vendor and venv/vendor copies, using hash-locked official 2026.10.19 files; replace installed pip and packed ensurepip wheels with hash-locked 26.2.2; remove old bytecode.",
+      "evidence": "remediation.certifiCopies and every bundle TLS probe"
+    },
+    {
+      "finding": "Node embedded roots",
+      "resolution": "derive-image",
+      "change": "Copy same-major patched Node 22.23.4 / 24.22.1 / 26.12.1 from immutable upstream manifest selected for glibc/musl; preserve app entrypoint and user",
+      "evidence": "security-upstream-inputs.json real registry digest lookup plus 05 per-major thresholds and healthy/rejected TLS probes"
+    },
+    {
+      "finding": "uv/Claude Code independently bundled roots",
+      "resolution": "derive-image",
+      "change": "Fixed uv/uvx 0.13.5 manifests and all discovered ELF copies, including packaged/venv copies; upgrade native Claude Code when present to 2.1.303. Actual binary content is replaced, not just OS stores or version metadata.",
+      "evidence": "Primary advisory fixed versions; package inventories + 05 version checks"
+    },
+    {
+      "finding": "Inherited local slim/managed Hermes, legacy wizard-shell, old WAM",
+      "resolution": "replace-and-remove",
+      "change": "Replace running references with selected patched images, build managed guard from patched stock, prune all unused old containers/images/build cache only in pristine disposable clone; require no unplanned image IDs afterward",
+      "evidence": "guest-security-apply.py mapping/readback and final daemon image inventory, never nonexistent upstream digests for local image IDs"
+    },
+    {
+      "finding": "Guest host CA/Python/certifi (not just Docker images)",
+      "resolution": "patch-guest-host",
+      "change": "guest-apply invokes same fingerprint/wheel remediation and real healthy/rejected network probes before sealing",
+      "evidence": "security-guest.json guest-host actual context probes; separate from 05 image preflight"
+    }
+  ],
+  "upstreamInputs": {
+    "node22-alpine": {
+      "queriedTag": "node:22.23.4-alpine",
+      "image": "node:22.23.4-alpine@sha256:fd4a97c1630a4a0a70117dd7b393e322db316d0489bdf36a0e776e7b235341b0",
+      "arm64": [
+        "sha256:fd4a97c1630a4a0a70117dd7b393e322db316d0489bdf36a0e776e7b235341b0"
+      ],
+      "indexResponseSha256": "fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914"
+    },
+    "node22-glibc": {
+      "queriedTag": "node:22.23.4-bookworm-slim",
+      "image": "node:22.23.4-bookworm-slim@sha256:ceb43e5c219139035fb742900629e4abed89fe0997f7c03250c499e1f2710c9e",
+      "arm64": [
+        "sha256:ceb43e5c219139035fb742900629e4abed89fe0997f7c03250c499e1f2710c9e"
+      ],
+      "indexResponseSha256": "de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d"
+    },
+    "node24-alpine": {
+      "queriedTag": "node:24.22.1-alpine",
+      "image": "node:24.22.1-alpine@sha256:398bcf38afb035ae76feb9ad3c7493a93feff4751351c65310811761e37bbfc7",
+      "arm64": [
+        "sha256:398bcf38afb035ae76feb9ad3c7493a93feff4751351c65310811761e37bbfc7"
+      ],
+      "indexResponseSha256": "06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53"
+    },
+    "node24-glibc": {
+      "queriedTag": "node:24.22.1-bookworm-slim",
+      "image": "node:24.22.1-bookworm-slim@sha256:294d33a992da016e059121deb0c979dffb4478b77a304376bca41393297c1ea2",
+      "arm64": [
+        "sha256:294d33a992da016e059121deb0c979dffb4478b77a304376bca41393297c1ea2"
+      ],
+      "indexResponseSha256": "55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205"
+    },
+    "node26-alpine": {
+      "queriedTag": "node:26.12.1-alpine",
+      "image": "node:26.12.1-alpine@sha256:fd33a7843535150ca8a82dcb26dece521dfedf020f532d4726d2705e067c9068",
+      "arm64": [
+        "sha256:fd33a7843535150ca8a82dcb26dece521dfedf020f532d4726d2705e067c9068"
+      ],
+      "indexResponseSha256": "40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797"
+    },
+    "node26-glibc": {
+      "queriedTag": "node:26.12.1-bookworm-slim",
+      "image": "node:26.12.1-bookworm-slim@sha256:a4e3fd25c2bee93019b46bfa0eb40c73b285f773e0bd6b7a81a442152cd0a8fc",
+      "arm64": [
+        "sha256:a4e3fd25c2bee93019b46bfa0eb40c73b285f773e0bd6b7a81a442152cd0a8fc"
+      ],
+      "indexResponseSha256": "28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe"
+    },
+    "uv": {
+      "queriedTag": "ghcr.io/astral-sh/uv:0.13.5",
+      "image": "ghcr.io/astral-sh/uv:0.13.5@sha256:d3a8362fee5c061dd78452b5915598fc8fbd15050db3a3d919fba5f2e38c629a",
+      "arm64": [
+        "sha256:d3a8362fee5c061dd78452b5915598fc8fbd15050db3a3d919fba5f2e38c629a"
+      ],
+      "indexResponseSha256": "32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff"
+    },
+    "certifi": {
+      "version": "2026.10.19",
+      "url": "https://files.pythonhosted.org/packages/c4/51/29046e48f693c54e5b7412216d447a1d8362c9653148d98c02cdf65fa733/certifi-2026.10.19-py3-none-any.whl",
+      "sha256": "42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b"
+    },
+    "pip": {
+      "version": "26.2.2",
+      "url": "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+      "sha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+    }
+  },
+  "imageResolution": "05 loads all named real output receipts, validates immutable bases/source commits, and binds their exact set plus plan hash into security-preflight.json.",
+  "retainedLocalDisposition": "All three old local families are replaced, and all unused legacy images/cache are removed only from the disposable pristine guest. Absence must be read back; no exemption based on private/network-only reachability.",
+  "pythonScopeEvidence": {
+    "url": "https://blog.python.org/2026/10/python-3151-3149-31317/",
+    "statement": "They all upgrade the bundled pip to version 26.2.2, which includes certifi 2026.10.19 to address the eMudhra / emSign CA certificate security incident.",
+    "abiChangeRequired": false
+  },
+  "retainedLocalImageDiscovery": {
+    "ghcr.io/humanitylabs-org/hermes-agent": {
+      "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard-slim1": "sha256:666d6c659574fa09c1ea47b7ec5f03e8d2c35a8aa8055fe60c1e2fe3d3e03e9b"
+    },
+    "wizard-hermes": {
+      "wizard-hermes:managed-f0a302329b39": "sha256:6c77d3d763f44b8b3f2fb219d90c5875c841c7c3c0fb3098a65c58e8aece36b7"
+    },
+    "wizard-shell": {
+      "wizard-shell:mac-mvp-20261013": "sha256:e6f833245f04c374286011fcc175c31c6ae10a0fd3a0761aa281219ab055a7c9",
+      "wizard-shell:mac-release-f0a302329b39": "sha256:e6f833245f04c374286011fcc175c31c6ae10a0fd3a0761aa281219ab055a7c9"
+    }
+  },
+  "retainedLocalImageDisposition": {
+    "ghcr.io/humanitylabs-org/hermes-agent": "selected patched default Hermes app/stock inputs; old slim image removed from final daemon",
+    "wizard-hermes": "managed guard built from patched stock in 07; no CA stores copied from compiler, then actual configured TLS probes",
+    "wizard-shell": "selected UX and Service outputs replace both historical local shell tags; old image/cache removed"
+  },
+  "preflightScope": "17 selected immutable image inputs; managed guard keeps stock trust stores and is rebuilt and actually probed in final guest. Final guest acceptance remains independently mandatory, not asserted by 05.",
+  "resolutions": {
+    "helper-python": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-helper-python@sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c",
+      "receipt": "security-packaging/helper-python/result.json",
+      "receiptSha256": "774b19134d763d2a25663b625d5865d070d36790ea17ca3b8b9a8c1ca3b210bd",
+      "imageId": "sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c"
+    },
+    "hermes-app": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-hermes-app@sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab",
+      "receipt": "security-packaging/hermes-app/result.json",
+      "receiptSha256": "89ae6b7b51f2b5ddc79f8ee43ffa85926af08ea44292f00ed5ca71e55408285a",
+      "imageId": "sha256:7559f62dabc66be54eb655b2336a19030e9da8d98b02cc48c9c9e0ffda5990ab"
+    },
+    "chatgpt": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-chatgpt@sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5",
+      "receipt": "security-packaging/chatgpt/result.json",
+      "receiptSha256": "88f09fcde980e85c7f4dc69aabca40025d05a676ab3b93cb3de0feade3f181f3",
+      "imageId": "sha256:84d4b47a246576da8da20435e88d3aea7fb5e0a37720260e0d480c885eb78ad5"
+    },
+    "claude": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-claude@sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2",
+      "receipt": "security-packaging/claude/result.json",
+      "receiptSha256": "5c3abf21771085fd723289264b214db79ee26e4e729f2675feddd205e893ac32",
+      "imageId": "sha256:c4130220e0a20858d45474ee598a378289cce694cf892b3383aa7e9198fb89c2"
+    },
+    "files": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-files@sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092",
+      "receipt": "security-packaging/files/result.json",
+      "receiptSha256": "3d0c811b7321bc582911570d251cf5c23bc48803fb6c6a1ba16a68c76e08ca1a",
+      "imageId": "sha256:dbdfa14f06fc96f43aafc08e02f2b673c185360ad338b2821f62890ac69a4092"
+    },
+    "transcriber": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber@sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6",
+      "receipt": "security-packaging/transcriber/result.json",
+      "receiptSha256": "702014b5df665c452e95adc5857d99b4d6a2af424edf68d8fe564217c5d9c213",
+      "imageId": "sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6"
+    },
+    "browser": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-browser@sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797",
+      "receipt": "security-packaging/browser/result.json",
+      "receiptSha256": "14fee61dfc464ddd63530613c64f2d86fd4758949e955bce2c489e0e244029b9",
+      "imageId": "sha256:b7495cd4cfdd3f2fb5fa6f68d5490b9e7460624b80f3d023a9d2d33db9fcb797"
+    },
+    "secrets": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-secrets@sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050",
+      "receipt": "security-packaging/secrets/result.json",
+      "receiptSha256": "f85d680c39027cac62bceda566bb8f9f139bc734e992bbaae3646a8c6650dfba",
+      "imageId": "sha256:fce52a66905c159ee7c2ffe05968d38710dc9c3c14a59a60ca8c939ab4cc0050"
+    },
+    "notifications": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-notifications@sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9",
+      "receipt": "security-packaging/notifications/result.json",
+      "receiptSha256": "1bc7fd643012402c388db32b68ecb75efd044ed43536074d072b4ca9b65cac0c",
+      "imageId": "sha256:18ddafcea3bceb37dccdcd96b71cba5e89c05a1b66760b901d29fd38a3b0d9c9"
+    },
+    "recorder": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-recorder@sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789",
+      "receipt": "security-packaging/recorder/result.json",
+      "receiptSha256": "aa4bdd41c26d3f007542064d0143de64d096b09d388508bcf71c0af1bb9223f3",
+      "imageId": "sha256:259a7050d35cb3938bda4c33b7c0c7d4cdb9e4c05ae5e7031eac1eea38b41789"
+    },
+    "stock": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-stock@sha256:b2235ce42931ea67b907b8271d22bf9f5e52e85068922b39d43af9d097920901",
+      "receipt": "security-packaging/stock/result.json",
+      "receiptSha256": "5425060f741747af1f084ce7178f787d1f0478c93b41debcb1d28ec3aea68c99",
+      "imageId": "sha256:b2235ce42931ea67b907b8271d22bf9f5e52e85068922b39d43af9d097920901"
+    },
+    "postgres": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-postgres@sha256:1a8877b3740fffc2ff87595f2df9cff3f12d9c00b59732825abca3d35b301553",
+      "receipt": "security-packaging/postgres/result.json",
+      "receiptSha256": "58a63fc95bf194f19880f724d3b035817e4ec76f5105e684adeede664a3ad44e",
+      "imageId": "sha256:1a8877b3740fffc2ff87595f2df9cff3f12d9c00b59732825abca3d35b301553"
+    },
+    "rabbitmq": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-rabbitmq@sha256:8fb80bd17d392a6b9ddf4b9fbbf39a9e6a59603c4a1f209fe7a573a1cc8ffedb",
+      "receipt": "security-packaging/rabbitmq/result.json",
+      "receiptSha256": "75dd80cdb2c885cf8474e39bbc7bedfbdb453e69eff8f83f509544b74e844967",
+      "imageId": "sha256:8fb80bd17d392a6b9ddf4b9fbbf39a9e6a59603c4a1f209fe7a573a1cc8ffedb"
+    },
+    "traefik": {
+      "image": "ghcr.io/humanitylabs-org/wizard-mac-security-traefik@sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964",
+      "receipt": "security-packaging/traefik/result.json",
+      "receiptSha256": "8efafb05ff9415e8daddbb9f630ec331bc6ead3bded384e12da2c2b0e7dd4a19",
+      "imageId": "sha256:a72cd3b96f25c59cc8349bc132876fe800e65f26f450c9f3f5db440f781cc964"
+    },
+    "wam": {
+      "image": "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40",
+      "receipt": "image-packaging/wam/result.json",
+      "receiptSha256": "bbea488e11220ca678cf39161fdbc800a71bfdd6e735ad66fca34d41c200519c",
+      "imageId": "sha256:b01e500e1c4597715830dc3e12610b727924803944a8348e750d6db730f99c40"
+    },
+    "service": {
+      "image": "ghcr.io/humanitylabs-org/wizard-agent-service@sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35",
+      "receipt": "image-packaging/service/result.json",
+      "receiptSha256": "c4c830cb12eb66827ef49fd4e34d1301bf31aa443fd6338fc48ff0a946245a61",
+      "imageId": "sha256:af057ab270c5559efb1d6b46efad667ec50514aa280ff00eadd1a1338c41fe35"
+    },
+    "ux": {
+      "image": "ghcr.io/humanitylabs-org/wizard-ux@sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97",
+      "receipt": "image-packaging/ux/result.json",
+      "receiptSha256": "1e9e70f569d926390a75e13dc0a2ee322a3e92c703f6a9d938faf621211a9308",
+      "imageId": "sha256:d491dd12596a3bd27b800dfa8f0cddcb4c28da5aaba86e4f2838ba61ab05dc97"
+    }
+  }
+}
