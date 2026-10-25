@@ -18,6 +18,10 @@ class SourceVerifierCI(unittest.TestCase):
         source = (RELEASE / 'verify-sources-v5.py').read_text()
         self.assertIn("('managed-interpreters',['-m','unittest','discover','-s','next/guest/tests','-p','test_managed_interpreters.py'])", source)
 
+    def test_overlay_mode_regression_runs_on_selected_native_source(self):
+        source = (RELEASE / 'verify-sources-v5.py').read_text()
+        self.assertIn("('overlay-tool-modes',['-m','unittest','discover','-s','next/guest/tests','-p','test_overlay_tool_modes.py'])", source)
+
     def test_rendered_shell_is_valid(self):
         self.assertIsNotNone(shutil.which('bash'))
         subprocess.run(['bash', '-n'], input=SCRIPT, text=True, check=True)
