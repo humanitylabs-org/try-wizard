@@ -50,7 +50,14 @@ final class FakeMachine {
     func requestStop() throws {} // never powers off until fixture explicitly signals
     func stop(_ done: (Error?)->Void) { forced += 1; done(nil) }
 }
+// I/O-only inventory peer for production prepareUpdate's pre-clone probe.
+// The real command is exercised separately by the production VM harness.
+enum WizardGuestPatchCommand { static let appInventory = "fixture-app-inventory" }
 final class VMController {
+    func runGuestPatch(script: String, _ done: ([String: Any]?) -> Void) {
+        precondition(script == WizardGuestPatchCommand.appInventory)
+        done(["apps": [String: Any]()])
+    }
     enum State { case running, starting, error, stopping, stopped, notInstalled }
     var vm: FakeMachine? = FakeMachine()
     var state: State = .running

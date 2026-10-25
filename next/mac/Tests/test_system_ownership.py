@@ -65,6 +65,17 @@ class SystemOwnershipContract(unittest.TestCase):
             app.write_text('{"keep":false}')
             self.assertNotEqual(before, guard.store_state(root))
 
+    def test_shutdown_fixture_has_new_inventory_io_peers(self):
+        # prepareUpdate is compiled verbatim into this isolated Swift fixture.
+        # Keep its new command and VM I/O symbols available before Mac execution.
+        host = (MAC / 'Host/main.swift').read_text()
+        prepare = host[host.index('    private func prepareUpdate()'):host.index('    func refresh()')]
+        self.assertIn('self.vm.runGuestPatch(script: WizardGuestPatchCommand.appInventory)', prepare)
+        fixture = (MAC / 'Tests/UpdateShutdown/main.swift').read_text()
+        self.assertIn('enum WizardGuestPatchCommand { static let appInventory', fixture)
+        self.assertIn('func runGuestPatch(script: String, _ done: ([String: Any]?) -> Void)', fixture)
+        self.assertIn('done(["apps": [String: Any]()])', fixture)
+
     def test_running_apps_must_resume(self):
         before = guard.apps([container(running=True), container('stopped')])
         guard.assert_running_after(before, copy.deepcopy(before))
