@@ -125,5 +125,10 @@ class StoreDefinitionOwnershipTests(unittest.TestCase):
         self.assertLess(src.index("'wizard:wizard',store_apps"),src.index("run(['bash',installer]"))
         self.assertNotIn("app-data/wizardapps'),",src.split("store_apps=")[1].split("run(['bash',installer]")[0])
 
+class InstallerLogTests(unittest.TestCase):
+    def test_installer_output_streams_into_the_apply_log(self):
+        src=(Path(__file__).resolve().parent/'guest-apply.py').read_text()
+        self.assertIn("run(['bash',installer],stream=True,",src)
+
 if __name__=='__main__':unittest.main()
 

@@ -6,7 +6,10 @@ import local_oci as oci
 import guest_docker_store as store
 ROOT=Path('/mnt/launch');WORK=ROOT/'assembly-work'
 
-def run(argv,**kw):return subprocess.check_output(list(map(str,argv)),text=True,timeout=kw.pop('timeout',600),**kw)
+def run(argv,**kw):
+    # stream=True: the child writes straight into apply.log, so a failing installer leaves its own reason there.
+    if kw.pop('stream',False):subprocess.run(list(map(str,argv)),check=True,timeout=kw.pop('timeout',600),**kw);return ''
+    return subprocess.check_output(list(map(str,argv)),text=True,timeout=kw.pop('timeout',600),**kw)
 def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 
@@ -99,7 +102,7 @@ def main():
     store_apps=Path('/home/wizard/runtipi/repos/wizardapps/apps')
     if store_apps.is_dir():run(['chown','-R','--no-dereference','wizard:wizard',store_apps])
     reattach_sealed_wam_checkout('/home/wizard/wizard-app-manager',env.get('WAM_REPO','https://github.com/humanitylabs-org/wizard-app-manager'),evidence=WORK/'sealed-wam-drift.json')
-    run(['bash',installer],env=env,stdin=subprocess.DEVNULL,timeout=3600)
+    run(['bash',installer],stream=True,env=env,stdin=subprocess.DEVNULL,timeout=3600)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']
     installed=json.loads(Path('/home/wizard/.wizard-os/release-pins.json').read_text());assert installed==release
     # Every default row is source-pinned in the release; get.sh WIZARD_STRICT reads actual installs back.
