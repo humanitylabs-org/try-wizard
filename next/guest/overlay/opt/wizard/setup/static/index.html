@@ -437,11 +437,15 @@ function phoneRender(v) {
   } else {
     const qr = v.connect_url ? phoneQr(v.connect_url) : ''
     const phone = (v.phones || []).find((p) => /ios|android/i.test(p.os || '')) || (v.phones || [])[0]
+    // Online on Tailscale is not connected: the phone still has to open Wizard (scan the code). Only a hint.
+    const online = (v.phones || []).find((p) => p.online && /ios|android/i.test(p.os || ''))
     box.innerHTML = '<div class="pair">'
       + (qr ? `<div class="qr"><img alt="QR code to connect your phone" src="${qr}"></div>` : '')
       + '<div>'
       + (done ? `<div class="okline">✓ ${phoneEsc(phone ? phone.name : 'Your phone')} is connected</div><p class="note">Open the Wizard app on your phone any time.</p>`
-              : '<p class="note" style="margin:0 0 10px">Open the Wizard app on your phone, tap <b>Scan QR code</b> and point it here. The iPhone Camera works too.</p><div class="wait"><span class="spinner"></span>Waiting for your phone…</div>')
+              : (online ? `<p class="note" style="margin:0 0 6px"><b>${phoneEsc(online.name)}</b> is on your private network. One more step: open the Wizard app on it, tap <b>Scan QR code</b> and point it here.</p>`
+                        : '<p class="note" style="margin:0 0 10px">Open the Wizard app on your phone, tap <b>Scan QR code</b> and point it here. The iPhone Camera works too.</p>')
+                + '<div class="wait"><span class="spinner"></span><span>Waiting for your phone…</span></div>')
       + (v.address ? `<div class="addr">${phoneEsc(v.address)}</div>` : '')
       + '</div></div>'
   }
