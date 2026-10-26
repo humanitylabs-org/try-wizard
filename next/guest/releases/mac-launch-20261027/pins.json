@@ -352,7 +352,7 @@
   ],
   "execution": {
     "recipe": "preparation/assemble.py",
-    "sha256": "04b37858d649d59b6546d2a2891c360368e07790dd0473ecc53b32f972aa9aaa",
+    "sha256": "53dd476ec7f57daab508f9776d76c17bb8c5a2536312eef8dd9ede88f7e2000c",
     "argv": [
       "/opt/homebrew/bin/python3",
       "preparation/assemble.py",

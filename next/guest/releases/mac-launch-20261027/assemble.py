@@ -51,26 +51,86 @@ def runtime_release(pins,root):
     assert rc['images']['wizard-recorder']=={'ref':recorder.split('@')[0],'digest':recorder.split('@')[1],'security_target':'recorder'}
     return {'version':rc['version'],'components':rc['components'],'default_apps':rc['default_apps'],'hermes':rc['hermes'],'images':rc['images']}
 
+def _read_exact(stream,n):
+    data=b''
+    while len(data)<n:
+        chunk=stream.read(min(n-len(data),8*1024*1024))
+        if not chunk:raise AssertionError('archive truncated')
+        data+=chunk
+    return data
+
+def _copy_hash(stream,n,hasher):
+    while n:
+        chunk=stream.read(min(n,8*1024*1024))
+        if not chunk:raise AssertionError('archive truncated')
+        hasher.update(chunk);n-=len(chunk)
+
+def _skip_pad(stream,n):
+    pad=-n%512
+    if pad:assert not _read_exact(stream,pad).strip(b'\0'),'non-zero tar padding'
+
+def _octal(field):
+    if field[:1]==b'\x80':return int.from_bytes(field[1:],'big')
+    text=field.rstrip(b'\0 ').strip()
+    return int(text,8) if text else 0
+
+def _pax(data):
+    out={}
+    while data:
+        length,rest=data.split(b' ',1);length=int(length)
+        record=data[len(str(length))+1:length];data=data[length:]
+        key,value=record.rstrip(b'\n').split(b'=',1);out[key.decode()]=value.decode()
+    return out
+
+ZEROS=bytes(8*1024*1024)
 def stream_members(archive,expected,xz='/opt/homebrew/bin/xz'):
-    """Stream the archive, hash every member and reject a layout mismatch; no second 16GB extraction.
-    tarfile stops at the end-of-archive marker, so drain the rest of xz's output (tar record padding,
-    which must be all zero) before waiting; otherwise xz blocks on a full pipe and never exits."""
-    import tarfile
-    reader=subprocess.Popen([xz,'-dc',str(archive)],stdout=subprocess.PIPE)
-    seen={}
+    """Stream the archive once, hash every member's real bytes and reject a layout mismatch;
+    no second 48GB extraction. Own minimal ustar/pax reader: Python's tarfile mis-places the next
+    header for libarchive's GNU sparse 1.0 entries (pax 'size' includes the sparse map), and stops
+    reading early. After the end marker the rest (record padding) is drained and must be zero."""
+    reader=subprocess.Popen([xz,'-dc',str(archive)],stdout=subprocess.PIPE);stream=reader.stdout
+    seen={};pax={}
     try:
-        with tarfile.open(fileobj=reader.stdout,mode='r|') as tar:
-            for member in tar:
-                assert member.isfile() and member.name in expected and member.name not in seen
-                stream=tar.extractfile(member);assert stream is not None
-                hasher=hashlib.sha256()
-                for chunk in iter(lambda:stream.read(8*1024*1024),b''):hasher.update(chunk)
-                seen[member.name]=hasher.hexdigest()
-        for chunk in iter(lambda:reader.stdout.read(1024*1024),b''):
+        while True:
+            header=_read_exact(stream,512)
+            if not header.strip(b'\0'):break
+            name=header[:100].split(b'\0',1)[0].decode();prefix=header[345:500].split(b'\0',1)[0].decode()
+            if prefix:name=prefix+'/'+name
+            kind=header[156:157];size=_octal(header[124:136])
+            if 'size' in pax:size=int(pax['size'])
+            if kind in (b'x',b'g'):
+                data=_read_exact(stream,size);_skip_pad(stream,size)
+                if kind==b'x':pax=_pax(data)
+                continue
+            assert kind in (b'0',b'\0'),'unexpected tar entry type %r'%kind
+            name=pax.get('GNU.sparse.name',pax.get('path',name))
+            assert name in expected and name not in seen,'unexpected archive member '+name
+            hasher=hashlib.sha256()
+            if pax.get('GNU.sparse.major')=='1' and pax.get('GNU.sparse.minor')=='0':
+                real=int(pax['GNU.sparse.realsize']);used=0;buf=b''
+                def line():
+                    nonlocal buf,used
+                    while b'\n' not in buf:buf+=_read_exact(stream,512);used+=512
+                    value,buf=buf.split(b'\n',1);return int(value)
+                count=line();segments=[(line(),line()) for _ in range(count)]
+                assert not buf.strip(b'\0'),'non-zero sparse map padding'
+                position=0
+                for offset,length in segments:
+                    assert offset>=position and offset+length<=real,'bad sparse map'
+                    gap=offset-position
+                    while gap:hasher.update(ZEROS[:min(gap,len(ZEROS))]);gap-=min(gap,len(ZEROS))
+                    _copy_hash(stream,length,hasher);position=offset+length;used+=length
+                gap=real-position
+                while gap:hasher.update(ZEROS[:min(gap,len(ZEROS))]);gap-=min(gap,len(ZEROS))
+                assert used==size,'sparse member size mismatch'
+            else:_copy_hash(stream,size,hasher)
+            _skip_pad(stream,size);seen[name]=hasher.hexdigest();pax={}
+        for chunk in iter(lambda:stream.read(1024*1024),b''):
             assert not chunk.strip(b'\0'),'non-zero data after end of archive'
         assert reader.wait(timeout=60)==0 and set(seen)==set(expected)
     finally:
         if reader.poll() is None:reader.kill();reader.wait(timeout=30)
+        stream.close()
     return seen
 
 def pack(work,pins):
