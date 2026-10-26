@@ -97,6 +97,48 @@ def owned_hosts(app, data):
     return [pid for pid,cmd in process_rows() if cmd == executable+' --wizard-data-home '+str(data)]
 
 
+def wait_for_harness_host(hostproc, data, out):
+    """Bound privacy-consent stalls before starting the release app/installer."""
+    def ready():
+        assert hostproc.poll() is None, 'Harness-owned Host exited before status'
+        path=data/'host-status.json'
+        if not path.exists():return False
+        status=json.loads(path.read_text())
+        assert status['pid']==hostproc.pid and status['dataHome']==str(data)
+        return status
+    try:
+        return bounded_wait(ready,180,'Host status after harness launch')
+    except AssertionError as error:
+        sample=out/'host-blocked.sample.txt'
+        try:
+            result=subprocess.run(['/usr/bin/sample',str(hostproc.pid),'5','-file',str(sample)],
+                                  text=True,capture_output=True,timeout=30)
+            (out/'host-blocked-sample-command.txt').write_text(result.stdout+result.stderr)
+        except (OSError,subprocess.TimeoutExpired) as diagnostic:
+            sample.write_text('Host sample unavailable: '+str(diagnostic))
+        raise AssertionError('Host blocked (likely macOS privacy consent); inspect '+str(sample)) from error
+
+
+def stop_harness_host(hostproc, app, data, out, cleanup):
+    # Retained Popen identity, never enumerate and terminate other Host processes.
+    if hostproc is None:return
+    if hostproc.poll() is None:
+        assert hostproc.pid in owned_hosts(app,data), 'Owned Host executable/DataHome mismatch'
+        try:
+            run(out/'terminate',hostproc.pid,app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host')
+            hostproc.wait(timeout=120)
+        except (subprocess.SubprocessError, OSError):
+            # Also bounds cleanup if the main thread itself is blocked by TCC.
+            if hostproc.poll() is None:
+                hostproc.terminate()
+                try:hostproc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    hostproc.kill();hostproc.wait(timeout=15)
+                cleanup['ownedHostSignalFallback']=True
+    assert hostproc.poll() is not None
+    assert not owned_hosts(app,data), 'Unexpected unowned Host remains; preserve DataHome'
+
+
 def shell(command, timeout=120):
     token = 'WIZARD_QA_EXIT_'+uuid.uuid4().hex
     with socket.create_connection(('127.0.0.1',48000),timeout=timeout) as s:
@@ -197,7 +239,7 @@ guard let app=NSRunningApplication(processIdentifier:pid), app.executableURL?.re
 exit(app.terminate() ? 0 : 3)
 ''')
     run('/usr/bin/xcrun','swiftc',helper,'-o',out/'terminate')
-    appproc=None; success=False; prefs_changed=False; cleanup={}
+    appproc=None; hostproc=None; success=False; prefs_changed=False; cleanup={}
     def interrupt(signum, frame):
         raise RuntimeError('Interrupted; clean up owned VM and restore preferences')
     signal.signal(signal.SIGTERM,interrupt)
@@ -207,6 +249,15 @@ exit(app.terminate() ? 0 : 3)
         run('/usr/bin/defaults','import',DOMAIN,testprefs)
         actual=preferences(); assert actual is not None
         assert actual['DataHome']==str(data) and actual['backends']==overlay['backends']
+        # Direct child launch retains the SSH harness's removable-volume responsibility.
+        # LaunchServices would make the ad-hoc Host its own TCC-responsible process.
+        with (out/'host.log').open('w') as log:
+            hostproc=subprocess.Popen([str(app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'),
+                                       '--wizard-data-home',str(data)],stdout=log,stderr=log)
+        (out/'host-launch.json').write_text(json.dumps({'hostLaunchedByHarness':True,'pid':hostproc.pid,
+                                                       'nativeFinderConsentProven':False},indent=2))
+        wait_for_harness_host(hostproc,data,out)
+        assert owned_hosts(app,data)==[hostproc.pid]
         with (out/'app.log').open('w') as log:
             appproc=subprocess.Popen([str(app/'Contents/MacOS/Wizard'),'-DataHome',str(data),'-osFeedURL',feed_url,
                                       '-SUEnableAutomaticChecks','NO'],stdout=log,stderr=log)
@@ -222,7 +273,8 @@ exit(app.terminate() ? 0 : 3)
         def healthy():
             status=json.loads((data/'host-status.json').read_text())
             assert status['dataHome']==str(data) and str(status['build'])=='309'
-            assert status['pid'] in owned_hosts(app,data)
+            assert status['pid']==hostproc.pid and owned_hosts(app,data)==[hostproc.pid]
+            assert hostproc.poll() is None, 'App did not reuse harness-owned Host'
             if status['state']!='running':return False
             health={}
             for name,url in [('onboarding','http://127.0.0.1:48030/healthz'),('agent','http://127.0.0.1:48023/wizard/health')]:
@@ -251,10 +303,7 @@ exit(app.terminate() ? 0 : 3)
                     appproc.wait(timeout=30)
             except Exception as e:
                 app_error=e
-            hosts=owned_hosts(app,data)
-            for pid in hosts:
-                run(out/'terminate',pid,app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host')
-            bounded_wait(lambda:not owned_hosts(app,data),120,'owned VM clean shutdown')
+            stop_harness_host(hostproc,app,data,out,cleanup)
             if app_error and appproc and appproc.poll() is None:
                 # Only our retained Popen child, after the owned VM stopped.
                 appproc.terminate()
@@ -277,9 +326,12 @@ exit(app.terminate() ? 0 : 3)
                 (out/'requests.json').write_text(json.dumps(requests,indent=2))
                 (out/'cleanup.json').write_text(json.dumps(cleanup,indent=2))
     assert success and cleanup.get('ownedProcessesStopped') and cleanup.get('preferencesRestored')
+    assert hostproc is not None
+    assert not cleanup.get('ownedHostSignalFallback'), 'Forced Host cleanup is not a successful acceptance'
     (out/'result.json').write_text(json.dumps({'pass':True,'version':'0.7.2','build':'309','factory':'0.5.0',
         'releaseAppUnmodified':True,'qaHooks':False,'feedURL':feed_url,'dataHome':str(data),
         'productionInstaller':True,'onboardingHealth':True,'agentHealth':True,
+        'hostLaunchedByHarness':True,'hostReusedByApp':True,'hostPID':hostproc.pid,
         'preferencesRestored':True,'vmStopped':True,'publication':'none',**setup},indent=2))
     print((out/'result.json').read_text())
 

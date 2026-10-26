@@ -34,7 +34,7 @@ if [[ "${WIZARD_UPDATE_HOST_FIXTURE:-0}" == 1 ]]; then
 else
 "${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Shared/HostTermination.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
 fi
-"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/UpdateArtifact.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/BackupContract.swift App/WizardBackup.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/UpdateArtifact.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
 
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra

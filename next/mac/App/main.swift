@@ -1461,6 +1461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let wizardsMenu = NSMenu(title: "Wizard")
     let statusMenu = WizardStatusMenu()
     let statusActions = WizardStatusActions()
+    var backup: WizardBackupController?
     var bindingsTimer: Timer?
     var quitDeadline: TimeInterval = 0
     var quitTimer: Timer?
@@ -1690,7 +1691,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        WizardUpdater.shared.shouldTerminate()
+        // An ordinary quit must not silently interrupt a backup, restore, undo or switch-over.
+        let keepOpen = MainActor.assumeIsolated { backup?.isBusy == true && backup?.confirmQuitWhileBusy() != true }
+        if keepOpen { return .terminateCancel }
+        return WizardUpdater.shared.shouldTerminate()
     }
     func applicationWillTerminate(_ notification: Notification) {
         // Leave the keyboard as we found it when Wizard isn't running.
@@ -1704,6 +1708,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Wizard", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        MainActor.assumeIsolated {
+            let backup = WizardBackupController()
+            backup.isLocal = { Store.active?.kind == .thisMac }
+            backup.wizardName = { Store.active?.name ?? "Wizard" }
+            backup.didRestore = { [weak self] in self?.controller.begin() }
+            backup.install(in: appMenu)
+            self.backup = backup
+        }
         appMenu.addItem(withTitle: "Check for Updates…", action: #selector(WizardUpdater.checkForUpdates(_:)), keyEquivalent: "").target = WizardUpdater.shared
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Wizard", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")

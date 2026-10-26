@@ -21,6 +21,69 @@ def helpers():
 
 
 class FreshInstallSafetyTests(unittest.TestCase):
+    def test_harness_directly_launches_retained_host_before_app_to_avoid_removable_volume_consent(self):
+        text=SOURCE.read_text()
+        self.assertLess(text.index('hostproc=subprocess.Popen'),text.index('appproc=subprocess.Popen'))
+        self.assertLess(text.index('wait_for_harness_host(hostproc,data,out)'),text.index('appproc=subprocess.Popen'))
+        self.assertIn("'--wizard-data-home',str(data)",text)
+        self.assertIn("'hostLaunchedByHarness':True",text)
+        self.assertIn("'hostReusedByApp':True",text)
+
+    def test_app_reuses_same_embedded_running_host_and_sends_start_after_install(self):
+        source=(ROOT/'next/mac/App/main.swift').read_text()
+        control=source[source.index('enum HostControl'):source.index('// MARK: - Native authority')]
+        self.assertIn('runningApplications(withBundleIdentifier: WizardShared.hostBundleID)',control)
+        self.assertIn('$0.bundleURL?.resolvingSymlinksInPath() == embeddedHostURL.resolvingSymlinksInPath()',control)
+        self.assertIn('if !isRunning {',control)
+        self.assertIn('HostControl.send("start")\n                self.connectLocal()',source)
+
+    def test_host_status_deadline_is_180_seconds_and_samples_privacy_blocked_host(self):
+        ns=helpers();proc=Mock(pid=123);proc.poll.return_value=None
+        ns['bounded_wait']=Mock(side_effect=AssertionError('timeout'))
+        saved=ns['subprocess'].run
+        try:
+            ns['subprocess'].run=Mock(return_value=subprocess.CompletedProcess([],0,'sampled',''))
+            with tempfile.TemporaryDirectory() as root:
+                out=Path(root)
+                with self.assertRaisesRegex(AssertionError,'Host blocked \\(likely macOS privacy consent\\)'):
+                    ns['wait_for_harness_host'](proc,out/'data',out)
+                self.assertEqual(ns['bounded_wait'].call_args.args[1],180)
+                args=ns['subprocess'].run.call_args.args[0]
+                self.assertEqual(args[:3],['/usr/bin/sample','123','5'])
+                self.assertTrue((out/'host-blocked-sample-command.txt').is_file())
+        finally:ns['subprocess'].run=saved
+
+    def test_host_status_must_match_retained_child_pid_and_data_home(self):
+        ns=helpers();proc=Mock(pid=123);proc.poll.return_value=None
+        ns['bounded_wait']=lambda predicate,seconds,label:predicate()
+        with tempfile.TemporaryDirectory() as root:
+            data=Path(root);status=data/'host-status.json'
+            status.write_text(json.dumps({'pid':123,'dataHome':str(data),'state':'stopped'}))
+            self.assertEqual(ns['wait_for_harness_host'](proc,data,data)['pid'],123)
+            status.write_text(json.dumps({'pid':456,'dataHome':str(data)}))
+            saved=ns['subprocess'].run
+            try:
+                ns['subprocess'].run=Mock(return_value=subprocess.CompletedProcess([],0,'',''))
+                with self.assertRaisesRegex(AssertionError,'Host blocked'):
+                    ns['wait_for_harness_host'](proc,data,data)
+            finally:ns['subprocess'].run=saved
+
+    def test_cleanup_terminates_only_retained_host_not_other_matching_processes(self):
+        ns=helpers();proc=Mock(pid=123);proc.poll.side_effect=[None,0]
+        ns['owned_hosts']=Mock(side_effect=[[123,456],[]]);ns['run']=Mock();cleanup={}
+        ns['stop_harness_host'](proc,Path('/app'),Path('/data'),Path('/out'),cleanup)
+        self.assertEqual(ns['run'].call_count,1)
+        self.assertEqual(ns['run'].call_args.args[1],123)
+        proc.terminate.assert_not_called();proc.kill.assert_not_called()
+
+    def test_blocked_host_cleanup_signals_only_retained_child_and_records_fallback(self):
+        ns=helpers();proc=Mock(pid=123);proc.poll.side_effect=[None,None,0]
+        ns['owned_hosts']=Mock(side_effect=[[123],[]])
+        ns['run']=Mock(side_effect=subprocess.TimeoutExpired('terminate',120));cleanup={}
+        ns['stop_harness_host'](proc,Path('/app'),Path('/data'),Path('/out'),cleanup)
+        proc.terminate.assert_called_once();proc.kill.assert_not_called()
+        self.assertTrue(cleanup['ownedHostSignalFallback'])
+
     def test_fresh_install_pre_answers_files_folder(self):
         ns=helpers()
         with tempfile.TemporaryDirectory() as root:
@@ -129,7 +192,7 @@ class FreshInstallSafetyTests(unittest.TestCase):
 
     def test_two_health_endpoints_belong_to_owned_host_and_retained_0_5_0_manifest(self):
         text=SOURCE.read_text()
-        for fragment in ("m['version']=='0.5.0'", "status['pid'] in owned_hosts(app,data)",
+        for fragment in ("m['version']=='0.5.0'", "status['pid']==hostproc.pid and owned_hosts(app,data)==[hostproc.pid]",
                          '48030/healthz','48023/wizard/health',"'0.7.2'","'309'"):
             self.assertIn(fragment,text)
 
