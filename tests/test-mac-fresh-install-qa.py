@@ -72,6 +72,20 @@ class FreshInstallSafetyTests(unittest.TestCase):
         ns['restore_preferences'](None,Path('/unused/backup'))
         ns['run'].assert_called_once_with('/usr/bin/defaults','delete',ns['DOMAIN'])
 
+    def test_preference_export_empty_dict_distinguishes_absent_domain(self):
+        ns=helpers();ns['DOMAIN']='isolated.test.domain'
+        exported=subprocess.CompletedProcess([],0,plistlib.dumps({}),b'')
+        absent=subprocess.CompletedProcess([],1,b'',b'Domain does not exist')
+        present=subprocess.CompletedProcess([],0,b'{}',b'')
+        saved=ns['subprocess'].run
+        try:
+            ns['subprocess'].run=Mock(side_effect=[exported,absent])
+            self.assertIsNone(ns['preferences']())
+            ns['subprocess'].run=Mock(side_effect=[exported,present])
+            self.assertEqual(ns['preferences'](),{})
+        finally:
+            ns['subprocess'].run=saved
+
     def test_missing_first_feed_request_has_short_diagnostic_deadline(self):
         text=SOURCE.read_text()
         self.assertIn("300,'release app first feed request (check backend selection/Files-folder prompt and app.log)'",text)

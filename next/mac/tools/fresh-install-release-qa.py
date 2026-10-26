@@ -41,7 +41,15 @@ def preferences():
     if p.returncode:
         assert b'does not exist' in p.stderr or b'not found' in p.stderr, p.stderr.decode()
         return None
-    return plistlib.loads(p.stdout)
+    value=plistlib.loads(p.stdout)
+    # On current macOS, export of an absent domain succeeds with an empty dict.
+    # Preserve absence separately from an existing empty domain for exact restore.
+    if not value:
+        probe=subprocess.run(['/usr/bin/defaults','read',DOMAIN],capture_output=True,timeout=30)
+        if probe.returncode:
+            assert b'does not exist' in probe.stderr or b'not found' in probe.stderr, probe.stderr.decode()
+            return None
+    return value
 
 
 def preanswer_files_folder(data, files):
