@@ -20,6 +20,28 @@ def files():
             dirs[:]=[d for d in dirs if d not in {'.git','__pycache__'}]
             if Path(parent).name=='certifi' and 'cacert.pem' in names:yield Path(parent)/'cacert.pem'
 
+DNS_TEMPORARY=('[Errno -3]','Temporary failure in name resolution','Try again')
+def transport_failure(detail):
+    """Inconclusive transport detail (never a verdict): returns 'dns', 'transport' or None."""
+    if not (isinstance(detail,tuple) and str(detail[-1]).startswith('<urlopen error')):return None
+    text=str(detail[-1])
+    if 'CERTIFICATE_VERIFY_FAILED' in text:return None
+    return 'dns' if any(t in text for t in DNS_TEMPORARY) else 'transport'
+def with_transport_retries(call,sleep=None):
+    # Retry only transport failures (EOF, bad record MAC, record layer, resets, timeouts) on good and bad
+    # hosts alike; an accepted bad chain or a rejected good chain is a verdict and fails at once.
+    # Temporary DNS failures (EAI_AGAIN) get a longer budget (~2.5 min): the guest resolver throttles
+    # under the probe's burst of lookups, and a failed lookup proves nothing about certificates.
+    sleep=sleep or time.sleep;attempt=0
+    while True:
+        try:return call()
+        except AssertionError as e:
+            kind=transport_failure(e.args[0] if e.args else None)
+            limit={'dns':8,'transport':5}.get(kind,0)
+            attempt+=1
+            if attempt>=limit:raise
+            sleep(min(2**attempt,30))
+
 def python_checks():
     ctxs=[('system',ssl.create_default_context())];seen=set()
     for name in ['REQUESTS_CA_BUNDLE','CURL_CA_BUNDLE','SSL_CERT_FILE','NODE_EXTRA_CA_CERTS']:
@@ -33,15 +55,7 @@ def python_checks():
         if key not in seen:ctxs.append((str(f),ssl.create_default_context(cafile=str(f))));seen.add(key)
     def request(row):
         name,ctx,url,bad=row
-        # Retry only transport failures (EOF, bad record MAC, record layer, resets, timeouts) on good and bad
-        # hosts alike; an accepted bad chain or a rejected good chain is a verdict and fails at once.
-        for attempt in range(5):
-            try:return attempt_request(name,ctx,url,bad)
-            except AssertionError as e:
-                detail=e.args[0] if e.args else None
-                transient=isinstance(detail,tuple) and str(detail[-1]).startswith('<urlopen error') and 'CERTIFICATE_VERIFY_FAILED' not in str(detail[-1])
-                if not transient or attempt==4:raise
-                time.sleep(2**(attempt+1))
+        return with_transport_retries(lambda:attempt_request(name,ctx,url,bad))
     def attempt_request(name,ctx,url,bad):
         try:
             with urllib.request.urlopen(url,context=ctx,timeout=20) as r:
