@@ -620,9 +620,11 @@ async def post_verify(_: web.Request) -> web.Response:
     return web.json_response({"reply": text, **public_state()})
 
 
+# The owner's first message (shown in the Setup preview bubble too). The agent's `wizard-guide` system skill answers
+# it: a short hello, three things to try, and the offer of one Wizard tip a day for five days (wizard_tips).
 FIRST_TASK = (
-    "Hi {name}! Tell me in a few friendly sentences who you are and which apps you can use on this computer "
-    "(check your tools), then where my files live."
+    "Hi {name}! I'm new to Wizard. Say hello in a couple of sentences, show me three things I can try right now, "
+    "and ask if I'd like a quick Wizard tip each day for the next five days."
 )
 
 
@@ -830,6 +832,14 @@ def build_app() -> web.Application:
         web.get("/api/agent-import", get_agent_import),
         web.static("/static", STATIC),
     ])
+    # Import by file so source-loaded contract tests and the systemd entrypoint use
+    # the same adjacent module, without depending on the caller's working directory.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wizard_backup_frontdoor", Path(__file__).with_name("backup_frontdoor.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.install(app, module.BackupDoor(name_provider=lambda: load_state().get("name") or "Wizard"))
     return app
 
 

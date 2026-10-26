@@ -1,0 +1,2 @@
+# HTTP front-door tests use an in-process server; no VM or live Wizard.
+aiohttp>=3.13.3,<4

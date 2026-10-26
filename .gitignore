@@ -22,3 +22,6 @@ __pycache__/
 /.build/
 /guest/.work/
 /macos/.swiftpm/
+/next/mac/.build/
+/next/mac/.swiftpm/
+/next/mac/dist/
