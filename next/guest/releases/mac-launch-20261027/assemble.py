@@ -51,6 +51,28 @@ def runtime_release(pins,root):
     assert rc['images']['wizard-recorder']=={'ref':recorder.split('@')[0],'digest':recorder.split('@')[1],'security_target':'recorder'}
     return {'version':rc['version'],'components':rc['components'],'default_apps':rc['default_apps'],'hermes':rc['hermes'],'images':rc['images']}
 
+def stream_members(archive,expected,xz='/opt/homebrew/bin/xz'):
+    """Stream the archive, hash every member and reject a layout mismatch; no second 16GB extraction.
+    tarfile stops at the end-of-archive marker, so drain the rest of xz's output (tar record padding,
+    which must be all zero) before waiting; otherwise xz blocks on a full pipe and never exits."""
+    import tarfile
+    reader=subprocess.Popen([xz,'-dc',str(archive)],stdout=subprocess.PIPE)
+    seen={}
+    try:
+        with tarfile.open(fileobj=reader.stdout,mode='r|') as tar:
+            for member in tar:
+                assert member.isfile() and member.name in expected and member.name not in seen
+                stream=tar.extractfile(member);assert stream is not None
+                hasher=hashlib.sha256()
+                for chunk in iter(lambda:stream.read(8*1024*1024),b''):hasher.update(chunk)
+                seen[member.name]=hasher.hexdigest()
+        for chunk in iter(lambda:reader.stdout.read(1024*1024),b''):
+            assert not chunk.strip(b'\0'),'non-zero data after end of archive'
+        assert reader.wait(timeout=60)==0 and set(seen)==set(expected)
+    finally:
+        if reader.poll() is None:reader.kill();reader.wait(timeout=30)
+    return seen
+
 def pack(work,pins):
     disk=work/'data/os/disk.img';out=work/'package';(out/'boot').mkdir(parents=True)
     def check(image):
@@ -110,18 +132,7 @@ def pack(work,pins):
         finally:
             for proc in [xz,tar]:
                 if proc.poll() is None:proc.terminate();proc.wait(timeout=30)
-    # Stream the archive, hash every member and reject a layout mismatch; no second 16GB extraction.
-    import tarfile
-    reader=subprocess.Popen(['/opt/homebrew/bin/xz','-dc',str(archive)],stdout=subprocess.PIPE)
-    seen={}
-    with tarfile.open(fileobj=reader.stdout,mode='r|') as tar:
-        for member in tar:
-            assert member.isfile() and member.name in ['manifest.json',*files,'bom.json']
-            stream=tar.extractfile(member);assert stream is not None
-            hasher=hashlib.sha256()
-            for chunk in iter(lambda:stream.read(8*1024*1024),b''):hasher.update(chunk)
-            seen[member.name]=hasher.hexdigest()
-    assert reader.wait(timeout=30)==0 and set(seen)==set(['manifest.json',*files,'bom.json'])
+    seen=stream_members(archive,['manifest.json',*files,'bom.json'])
     assert all(seen[x]==manifest['files'][x] for x in files)
     return {'archive':str(archive),'sha256':sha(archive),'manifest':manifest,'archiveMembersVerified':True}
 
