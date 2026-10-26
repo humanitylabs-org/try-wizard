@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import secrets
+import socket
 import stat
 import re
 import subprocess
@@ -731,12 +732,25 @@ PHONE_STEPS = {"unavailable", "off", "signin", "https", "serving", "phone_seen"}
 PHONE_APPS = {"ios": os.environ.get("WIZARD_IOS_APP_URL", ""), "android": os.environ.get("WIZARD_ANDROID_APP_URL", "")}
 
 
+def _tailscale_link(url: Any) -> str | None:
+    parts = urlsplit(url) if isinstance(url, str) else None
+    if parts and parts.scheme == "https" and (parts.hostname == "tailscale.com" or (parts.hostname or "").endswith(".tailscale.com")):
+        return url
+    return None
+
+
 def _phone_view(status: int, payload: Any) -> dict[str, Any]:
     if status != 200 or not isinstance(payload, dict) or payload.get("step") not in PHONE_STEPS:
         return {"step": "unavailable", "apps": {k: bool(v) for k, v in PHONE_APPS.items()}}
     view = {k: payload.get(k) for k in ("step", "device_name", "error")}
     view["signin"] = bool(payload.get("auth_url"))
     view["https"] = bool(payload.get("https_enable_url"))
+    # Shown as a copyable fallback in case the browser doesn't open. Only Tailscale's own https pages.
+    view["signin_url"] = _tailscale_link(payload.get("auth_url"))
+    view["https_url"] = _tailscale_link(payload.get("https_enable_url"))
+    # The name the Wizard joins the tailnet under (the guest's hostname until Tailscale reports one), so the
+    # owner knows which device to approve: it is not the Mac's own Tailscale.
+    view["this_device"] = str(payload.get("device_name") or socket.gethostname() or "wizard").split(".")[0][:64]
     view["phones"] = [{"name": str(p.get("name") or "phone")[:64], "os": str(p.get("os") or "")[:32],
                        "online": p.get("online") is True} for p in (payload.get("phones") or []) if isinstance(p, dict)][:8]
     url = payload.get("wizard_url") or ""

@@ -80,6 +80,12 @@
   .pair { display: flex; gap: 18px; align-items: center; }
   .qr { flex: none; width: 152px; height: 152px; padding: 10px; border-radius: 12px; background: #fff; display: grid; place-items: center; }
   .qr img { width: 132px; height: 132px; image-rendering: pixelated; display: block; }
+  .phonebox .note b { white-space: nowrap; }
+  .manual { margin-top: 14px; font-size: 13px; color: var(--dim); }
+  .manual .link { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .manual input { flex: 1; min-width: 0; font: 500 12px ui-monospace, "JetBrains Mono", monospace; color: var(--text, #e9e7f5); background: #0a0912; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .manual button { padding: 8px 12px; font-size: 13px; }
+  .phonebox .warn { color: #f2b56b; }
   .addr { font: 500 13px ui-monospace, "JetBrains Mono", monospace; color: var(--dim); word-break: break-all; margin-top: 8px; }
   .wait { color: var(--dim); font-size: 14px; display: flex; align-items: center; gap: 10px; }
   .wait .spinner { border-color: #9a96b555; border-top-color: var(--accent2); margin: 0; }
@@ -362,6 +368,9 @@ $('#next3').addEventListener('click', () => { if (!$('#next3').onclick) show(4) 
 // 4. Phone: the Agent Service's phone setup, relayed by /api/phone*. Poll every 2 s while visible.
 let phoneTimer = null
 let phoneStarted = false
+// Links opened automatically on this page: a Tailscale link opens once, as soon as the Wizard reports it.
+const phoneAutoOpened = {}
+let phoneOpenFailed = false
 const phoneEsc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 function phoneQr(text) {
   try { const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createDataURL(4, 0) } catch (e) { return '' }
@@ -371,11 +380,36 @@ async function phoneEnter() {
   phoneLeave()
   let v
   try { v = await api('/api/phone') } catch (err) { v = { step: 'unavailable' } }
+  phoneAutoOpen(v)
   phoneRender(v)
   if (['signin', 'https', 'serving'].includes(v.step) || (phoneStarted && v.step === 'off')) phoneTimer = setTimeout(phoneEnter, 2000)
 }
+// After "Connect a phone", open the Tailscale page for the owner instead of waiting for another click.
+function phoneAutoOpen(v) {
+  const kind = v.step === 'signin' ? 'signin' : v.step === 'https' ? 'https' : null
+  const url = kind && v[kind + '_url']
+  if (!phoneStarted || !url || phoneAutoOpened[url]) return
+  phoneAutoOpened[url] = true
+  phoneOpen(kind)
+}
+async function phoneOpen(kind) {
+  try {
+    const r = await api('/api/phone/open', { method: 'POST', body: JSON.stringify({ kind }) })
+    phoneOpenFailed = !r.opened
+  } catch (err) { phoneOpenFailed = true }
+  const warn = $('#phoneWarn')
+  if (warn) warn.classList.toggle('hidden', !phoneOpenFailed)
+  if ($('#phoneHint')) $('#phoneHint').classList.toggle('hidden', phoneOpenFailed)
+}
+function phoneManual(url) {
+  if (!url) return ''
+  return '<div class="manual"><span id="phoneWarn" class="warn' + (phoneOpenFailed ? '' : ' hidden') + '">Your browser didn\'t open. Copy this link into it:</span>'
+    + '<span id="phoneHint"' + (phoneOpenFailed ? ' class="hidden"' : '') + '>Nothing opened? Copy this link into your browser:</span>'
+    + `<div class="link"><input readonly value="${phoneEsc(url)}" aria-label="Tailscale link"><button class="secondary" data-copy>Copy link</button></div></div>`
+}
 function phoneRender(v) {
   const box = $('#phoneBox'), next = $('#nextPhone')
+  const device = `<b>${phoneEsc(v.this_device || 'wizard')}</b>`
   for (const kind of ['ios', 'android']) {
     const btn = $(kind === 'ios' ? '#appIos' : '#appAndroid')
     btn.disabled = !(v.apps && v.apps[kind])
@@ -385,18 +419,20 @@ function phoneRender(v) {
   next.textContent = done ? 'Continue' : 'Skip for now'
   next.className = done ? 'primary' : 'ghost'
   $('#errPhone').textContent = v.error && !['owner_not_recorded'].includes(v.error) ? `Phone setup: ${v.error.replace(/_/g, ' ')}` : ''
+  let html = null
   if (v.step === 'unavailable') {
     box.innerHTML = '<p class="note" style="margin:0">Phone access isn\'t available on this Wizard yet. You can set it up later in Settings.</p>'
   } else if (v.step === 'off') {
     box.innerHTML = phoneStarted ? '<div class="wait"><span class="spinner"></span>Starting Tailscale…</div>'
-      : '<p class="note" style="margin:0">Wizard signs this Mac in to <b>Tailscale</b>, a free private network. Use the same Tailscale account on your phone.</p>'
+      : '<p class="note" style="margin:0">Your Wizard joins <b>Tailscale</b>, a free private network, as its own device. Use the same Tailscale account on your phone.</p>'
         + '<div class="act"><button class="primary" id="phoneStart">Connect a phone</button></div>'
   } else if (v.step === 'signin') {
-    box.innerHTML = '<p class="note" style="margin:0">Sign in to Tailscale in your browser and approve this Mac. Then come back here.</p>'
-      + '<div class="act"><button class="primary" data-open="signin">Sign in to Tailscale</button><span class="wait"><span class="spinner"></span>Waiting for sign-in…</span></div>'
+    html = `<p class="note" style="margin:0">Sign in to Tailscale in your browser, then approve the new device ${device}. That's your Wizard joining your private network; it's separate from any Tailscale app on this Mac.</p>`
+      + `<div class="act"><button class="${phoneAutoOpened[v.signin_url] ? 'secondary' : 'primary'}" data-open="signin">${phoneAutoOpened[v.signin_url] ? 'Open again' : 'Sign in to Tailscale'}</button><span class="wait"><span class="spinner"></span><span>Waiting for approval…</span></span></div>`
+      + phoneManual(v.signin_url)
   } else if (v.step === 'https') {
-    box.innerHTML = '<p class="note" style="margin:0">One more switch: your tailnet needs HTTPS certificates turned on, so your phone gets a secure address.</p>'
-      + (v.https ? '<div class="act"><button class="primary" data-open="https">Turn on HTTPS</button><span class="wait"><span class="spinner"></span>Waiting…</span></div>'
+    html = '<p class="note" style="margin:0">One more switch: your tailnet needs HTTPS certificates turned on, so your phone gets a secure address.</p>'
+      + (v.https ? `<div class="act"><button class="${phoneAutoOpened[v.https_url] ? 'secondary' : 'primary'}" data-open="https">${phoneAutoOpened[v.https_url] ? 'Open again' : 'Turn on HTTPS'}</button><span class="wait"><span class="spinner"></span>Waiting…</span></div>` + phoneManual(v.https_url)
                  : '<div class="act"><span class="wait"><span class="spinner"></span>Setting up the secure address…</span></div>')
   } else {
     const qr = v.connect_url ? phoneQr(v.connect_url) : ''
@@ -409,6 +445,8 @@ function phoneRender(v) {
       + (v.address ? `<div class="addr">${phoneEsc(v.address)}</div>` : '')
       + '</div></div>'
   }
+  if (html !== null && box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html }
+  else if (html === null) box.dataset.html = ''
 }
 $('#phoneBox').addEventListener('click', async (e) => {
   const start = e.target.closest('#phoneStart'), open = e.target.closest('[data-open]')
@@ -417,7 +455,11 @@ $('#phoneBox').addEventListener('click', async (e) => {
     try { phoneRender(await api('/api/phone/start', { method: 'POST', body: '{}' })) } catch (err) { $('#errPhone').textContent = err.message }
     phoneEnter()
   } else if (open) {
-    try { await api('/api/phone/open', { method: 'POST', body: JSON.stringify({ kind: open.dataset.open }) }) } catch (err) { $('#errPhone').textContent = err.message }
+    phoneOpen(open.dataset.open)
+  } else if (e.target.closest('[data-copy]')) {
+    const btn = e.target.closest('[data-copy]'), input = btn.parentElement.querySelector('input')
+    try { await navigator.clipboard.writeText(input.value) } catch (err) { input.select(); document.execCommand('copy') }
+    btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy link' }, 2000)
   }
 })
 $$('.apps .choice').forEach((b) => b.addEventListener('click', () => api('/api/phone/open', { method: 'POST', body: JSON.stringify({ kind: b.dataset.app }) }).catch(() => {})))
