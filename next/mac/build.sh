@@ -17,6 +17,10 @@ rm -rf "$OUT/Wizard.app" "$OUT/obj"; mkdir -p "$OUT/obj"
 
 TARGET="arm64-apple-macos14.0"
 SWIFTC=(xcrun swiftc -O -target "$TARGET" -swift-version 5)
+# This flag is never enabled for a release. It admits the disposable loopback
+# transport and native update fault-injection controls, not production defaults.
+if [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]]; then SWIFTC+=(-D WIZARD_UPDATE_QA); fi
+export WIZARD_UPDATE_QA
 
 APP=$OUT/Wizard.app
 HOST=$APP/Contents/Library/LoginItems/"Wizard Host.app"
@@ -24,8 +28,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" 
 
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+if [[ "${WIZARD_UPDATE_HOST_FIXTURE:-0}" == 1 ]]; then
+  [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]] || { echo "Host fixture requires QA build" >&2; exit 2; }
+  "${SWIFTC[@]}" tools/update-host-fixture.swift -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
+else
 "${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Shared/HostTermination.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
-"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+fi
+"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/UpdateArtifact.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
 
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra
@@ -59,8 +68,9 @@ import hashlib,json,os,pathlib,plistlib,struct
 a=pathlib.Path(os.environ['APP']); p=a/'Contents/Info.plist'
 import urllib.parse
 feed=urllib.parse.urlsplit(os.environ['SPARKLE_FEED'])
-assert feed.scheme=='https' or (feed.scheme=='http' and feed.hostname in ('127.0.0.1','::1','localhost')), 'Only HTTPS distribution or loopback developer feeds are allowed'
-d=plistlib.loads(p.read_bytes()); d.update(SUFeedURL=os.environ['SPARKLE_FEED'],SUPublicEDKey=os.environ['SPARKLE_PUBLIC_KEY'],SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUSendProfileInfo=False,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUUpdateCheckInterval=3600)
+assert feed.scheme=='https' or (os.environ.get('WIZARD_UPDATE_QA')=='1' and feed.scheme=='http' and feed.hostname in ('127.0.0.1','::1','localhost')), 'Only HTTPS distribution (or compile-time QA loopback) feeds are allowed'
+d=plistlib.loads(p.read_bytes()); d.update(SUFeedURL=os.environ['SPARKLE_FEED'],SUPublicEDKey=os.environ['SPARKLE_PUBLIC_KEY'],SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUAllowsAutomaticUpdates=False,SUSendProfileInfo=False,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0,SUUpdateCheckInterval=3600)
+d['WizardUpdateQA'] = os.environ.get('WIZARD_UPDATE_QA') == '1'
 p.write_bytes(plistlib.dumps(d))
 files=['Contents/MacOS/Wizard','Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host']
 guest=os.environ.get('GUEST_UPDATE_PAYLOAD')
@@ -91,6 +101,7 @@ def digest(f):
    h.update(chunk)
  return h.hexdigest()
 r=dict(schema=1,releaseID=os.environ['RELEASE_ID'],build=os.environ['BUILD'],arch='arm64',minimumOS='14.0',hostProtocol=1,minimumPeer=1,files={f:digest(f) for f in files},guestPatch='mac-stack-v1' if guest else None)
+r['qa'] = os.environ.get('WIZARD_UPDATE_QA') == '1'
 (a/'Contents/Resources/wizard-release.json').write_text(json.dumps(r,sort_keys=True)+'\n')
 PY
 

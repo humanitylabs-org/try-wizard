@@ -14,7 +14,7 @@ class FactoryVersionContract(unittest.TestCase):
         match = re.search(r'(\[[^\n]+\])\.contains\(imageVersion\)', check)
         self.assertIsNotNone(match)
         versions = set(json.loads(match[1]))
-        self.assertEqual(versions, {'0.3.0', '0.4.0', '0.4.1'})
+        self.assertEqual(versions, {'0.3.0', '0.4.0', '0.4.1', '0.5.0'})
         self.assertNotIn('0.4.9', versions)
         self.assertIn('!files.isEmpty else { throw bad }', check)
         self.assertIn('guard got == want.lowercased() else { throw bad }', check)
@@ -24,13 +24,13 @@ class FactoryVersionContract(unittest.TestCase):
         check = source[source.index('static var legacyBootstrapNeeded'):source.index('static var diskIdentity')]
         match = re.search(r'Set\((\[[^\n]+\])\)\.contains\(version\) \{ return false \}', check)
         self.assertIsNotNone(match)
-        self.assertEqual(set(json.loads(match[1])), {'0.4.0', '0.4.1'})
+        self.assertEqual(set(json.loads(match[1])), {'0.4.0', '0.4.1', '0.5.0'})
         self.assertNotIn('0.4.9', json.loads(match[1]))
         self.assertIn('WizardDiskIdentity.completed(receipt, modern: modern', check)
 
     def test_current_release_contract(self):
-        release = json.loads((ROOT / 'release-0.7.1.json').read_text())
-        self.assertEqual((release['nativeVersion'], release['nativeBuild'], release['guestVersion']), ('0.7.1', '308', '0.4.1'))
+        release = json.loads((ROOT / 'release-0.7.2.json').read_text())
+        self.assertEqual((release['nativeVersion'], release['nativeBuild'], release['factoryVersion']), ('0.7.2', '309', '0.5.0'))
 
 if __name__ == '__main__':
     unittest.main()

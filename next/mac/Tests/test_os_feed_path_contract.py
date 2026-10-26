@@ -7,12 +7,12 @@ class FeedPathContract(unittest.TestCase):
         src = (MAC / 'App/main.swift').read_text()
         m = re.search(r'Store\.downloadsBase \+ "(os/[^"]+)"', src)
         self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), 'os/p1/latest.json')
+        self.assertEqual(m.group(1), 'os/p2/latest.json')
         self.assertNotIn('"os/latest.json"', src)
 
     def test_release_metadata_matches(self):
-        rel = json.loads((MAC / 'release-0.7.1.json').read_text())
-        self.assertEqual(rel['imageFeed'], 'https://downloads.aiwizards.com/os/p1/latest.json')
+        rel = json.loads((MAC / 'release-0.7.2.json').read_text())
+        self.assertEqual(rel['imageFeed'], 'https://downloads.aiwizards.com/os/p2/latest.json')
 
 if __name__ == '__main__':
     unittest.main()

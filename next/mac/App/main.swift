@@ -33,9 +33,9 @@ enum Store {
     static var osFeedURL: URL {
         // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
         // Feeds are never repointed under shipped apps: os/latest.json stays frozen at 0.4.0 for 0.7.0 downloads,
-        // and os/p1/latest.json serves only images this build's verifyManifest admits. See DOWNLOADS.md.
+        // os/p1/latest.json remains for 0.7.1; os/p2/latest.json admits factory 0.5.0. See DOWNLOADS.md.
         // QA and testers can point a build elsewhere with `defaults write org.humanitylabs.wizard.mvp osFeedURL <url>`.
-        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/p1/latest.json")!
+        URL(string: d.string(forKey: "osFeedURL") ?? Store.downloadsBase + "os/p2/latest.json")!
     }
     static let downloadsBase = "https://downloads.aiwizards.com/"
     static var downloadsPage: URL { URL(string: downloadsBase + "index.html")!
@@ -385,7 +385,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let imageVersion = m["version"] as? String,
-              ["0.3.0", "0.4.0", "0.4.1"].contains(imageVersion),
+              ["0.3.0", "0.4.0", "0.4.1", "0.5.0"].contains(imageVersion),
               let files = m["files"] as? [String: String], !files.isEmpty else { throw bad }
         for (rel, want) in files {
             guard !rel.contains(".."), FileManager.default.fileExists(atPath: dir.appendingPathComponent(rel).path) else { throw bad }
@@ -1805,11 +1805,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
     func installQAHooks() {
+        #if WIZARD_UPDATE_QA
         guard UserDefaults.standard.bool(forKey: "QAHooks") else { return }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(qa(_:)),
             name: Notification.Name("org.humanitylabs.wizard.mvp.qa"), object: nil, suspensionBehavior: .deliverImmediately)
+        #endif
     }
 
+    #if WIZARD_UPDATE_QA
     @MainActor @objc func qa(_ n: Notification) {
         guard let cmd = n.object as? String else { return }
         let parts = cmd.split(separator: " ", maxSplits: 1).map(String.init)
@@ -1822,6 +1825,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case "update-state": try? WizardUpdate.write(WizardUpdater.shared.snapshot, WizardUpdate.dir.appendingPathComponent("qa.json"))
         case "update-host-start": HostControl.ensureRunning()
         case "update-quit": NSApp.terminate(nil)
+        case "update-power-off": NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willPowerOffNotification, object: nil); NSApp.terminate(nil)
+        case "update-no-space": UserDefaults.standard.set(arg == "on", forKey: "QAUpdateNoSpace")
         case "choose-this-mac": addThisMac()
         case "reload": controller.begin()
         case "voice-retry": controller.perform(NSSelectorFromString("retryLocalVoice"))
@@ -2048,6 +2053,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         default: break
         }
     }
+    #endif
 
     func snapshot(to path: String) {
         let write: (NSImage) -> Void = { img in

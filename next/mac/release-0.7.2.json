@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "nativeVersion": "0.7.2",
+  "nativeBuild": "309",
+  "liveNativeBase": "84720ac1230456e99feffe324ce7beaa3d49c5ce",
+  "updaterDeltaBase": "256bd9f72f7adf027c9fd4a4adeb0d5e202e20a2^",
+  "updaterDeltaHead": "b2bcc10a0d9b79977be3cee5507247062d7adeba",
+  "imageFeed": "https://downloads.aiwizards.com/os/p2/latest.json",
+  "factoryVersion": "0.5.0",
+  "retainedFactoryVersions": ["0.3.0", "0.4.0", "0.4.1"],
+  "guestUpdatePayloadBaseline": "308",
+  "guestUpdatePayloadPolicy": "Preserve the shipped build 308 GuestUpdate payload byte-for-byte. Fresh factory 0.5.0 is separately downloaded; no guest pin or core Hermes change.",
+  "distribution": "source candidate only; build and fresh install await parent-owned Thales jobs; ad-hoc native signing; external Sparkle signer; no publication or merge"
+}
