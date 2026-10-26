@@ -421,9 +421,9 @@ function phoneRender(v) {
   $('#errPhone').textContent = v.error && !['owner_not_recorded'].includes(v.error) ? `Phone setup: ${v.error.replace(/_/g, ' ')}` : ''
   let html = null
   if (v.step === 'unavailable') {
-    box.innerHTML = '<p class="note" style="margin:0">Phone access isn\'t available on this Wizard yet. You can set it up later in Settings.</p>'
+    html = '<p class="note" style="margin:0">Phone access isn\'t available on this Wizard yet. You can set it up later in Settings.</p>'
   } else if (v.step === 'off') {
-    box.innerHTML = phoneStarted ? '<div class="wait"><span class="spinner"></span>Starting Tailscale…</div>'
+    html = phoneStarted ? '<div class="wait"><span class="spinner"></span>Starting Tailscale…</div>'
       : '<p class="note" style="margin:0">Your Wizard joins <b>Tailscale</b>, a free private network, as its own device. Use the same Tailscale account on your phone.</p>'
         + '<div class="act"><button class="primary" id="phoneStart">Connect a phone</button></div>'
   } else if (v.step === 'signin') {
@@ -439,7 +439,7 @@ function phoneRender(v) {
     const phone = (v.phones || []).find((p) => /ios|android/i.test(p.os || '')) || (v.phones || [])[0]
     // Online on Tailscale is not connected: the phone still has to open Wizard (scan the code). Only a hint.
     const online = (v.phones || []).find((p) => p.online && /ios|android/i.test(p.os || ''))
-    box.innerHTML = '<div class="pair">'
+    html = '<div class="pair">'
       + (qr ? `<div class="qr"><img alt="QR code to connect your phone" src="${qr}"></div>` : '')
       + '<div>'
       + (done ? `<div class="okline">✓ ${phoneEsc(phone ? phone.name : 'Your phone')} is connected</div><p class="note">Open the Wizard app on your phone any time.</p>`
@@ -449,8 +449,8 @@ function phoneRender(v) {
       + (v.address ? `<div class="addr">${phoneEsc(v.address)}</div>` : '')
       + '</div></div>'
   }
-  if (html !== null && box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html }
-  else if (html === null) box.dataset.html = ''
+  // Only touch the DOM when something changed: re-rendering every poll restarts the spinner and resets focus.
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html }
 }
 $('#phoneBox').addEventListener('click', async (e) => {
   const start = e.target.closest('#phoneStart'), open = e.target.closest('[data-open]')
