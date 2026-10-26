@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Focused safety contracts for final-release fresh install (no macOS/VM needed)."""
 import ast
+import json
 from pathlib import Path
+import plistlib
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import Mock
 
@@ -18,6 +21,61 @@ def helpers():
 
 
 class FreshInstallSafetyTests(unittest.TestCase):
+    def test_fresh_install_pre_answers_files_folder(self):
+        ns=helpers()
+        with tempfile.TemporaryDirectory() as root:
+            out=Path(root);data=out/'data';data.mkdir();files=out/'files'
+            evidence=ns['preanswer_files_folder'](data,files)
+            self.assertEqual(json.loads((data/'files-folder.json').read_text()),{'path':str(files)})
+            self.assertTrue(files.is_dir())
+            self.assertEqual([p.name for p in data.iterdir()],['files-folder.json'])
+            self.assertTrue(evidence['filesFolderPromptPreAnswered'])
+            self.assertFalse(evidence['finalAppFinderConsentProven'])
+            self.assertEqual(evidence['filesFolder'],str(files))
+        text=SOURCE.read_text()
+        self.assertLess(text.index("setup=preanswer_files_folder(data,out/'files')"),text.index('appproc=subprocess.Popen'))
+        self.assertIn("'publication':'none',**setup",text)
+
+    def test_fresh_install_selects_codable_this_mac_backend_not_unanswered_chooser(self):
+        ns=helpers();overlay=ns['isolated_overlay']({'keep':'unchanged'},Path('/isolated/data'),'http://127.0.0.1/feed')
+        self.assertEqual(overlay['activeBackend'],0)
+        self.assertEqual(json.loads(overlay['backends']),[{'name':'This Mac','kind':'thisMac','url':'http://127.0.0.1:48030/'}])
+        self.assertFalse(overlay['QAHooks'])
+        self.assertEqual(overlay['keep'],'unchanged')
+        # Backend's required Codable fields must remain synchronized with the app.
+        source=(ROOT/'next/mac/App/main.swift').read_text()
+        for field in ('var kind: Kind','var name: String','var url: String','d.integer(forKey: "activeBackend")'):
+            self.assertIn(field,source)
+
+    def test_preference_restore_removes_overlay_only_keys(self):
+        ns=helpers();ns['DOMAIN']='isolated.test.domain'
+        original={'DataHome':'/real','retained':b'bytes','nested':{'keep':True}}
+        state=dict(original,ShowMenuBarIcon=False,SUEnableAutomaticChecks=False,
+                   SUHasLaunchedBefore=True,WizardKeyEnabled=False,WizardKeyUseGlobal=False)
+        actions=[]
+        with tempfile.TemporaryDirectory() as root:
+            backup=Path(root)/'backup.plist';backup.write_bytes(plistlib.dumps(original))
+            def defaults(*argv):
+                actions.append(argv)
+                self.assertEqual(argv[:1],('/usr/bin/defaults',))
+                self.assertEqual(argv[2],ns['DOMAIN'])
+                if argv[1]=='delete':state.clear()
+                elif argv[1]=='import':state.update(plistlib.loads(Path(argv[3]).read_bytes()))
+                else:self.fail(str(argv))
+            ns['run']=defaults;ns['preferences']=lambda:dict(state)
+            ns['restore_preferences'](original,backup)
+            self.assertEqual(state,original)
+            self.assertEqual([a[1] for a in actions],['delete','import'])
+
+    def test_preference_restore_removes_domain_when_original_absent(self):
+        ns=helpers();ns['DOMAIN']='isolated.test.domain';ns['run']=Mock();ns['preferences']=lambda:None
+        ns['restore_preferences'](None,Path('/unused/backup'))
+        ns['run'].assert_called_once_with('/usr/bin/defaults','delete',ns['DOMAIN'])
+
+    def test_missing_first_feed_request_has_short_diagnostic_deadline(self):
+        text=SOURCE.read_text()
+        self.assertIn("300,'release app first feed request (check backend selection/Files-folder prompt and app.log)'",text)
+
     def test_cleanup_owns_exact_host_executable_and_exact_data_home_not_prefix(self):
         ns=helpers(); app=Path('/qa space/Wizard.app'); data=Path('/qa space/data')
         host=app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'

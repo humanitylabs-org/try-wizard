@@ -44,6 +44,38 @@ def preferences():
     return plistlib.loads(p.stdout)
 
 
+def preanswer_files_folder(data, files):
+    """Match WizardShared.setFilesFolder; this is not native Finder consent proof."""
+    files.mkdir()
+    target=data/'files-folder.json'
+    temporary=data/'files-folder.json.tmp'
+    temporary.write_text(json.dumps({'path':str(files)},indent=2))
+    temporary.replace(target)
+    assert json.loads(target.read_text())=={'path':str(files)}
+    return {'filesFolderPromptPreAnswered':True,'filesFolder':str(files),
+            'finalAppFinderConsentProven':False}
+
+
+def isolated_overlay(original, data, feed_url):
+    # Match Backend: Codable (kind/name/url), Store.activeIndex is an integer.
+    # An extra UUID cannot replace the required url: decoding fails to [] and
+    # leaves the final app at the backend chooser without ever fetching a feed.
+    overlay=dict(original or {})
+    overlay.update(DataHome=str(data),osFeedURL=feed_url,QAHooks=False,WizardKeyEnabled=False,
+                   WizardKeyUseGlobal=False,ShowMenuBarIcon=False,SUEnableAutomaticChecks=False,
+                   SUAutomaticallyUpdate=False,activeBackend=0,
+                   backends=json.dumps([{'name':'This Mac','kind':'thisMac',
+                                         'url':'http://127.0.0.1:48030/'}]).encode())
+    return overlay
+
+
+def restore_preferences(original, backup):
+    # defaults import MERGES; remove all temporary/Sparkle keys before import.
+    run('/usr/bin/defaults','delete',DOMAIN)
+    if original is not None:run('/usr/bin/defaults','import',DOMAIN,backup)
+    assert preferences()==original,'Preference restore mismatch: preserved backup at '+str(backup)
+
+
 def process_rows():
     result=[]
     for line in run('/bin/ps','-axo','pid=,command=').splitlines():
@@ -130,8 +162,8 @@ def main():
     data=out/'data'; assert not data.exists(); data.mkdir()
     (out/'fresh-before.json').write_text(json.dumps({'dataHome':str(data),'entries':list(data.iterdir()),'feedURL':feed_url},default=str))
     # Config is the only preseed. No disk, manifest, receipt or onboarding identity.
-    files=out/'files';files.mkdir()
-    (data/'files-folder.json').write_text(json.dumps({'path':str(files)}))
+    setup=preanswer_files_folder(data,out/'files')
+    (out/'preanswered-prompts.json').write_text(json.dumps(setup,indent=2))
     (data/'dev-shell').touch()
     original=preferences()
     real_home=Path((original or {}).get('DataHome',Path.home()/'Library/Application Support/Wizard MVP')).resolve()
@@ -147,12 +179,7 @@ def main():
     (out/'real-state-before.json').write_text(json.dumps(before,indent=2))
     backup=out/'original-preferences.plist'
     backup.write_bytes(plistlib.dumps(original or {}));os.chmod(backup,0o600)
-    overlay=dict(original or {})
-    backend=str(uuid.uuid4()).upper()
-    overlay.update(DataHome=str(data),osFeedURL=feed_url,QAHooks=False,WizardKeyEnabled=False,
-                   WizardKeyUseGlobal=False,ShowMenuBarIcon=False,SUEnableAutomaticChecks=False,
-                   SUAutomaticallyUpdate=False,activeBackend=backend,
-                   backends=json.dumps([{'id':backend,'name':'On This Mac','kind':'thisMac'}]).encode())
+    overlay=isolated_overlay(original,data,feed_url)
     testprefs=out/'isolated-preferences.plist';testprefs.write_bytes(plistlib.dumps(overlay));os.chmod(testprefs,0o600)
     # A tiny AppKit tool terminates ONLY a verified PID/executable pair gracefully.
     helper=out/'terminate.swift';helper.write_text('''import AppKit
@@ -175,6 +202,8 @@ exit(app.terminate() ? 0 : 3)
         with (out/'app.log').open('w') as log:
             appproc=subprocess.Popen([str(app/'Contents/MacOS/Wizard'),'-DataHome',str(data),'-osFeedURL',feed_url,
                                       '-SUEnableAutomaticChecks','NO'],stdout=log,stderr=log)
+        bounded_wait(lambda:appproc.poll() is None and any(r['path']=='/os/p2/latest.json' for r in requests),
+                     300,'release app first feed request (check backend selection/Files-folder prompt and app.log)')
         def installed():
             assert appproc.poll() is None, 'Release app exited'
             manifest=data/'os/manifest.json'
@@ -229,9 +258,7 @@ exit(app.terminate() ? 0 : 3)
         finally:
             try:
                 if prefs_changed:
-                    if original is None:run('/usr/bin/defaults','delete',DOMAIN)
-                    else:run('/usr/bin/defaults','import',DOMAIN,backup)
-                    assert preferences()==original,'Preference restore mismatch: preserved backup at '+str(backup)
+                    restore_preferences(original,backup)
                     cleanup['preferencesRestored']=True
                 after=real_state()
                 (out/'real-state-after.json').write_text(json.dumps(after,indent=2))
@@ -245,7 +272,7 @@ exit(app.terminate() ? 0 : 3)
     (out/'result.json').write_text(json.dumps({'pass':True,'version':'0.7.2','build':'309','factory':'0.5.0',
         'releaseAppUnmodified':True,'qaHooks':False,'feedURL':feed_url,'dataHome':str(data),
         'productionInstaller':True,'onboardingHealth':True,'agentHealth':True,
-        'preferencesRestored':True,'vmStopped':True,'publication':'none'},indent=2))
+        'preferencesRestored':True,'vmStopped':True,'publication':'none',**setup},indent=2))
     print((out/'result.json').read_text())
 
 
