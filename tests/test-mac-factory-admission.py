@@ -4,10 +4,14 @@ Run with --native on Thales; no preferences, VM or owner state is opened.
 """
 import argparse
 import hashlib
+import http.server
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,6 +97,61 @@ print("PASS default feed p2")
 
 
 class FactoryAdmissionTests(unittest.TestCase):
+    def test_os_download_survives_a_long_unpack_pause(self):
+        app = APP.read_text()
+        session = member(app, '    private lazy var session')
+        self.assertIn('let configuration = URLSessionConfiguration.default', session)
+        timeout = re.search(r'configuration\.timeoutIntervalForRequest\s*=\s*([0-9]+)', session)
+        self.assertIsNotNone(timeout)
+        assert timeout is not None
+        self.assertGreaterEqual(int(timeout[1]), 600)
+        self.assertNotIn('timeoutIntervalForResource', session)
+        self.assertIn('URLSession(configuration: configuration, delegate: self, delegateQueue: queue)', session)
+        self.assertIn('req.timeoutInterval = 6', member(app, '    func fetchSizeNote('))
+        self.assertIn('req.timeoutInterval = 8', member(app, '    func install()'))
+
+    def test_native_os_download_survives_a_65_second_mid_part_pause(self):
+        if not NATIVE:
+            self.skipTest('run --native on Thales for real URLSession loopback execution')
+        # Execute the production session initializer unchanged. A tiny HTTP part stalls
+        # longer than URLSession's default 60 s idle timeout; no VM or large archive.
+        session = member(APP.read_text(), '    private lazy var session') + '()'
+        source = '''import Foundation
+import Darwin
+final class Download: NSObject, URLSessionDataDelegate {
+    private let queue = OperationQueue()
+''' + session + '''
+    func start() {
+        session.dataTask(with: URL(string:CommandLine.arguments[1])!) { data, response, error in
+            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                  data == Data("ab".utf8) else {
+                fputs("stalled part failed: \\(String(describing:error))\\n",stderr); exit(1)
+            }
+            print("PASS production session survives 65 second mid-part idle pause"); exit(0)
+        }.resume()
+    }
+}
+let download = Download(); download.start(); dispatchMain()
+'''
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, format, *args): pass
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Length', '2')
+                self.end_headers()
+                self.wfile.write(b'a'); self.wfile.flush()
+                time.sleep(65)
+                self.wfile.write(b'b'); self.wfile.flush()
+        with tempfile.TemporaryDirectory(prefix='os-download-pause.') as tmp:
+            path = Path(tmp); (path/'main.swift').write_text(source)
+            subprocess.run(['xcrun','swiftc','-swift-version','5',path/'main.swift','-o',path/'fixture'],check=True,timeout=120)
+            with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+                thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+                try:
+                    subprocess.run([path/'fixture',f'http://127.0.0.1:{server.server_port}/part00'],check=True,timeout=100)
+                finally:
+                    server.shutdown(); thread.join(timeout=10)
+
     def test_accepts_0_5_0_in_validator_and_bootstrap_classifier(self):
         self.assertIn('"0.5.0"', member(APP.read_text(), '    static func verifyManifest('))
         self.assertIn('"0.5.0"', member(SHARED.read_text(), '    static var legacyBootstrapNeeded:'))

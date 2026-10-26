@@ -51,7 +51,12 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var version = ""
     // Delegate callbacks on a private serial queue: writing into tar blocks there, which throttles the download.
     private let queue: OperationQueue = { let q = OperationQueue(); q.maxConcurrentOperationCount = 1; return q }()
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: queue)
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        // tar can spend minutes writing a compressed zero-filled tail without consuming network input.
+        configuration.timeoutIntervalForRequest = 900
+        return URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
+    }()
     private var tar: Process?
     private var tarIn: FileHandle?
     private var tarErr: Pipe?
