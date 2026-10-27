@@ -93,42 +93,50 @@
     }
   },
   "stable": {
-    "version": "0.3.38",
-    "wizardOsCommit": "297489abb6feff0f5506c1a6959cf5cfa9e85f1f",
-    "manifest": "wizard-os-stable.json",
-    "sha256": "999fc2a33e0534478e23172d899fd4aa8bc1281724815bb62c6c42004f0862bf",
+    "version": "0.3.68",
+    "wizardOsCommit": "3ebcd9f506857825cbea4157c82208d050cdf348",
+    "manifest": "wizard-os-current-stable.json",
+    "sha256": "29649334a5685cf85ed23f509c78ccdf1235dc55bd85f1e986c7a144eb4e9b04",
+    "source": {
+      "repo": "humanitylabs-org/wizard-os",
+      "commit": "3ebcd9f506857825cbea4157c82208d050cdf348",
+      "sha": "40f8fde9d27f5f777224acfbefe3a214b00c08f8",
+      "path": "releases/0.3.68.json",
+      "html_url": "https://github.com/humanitylabs-org/wizard-os/blob/3ebcd9f506857825cbea4157c82208d050cdf348/releases/0.3.68.json",
+      "stablePointerBlob": "6605e914177dd5ab8f6341209e90790cb8b7c58c"
+    },
     "components": {
       "wizard-app-manager": {
         "repo": "humanitylabs-org/wizard-app-manager",
-        "commit": "d926eec199c6440249c799677ff87585ece76a96",
-        "branch": "main",
-        "note": "Official main through #198; image inputs unchanged."
+        "commit": "da2f01d17feb7be09f3d4ed3827535ba021a9cef",
+        "branch": "maintenance/latest-0.3.58",
+        "note": "Latest App Manager 48795318 plus exactly wizard-app-manager #258 (installer reruns keep connection apps on the current agent address; HTTPS-off owner step; approved Tailscale login waited for; official-installer Hermes -> hermes update), merged as #260 on the Latest maintenance branch. Image inputs unchanged."
       },
       "wizard-troubleshooter": {
         "repo": "humanitylabs-org/wizard-troubleshooter",
-        "commit": "4b1f0efc09ea6a57f5fe35e8e52e014258d634e7",
+        "commit": "c1b4c432fd7b162d23d42fb7d3d8fb049bee764e",
         "branch": "main",
-        "note": "Host tooling, no image: installed by `wam troubleshooter` as user systemd units (wizard-troubleshooter.service + wizard-guardian.timer, report-only) from exactly this commit; c434bbe plus #9 (connection app links follow apps.json; no dead Claude button when Claude Code is missing)."
+        "note": "Host tooling, no image: installed by `wam troubleshooter` as user systemd units (wizard-troubleshooter.service + wizard-guardian.timer, report-only) from exactly this commit; 4b1f0ef plus #10 (MIT license, no behavior change), #12 (one bounded owner-approved repair tool set shared by Claude, ChatGPT and Tinfoil; host-independent paths; no file/command grants without a per-box policy) and #13 (Claude falls back to the agent's second Claude sign-in when the Claude app login hits its usage limit)."
       },
       "wizard-agent-service": {
         "repo": "humanitylabs-org/wizard-agent-service",
-        "commit": "6424db094d03af255b7ec35cb731bfc0087c61ef",
+        "commit": "b1f8d2c1442a45da285161f21ad04a5449977eda",
         "branch": "main",
-        "note": "Official main through #151; preserves final #149 guards after #150 supersession."
+        "note": "Official main through #203 (183 commits after 6424db09): #191 phone connected only after it opens Wizard, #195 security deps, #196 provider accounts report emailHash, #203 listing declares it (identity marker), #186 Claude usage percentages/signed-in email/Claude Code mirror flag. The host plugin (wizard-os dashboard) installs from this commit. Open sign-in recovery PRs #199/#200/#201 are not included."
       },
       "wizard-ux": {
         "repo": "humanitylabs-org/wizard-ux",
-        "commit": "3965b609e447dbb7fd73b1afc628d86f962e1f93",
+        "commit": "d53b2b243b07914882e0a9d4337d12d2f8c3629f",
         "branch": "main",
-        "note": "Official main through #446; chat-first alongside launch and history fixes."
+        "note": "Official main head at cut (#593), after 0.3.67's #569: includes #573 (model picker refetches on open when its list is older than 15 s and says when the Claude app is not answering; closes #572), desktop keys (#575-#593), #561-#566."
       }
     },
     "images": {
       "wizard-app-manager": {
-        "ref": "ghcr.io/humanitylabs-org/wizard-app-manager:v4.10.2-wizard.465-db4325a",
-        "digest": "sha256:07df73e79ee3bea5465cd27d90f99191317075e7a669678a8d066c51473d4116",
+        "ref": "ghcr.io/humanitylabs-org/wizard-app-manager:v4.10.2-wizard.571-80c76cf",
+        "digest": "sha256:ff30d81d103c7ca408692fb25b98827d0fb382a8034e2bcbd0daf46b99547e39",
         "built_from": "wizard-app-manager",
-        "source_commit": "db4325adcb6ff93de70f760c8b584c93a71f058f",
+        "source_commit": "80c76cf9e61df78abe4c09ffa419ad899bbc61a6",
         "image_inputs": [
           "packages/**",
           "Dockerfile",
@@ -141,28 +149,28 @@
           "amd64",
           "arm64"
         ],
-        "ci_run": "https://github.com/humanitylabs-org/wizard-app-manager/actions/runs/40008375561",
-        "note": "Official multi-arch image built from db4325a; image_inputs unchanged at d926eec."
+        "ci_run": "https://github.com/humanitylabs-org/wizard-app-manager/actions/runs/40171067383",
+        "note": "Official multi-arch main image from 80c76cf, workflow run 40171067383. Attestation reverified; all declared image inputs and workflow are byte-identical through 44fded38. Python backup engine is host-installed WAM source, not an image input."
       },
       "wizard-ux": {
-        "ref": "ghcr.io/humanitylabs-org/wizard-ux:sha-3965b609e447dbb7fd73b1afc628d86f962e1f93",
-        "digest": "sha256:7add31c745aa5ea9aef60de453f85be99a781a584d7bf671a04c3970d4027e61",
+        "ref": "ghcr.io/humanitylabs-org/wizard-ux:sha-d53b2b243b07914882e0a9d4337d12d2f8c3629f",
+        "digest": "sha256:5b661b073d6a726361f85ca644bb0bab1cf4430819dca19118a6b5a27a33cf61",
         "built_from": "wizard-ux",
         "architectures": [
           "amd64",
           "arm64"
         ],
-        "ci_run": "https://github.com/humanitylabs-org/wizard-ux/actions/runs/40087814055"
+        "ci_run": "https://github.com/humanitylabs-org/wizard-ux/actions/runs/40465748639"
       },
       "wizard-agent-service": {
-        "ref": "ghcr.io/humanitylabs-org/wizard-agent-service:sha-6424db094d03af255b7ec35cb731bfc0087c61ef",
-        "digest": "sha256:840a371ca864755e01490ab7e5e31a1fc8bd0d698637ecd7e9b1523b3419a9b8",
+        "ref": "ghcr.io/humanitylabs-org/wizard-agent-service:sha-b1f8d2c1442a45da285161f21ad04a5449977eda",
+        "digest": "sha256:59cc167250c9793ba5112ad45256d1f64304a13fb809fb4f39b4694e43fa9a75",
         "built_from": "wizard-agent-service",
         "architectures": [
           "amd64",
           "arm64"
         ],
-        "ci_run": "https://github.com/humanitylabs-org/wizard-agent-service/actions/runs/40088580225"
+        "ci_run": "https://github.com/humanitylabs-org/wizard-agent-service/actions/runs/40464828166"
       }
     },
     "default_apps": {
@@ -170,14 +178,14 @@
         "app": "wizard-ux",
         "repo": "humanitylabs-org/wizard-ux",
         "index_version": "0.3.0-candidate.20261012",
-        "commit": "3965b609e447dbb7fd73b1afc628d86f962e1f93",
+        "commit": "d53b2b243b07914882e0a9d4337d12d2f8c3629f",
         "note": "Alongside installs use the immutable official image above; index drift is informational."
       },
       "agent-service": {
         "app": "wizard-agent-service",
         "repo": "humanitylabs-org/wizard-agent-service",
         "index_version": "0.3.0-candidate.20261012",
-        "commit": "6424db094d03af255b7ec35cb731bfc0087c61ef"
+        "commit": "b1f8d2c1442a45da285161f21ad04a5449977eda"
       },
       "agent": {
         "app": "hermes-agent",
@@ -189,16 +197,16 @@
       "ai-connection": {
         "app": "wizard-chatgpt",
         "repo": "oscarhenrycollins/chatgpt-connection",
-        "index_version": "0.1.4",
-        "commit": "f87d5ddc449535418ee92ebeb24aaec36cc58058",
-        "note": "Host Hermes owns and renews its sign-in; the connection app reads sanitized usage through the wizard-os dashboard plugin. Claude is installed by default as its own `claude-subscription` row below."
+        "index_version": "0.2.6",
+        "commit": "f73b84879d173cd3c99dca7ab7695a31a6b34810",
+        "note": "Any number of ChatGPT subscriptions on the same accounts page as Claude (chatgpt-connection #6; engine ghcr.io/humanitylabs-org/wizard-chatgpt:0.2.6@sha256:72be4ede5a2e0151eea3a9050611352b0b14c044e56c1202a25442f4003552e3, amd64+arm64, wizard-app-store #33+#36 at 81758d58, run 40465361129). 0.2.4 plus design rules v0 page (wizard-app-store #34) and Home names Hermes' default sign-in labels 'ChatGPT', 'ChatGPT 2' (#33). Sign-ins run inside the agent (stock `hermes auth add openai-codex` through the wizard-os plugin broker); an unreachable agent is reported with Retry. Claude is installed by default as its own `claude-subscription` row below."
       },
       "claude-subscription": {
         "app": "wizard-claude",
         "repo": "oscarhenrycollins/claude-connection",
-        "index_version": "0.1.2",
-        "commit": "3b2d6186b86a896f254150ad056b9eaa495e738e",
-        "note": "Installed on every box next to ChatGPT. Alongside with host Hermes on a claude-subscription provider: App Manager binds the agent's own Claude Code login folder at the engine's /claude, so Connect/Test and auto-renew act on the agent's sign-in; tokens are never copied."
+        "index_version": "0.2.8",
+        "commit": "43f6a4123d2f781fb82149a51414723e56056b13",
+        "note": "Any number of Claude subscriptions (claude-connection #6; engine ghcr.io/humanitylabs-org/wizard-claude:0.2.8@sha256:7e7956086a2f8810b46666e5948c71ffc2637e1e54566eaffb100fb8acdc406c, amd64+arm64, wizard-app-store #33+#36 at 81758d58, run 40465361122). 0.2.6 plus design rules v0 page (#34); the original Claude Code sign-in and an agent row merge only on the agent's exact emailHash (Agent Service #196/#203), masked-email matching only for older agent services (#33). Added subscriptions sign in inside the agent (stock `hermes auth add anthropic`) through the wizard-os plugin broker. Alongside with host Hermes on a claude-subscription provider: App Manager still binds the agent's own Claude Code login folder at the engine's /claude; tokens are never copied."
       },
       "files": {
         "app": "files",
@@ -230,7 +238,20 @@
         "repo": "oscarhenrycollins/notifications",
         "index_version": "2.29.0-wizard2",
         "commit": "0428e7c73a4ac9cb0f7a21d40c7c7a5fda16af55"
-      }
+      },
+      "voice": {
+        "app": "wizard-voice-service",
+        "repo": "humanitylabs-org/wizard-voice-service",
+        "index_version": "0.2.2-rc1.app1",
+        "commit": "d28c5f7cd29040ab1df3b5a945a81486f53e445a"
+      },
+      "connection-router": {
+        "app": "wizard-connection-router",
+        "repo": "humanitylabs-org/wizard-connection-router",
+        "index_version": "0.1.4",
+        "commit": "f46a867207deb6e3a465bf86241dd3fe76a6ce5f"
+      },
+      "agent-history": null
     },
     "hermes": {
       "tag": "v2026.9.24",
@@ -252,9 +273,22 @@
   },
   "factory": {
     "version": "0.5.0",
-    "flavor": "full-frozen-default-set",
-    "diskGB": 48,
-    "runtimePayload": "retained-build-307 factory clone; frozen release then Mac overlays, never fresh mutable base build"
+    "flavor": "onboarding-only",
+    "diskGB": 16,
+    "userDiskGB": 64,
+    "packedSizing": "minimum ext4 block count plus packedHeadroomMiB; diskGB is only retained assembly capacity",
+    "runtimePayload": "retained-build-307 clone; current Stable defaults plus protected Mac core source overlays; offline compact, grow only after Mac download",
+    "packedHeadroomMiB": 512,
+    "onboardingSlots": [
+      "shell",
+      "agent-service",
+      "agent",
+      "ai-connection",
+      "claude-subscription",
+      "transcription",
+      "files"
+    ],
+    "backgroundInstall": "WAM bootstrap after Setup done; retrying systemd timer, no optional-app waiting screen"
   },
   "exclusions": [
     "Do not merge try-wizard #30 or #20 in this task; existing already-merged import code is not removed",
@@ -352,14 +386,25 @@
   ],
   "execution": {
     "recipe": "preparation/assemble.py",
-    "sha256": "bed1c1c61bfe13f7c4d335985668c1899ee7eea3fa0e261c3e3f72f0d26553a2",
+    "sha256": "0efa80c3b0879149c1fdf2d031ffbb952d7b4d7c9adf16ab037e1036b49a0b30",
     "argv": [
       "/opt/homebrew/bin/python3",
       "preparation/assemble.py",
       "--stage-root",
       ".",
       "--execute"
-    ]
+    ],
+    "inputs": {
+      "preparation/guest-apply.py": "878d8f1ae6a608819448e1c7d540d7f9b955307d0e8a94069d647e400d24e116",
+      "preparation/seal-factory.py": "f04288b392687e45f930a7f592a8f7a1e2501adbedf12f68f624e7468c2f5ce6",
+      "preparation/factory-policy.py": "f21ec07e2403dfe53cf6687f2e3fac2edae25ab6691649653852ff8e32d079b5",
+      "preparation/factory-cleanup.py": "d8c18e1b26e3bfb64877976b2be509c0b9839a01bece40347986e70103763680",
+      "preparation/post-setup-apps.py": "01bf30f28ee4e715511277550c627ae1a2337d8deba43dc312f8eac1e8fbed95",
+      "preparation/compact-ext4.py": "59118f44faed91af29c5a1488f3ce7462704a1c5c27d1131965df7e166e46365",
+      "preparation/factory-units/wizard-default-apps.service": "1cac841b96dea854766712deadb3b9ec8fb7c8564f4442b4dee5706e0932521a",
+      "preparation/factory-units/wizard-default-apps.timer": "3a91790c8288052c441156dcd37629b09cf1de100c12f00121cb448653cab108",
+      "preparation/factory-units/wizard-grow.service": "549f29a1ac04e0ac7e0ccb06a1410a69674554d4dfdbbfdc8f1e77684815fc74"
+    }
   },
   "runtimeSelected": {
     "service": "service-reconciled",
@@ -390,7 +435,7 @@
   },
   "wizardOsCandidate": {
     "path": "wizard-os-release-candidate.json",
-    "sha256": "90bdb9ec8e355d0c7641a9bb604dc65d81fcb328ba1931be37fef1be23da5251",
+    "sha256": "466127dc96f50416266f6f0ab902be3b53cffc508ad5f85922f718f36d966003",
     "status": "source-frozen; assembly/image/bootstrap gates remain"
   },
   "assembly": {

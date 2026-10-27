@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Inside only the disposable retained-factory clone. Frozen RC first, Mac layers second."""
-import argparse, hashlib, json, os, shutil, sqlite3, subprocess
+import argparse, hashlib, importlib.util, json, os, shutil, sqlite3, subprocess
 from pathlib import Path
 ROOT=Path('/mnt/launch');WORK=ROOT/'assembly-work'
 
@@ -34,6 +34,15 @@ def main():
     if a.check_pristine:print('pristine empty factory verified');return
     assert a.apply
     pins=json.loads((ROOT/'preparation/pins.json').read_text());release=json.loads((WORK/'runtime-release.json').read_text())
+    background=json.loads((WORK/'default-apps-release.json').read_text())
+    allowed={row['app'] for row in release['default_apps'].values() if row}
+    deferred={row['app'] for row in background['default_apps'].values() if row}-allowed
+    def trim(final=False):
+        pristine()
+        run(['sudo','-u','wizard','env','HOME=/home/wizard','python3',ROOT/'preparation/factory-cleanup.py',
+             json.dumps({'allowed':sorted(allowed),'deferred':sorted(deferred),'final':final})])
+    # Remove inherited optional apps/data before bootstrap; do not pull them just to delete them.
+    trim()
     release_dir=Path('/var/lib/wizard/frozen-release');release_dir.mkdir(parents=True,exist_ok=True)
     target=release_dir/(release['version']+'.json');shutil.copy2(WORK/'runtime-release.json',target);assert sha(target)==sha(WORK/'runtime-release.json')
     # Debian workaround from the primary advisory; do not use the retained stale roots to bootstrap HTTPS.
@@ -49,7 +58,10 @@ def main():
     run(['bash',installer],env=env,stdin=subprocess.DEVNULL,timeout=3600)
     assert run(['sudo','-u','wizard','git','-C','/home/wizard/wizard-app-manager','rev-parse','HEAD']).strip()==pins['finalPins']['wam']
     installed=json.loads(Path('/home/wizard/.wizard-os/release-pins.json').read_text());assert installed==release
-    # Every default row is source-pinned in the release; get.sh WIZARD_STRICT reads actual installs back.
+    # Only onboarding rows are installed; the full release remains immutable for post-setup WAM.
+    target_background=Path('/var/lib/wizard/default-apps-release.json')
+    shutil.copy2(WORK/'default-apps-release.json',target_background);target_background.chmod(0o644)
+    # Every onboarding row is source-pinned; get.sh WIZARD_STRICT reads actual installs back.
     outcome=json.loads(Path('/home/wizard/.wizard-os/release.json').read_text())
     assert outcome.get('status')=='pinned', 'strict installer did not leave a pinned receipt'
     (WORK/'install-outcome.json').write_text(json.dumps(outcome,indent=2)+'\n')
@@ -73,7 +85,20 @@ def main():
     run(['sudo','-iu','wizard','wam','fresh-agent','connect'])
     run(['/opt/wizard/bin/wizard-agent-ssh-migrate'])
     run(['/opt/wizard/bin/wizard-runtime-configure'])
-    run(['systemctl','daemon-reload']);run(['systemctl','restart','wizard-setup','wizard-local-proxy'])
+    # Recipe assets are consumed from preparation, not the older frozen native overlay.
+    shutil.copy2(ROOT/'preparation/post-setup-apps.py','/opt/wizard/bin/wizard-default-apps')
+    Path('/opt/wizard/bin/wizard-default-apps').chmod(0o755)
+    install_package(ROOT/'preparation/factory-units',Path('/etc/systemd/system'))
+    run(['systemctl','daemon-reload'])
+    run(['systemctl','enable','wizard-default-apps.timer','wizard-grow.service'])
+    run(['systemctl','restart','wizard-setup','wizard-local-proxy'])
+    # Voice must be actually ready before sealing, including model and Python wheels.
+    # Reuse the established local-Parakeet preparation/readiness path; no first-run download.
+    run(['sudo','-u','wizard','/opt/wizard/bin/wizard-apps','fetch-voice'],timeout=1800)
+    trim(final=True)
+    spec=importlib.util.spec_from_file_location('factory_cleanup',ROOT/'preparation/factory-cleanup.py');assert spec and spec.loader
+    cleanup=importlib.util.module_from_spec(spec);spec.loader.exec_module(cleanup)
+    cleanup.prune([stock,tag])
     containers=json.loads(run(['docker','inspect',*run(['docker','ps','-q']).split()]))
     for key,name in [('service','wizard-agent-service'),('ux','wizard-ux')]:
         wanted=release['images'][name]['ref']+'@'+release['images'][name]['digest']

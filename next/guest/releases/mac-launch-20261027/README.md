@@ -7,7 +7,85 @@ stable manifest. `finalPins` are intentionally null wherever no tested integrate
 source exists. Do not substitute `main` for a protected Mac source, silently use
 old compatibility pins, or set the status to admitted to get past a gate.
 
-## Findings
+## Current factory contents: onboarding only
+
+The factory now uses the immutable Wizard OS **0.3.68** Stable snapshot (read from
+`humanitylabs-org/wizard-os/releases/stable`), not 0.3.39. The selected protected
+Mac WAM/Service/UX source overlays remain explicit in `finalPins`; this is not a
+claim that those older integrated candidates include every subsequent upstream
+core fix. Their compatibility with the newer connection apps still needs real
+candidate acceptance. The older `wizard-os-stable.json` is historical only.
+The manifest records actual provenance as `baseRelease: 0.3.68`. Its existing
+`stack` compatibility ID intentionally stays unchanged: the native installer
+uses equality of that ID to preserve an existing owner's disk, not to pick
+which release gets installed. Changing it would silently replace that disk.
+
+| Component | Factory decision and reason |
+|---|---|
+| Base system, Setup, first chat, phone/Tailscale helpers | Keep: boot and onboarding require them. |
+| WAM, Wizard UX, Agent Service | Keep: existing installation, sign-in and chat APIs. |
+| Hermes app plus pinned stock/managed runtime | Keep: first reply and the existing managed runtime/rollback contract; shared Docker layers are not extra copies. |
+| Transcriber, local model and voice Python environment | Keep and prepare before sealing: voice must work during onboarding, not download on first use. |
+| Claude and ChatGPT connection apps | Keep: both offered sign-in paths must work. |
+| Files | Keep for now: the pinned Agent Service declares `uses: files`, so dropping it breaks its installation dependency closure. Removing that dependency is separate upstream work. |
+| Postgres | Keep: App Manager's database, not an optional user app. |
+| RabbitMQ | Keep: App Manager's lifecycle/install queue. |
+| Traefik | Keep: the existing App Manager routing stack; no replacement proxy. |
+| Recorder | Defer: recording is not onboarding; same pinned app installs later through WAM. |
+| Browser | Defer: onboarding sign-in uses the Mac's browser, not guest Chromium. |
+| Notifications app | Defer: optional notifications delivery, not the first chat. |
+| Secret Drop app | Defer: optional secret-sharing app; host runtime-secrets wiring stays. |
+| Voice-service and connection-router apps | Defer: newer optional default apps; the selected Mac onboarding already uses local transcription and existing sign-in wiring. |
+| helper-python/security helpers | Remove when unused: build/probe tooling is not an onboarding runtime. |
+
+`factory-policy.py` derives a small bootstrap release and the **full pinned default
+release** from one manifest. The installer receives only the former. The
+never-onboarded clone removes inherited optional apps through WAM, discards their
+empty factory data, then prunes unreferenced images and build caches. Running
+infrastructure and the pinned stock/managed images are retained.
+
+After `/var/lib/wizard/setup.json` says `done: true`, a low-priority systemd timer
+invokes **the existing `wam bootstrap`** with the full release. WAM keeps ownership
+of dependency resolution, installation, installed alternatives and retry logic.
+The trigger restores that full release to WAM's canonical `release-pins.json`;
+it does not create a second store, downloader or app installer. CLI exit zero is
+not enough: per-app `failed` results remain retryable across boots. A completed
+request is not repeated if the owner subsequently removes an app. There is no
+optional-app wait or download in Setup's HTTP path. WAM's recommendation prefetch
+only caches images, so it is deliberately not mistaken for app installation.
+
+### Packed size and first-boot growth
+
+The old external candidate had a 48-GiB disk. This source recipe no longer asks
+the guest to grow during assembly, and **always shrinks the sealed copy offline**
+with `e2fsck` / `resize2fs -M`, adds only 512 MiB headroom, and truncates to the
+actual ext4 block count. It then inventories, zeroes and independently reads back
+all free blocks, and checks the filesystem again before xz. The tiny ext4 test
+also checks that a retained file survives compaction after a nonzero file is
+deleted. `installBytes` reports the compact disk plus kernel/initrd, never a
+48/64-GiB future capacity. Native extraction already sparsely grows the user's
+disk to 64 GiB; `wizard-grow.service` resizes ext4 on that user's first boot.
+Factory boots are explicitly excluded from that unit.
+
+**Unmeasured budget:** the supplied retained-component sizes sum to about 4.132 GB
+before shared-layer savings. Allow another net 1.2–2.0 GB for the OS, WAM/UX/API,
+local model and voice wheels, and assume xz produces 40–50% of those bytes:
+**roughly 2.1–3.1 GB download**, with a roughly 6–9 GB compact initial disk rather
+than 48 GiB. These assumptions are not a built-artifact measurement. Near 2 GB is
+a target, not a proven 1.9-GB result; further Hermes/layer/model packaging work may
+be required. Deferred apps subsequently use normal disk/network space.
+
+Run `make test-factory` for portable light checks. Full `make test-contracts`
+also contains a macOS-only Swift check and cannot pass as a whole on Linux.
+No image build, upload, release/feed change or merge is authorized by these edits.
+All existing source/image/security/phone acceptance gates remain in force.
+
+REUSE: WAM bootstrap/recursive installer and release pins; existing voice readiness;
+existing native sparse-disk expansion.
+EXTEND: factory selection, post-Setup trigger, offline ext4 compaction and input hashes.
+NEW: no UI component, replacement install path or publication mechanism.
+
+## Historical findings
 
 - `try-wizard#22` is already merged (`13e20d9`). The front door alone is not the
   matching backup engine. Stable `0.3.38` WAM includes custody #164/#165 but not

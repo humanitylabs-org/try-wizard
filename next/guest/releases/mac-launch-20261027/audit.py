@@ -80,6 +80,9 @@ def inspect(manifest,root):
         if not receipt or receipt.get('sourceCommit')!=manifest['finalPins'][key] or receipt.get('pullVerified') is not True or receipt.get('digest')!=selected.get('digest') or receipt.get('ref')!=selected.get('ref'):errors.append('IMAGE_DIGESTS_PENDING: no matching pull-verified '+key+' output')
     recipe=(root/execution.get('recipe','.missing')).resolve()
     if not recipe.is_relative_to(root) or not recipe.is_file() or digest(recipe)!=execution.get('sha256'):errors.append('assembly recipe missing or digest mismatch')
+    for rel,want in execution.get('inputs',{}).items():
+        target=(root/rel).resolve()
+        if not target.is_relative_to(root) or not target.is_file() or digest(target)!=want:errors.append('factory recipe input missing or digest mismatch: '+rel)
     for name,pin in manifest['finalPins'].items():
         stamp=record('final/'+name+'/.wizard-source.json')
         if not stamp or stamp.get('commit')!=pin:errors.append('staged final source identity mismatch: '+name)

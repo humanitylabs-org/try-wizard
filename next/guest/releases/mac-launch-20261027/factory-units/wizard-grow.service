@@ -1,0 +1,13 @@
+[Unit]
+Description=Grow Wizard filesystem to the user Mac's sparse disk
+DefaultDependencies=no
+After=local-fs.target
+Before=wizard-firstboot.service wizard-default-apps.service
+ConditionKernelCommandLine=!wizard.factory=1
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/resize2fs /dev/vda
+
+[Install]
+WantedBy=multi-user.target

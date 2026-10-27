@@ -41,7 +41,7 @@ class AdmissionTests(unittest.TestCase):
     def test_plan_has_full_assembly_without_executing(self):
         proc=subprocess.run([sys.executable,str(ROOT/'assemble.py'),'--stage-root','.'],capture_output=True,text=True,check=True)
         plan=json.loads(proc.stdout);self.assertFalse(plan['publishing']);self.assertEqual(plan['signing'],'unsigned/pluggable')
-        for key in ['WIZARD_RELEASE-install-without-WAM_REF','security-all-client-closure','offline-fsck-and-zero-free-blocks','BOM-manifest-sparse-archive']:self.assertIn(key,plan['steps'])
+        for key in ['WIZARD_RELEASE-install-without-WAM_REF','security-all-client-closure','offline-fsck-shrink-and-zero-free-blocks','BOM-manifest-sparse-archive']:self.assertIn(key,plan['steps'])
     def test_installer_pinned_and_no_developer_override(self):
         text=(ROOT/'guest-apply.py').read_text()
         self.assertIn("assert sha(installer)==pins['osInstaller']['sha256']",text)
@@ -95,6 +95,9 @@ class AdmissionTests(unittest.TestCase):
         emit(root/'evidence/ux-final-ci.json',{'headSha':m['finalPins']['ux'],'conclusion':'success'})
         recipe=root/'preparation/assemble.py';recipe.parent.mkdir(exist_ok=True);recipe.write_bytes((ROOT/'assemble.py').read_bytes())
         m['execution']['sha256']=hashlib.sha256(recipe.read_bytes()).hexdigest()
+        for rel in m['execution'].get('inputs',{}):
+            target=root/rel;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes((ROOT/rel.removeprefix('preparation/')).read_bytes())
         base=root/'unit-base-not-a-VM';base.write_bytes(b'unit fixture')
         m['assembly']['base']['path']=str(base)
         emit(root/'staged-files.json',{'files':{},'symlinks':{}})
@@ -115,6 +118,9 @@ class AdmissionTests(unittest.TestCase):
                     ('image-packaging/service/result.json',lambda d:d.update(pullVerified=False),'IMAGE_DIGESTS_PENDING')]:
                     p=root/rel;before=p.read_bytes();d=json.loads(before);change(d);p.write_text(json.dumps(d))
                     self.assertTrue(any(e.startswith(prefix) for e in audit.inspect(m,root)),rel);p.write_bytes(before)
+                companion=root/'preparation/post-setup-apps.py';before=companion.read_bytes();companion.write_text('changed')
+                self.assertTrue(any(e.startswith('factory recipe input missing or digest mismatch') for e in audit.inspect(m,root)))
+                companion.write_bytes(before)
                 malicious=copy.deepcopy(m);malicious['execution']['argv']=['bash','build-image.sh']
                 self.assertIn('reviewed complete assembly recipe is not pinned',audit.inspect(malicious,root))
                 allowlist=root/'final/service/server/read-human-sessions.py';allowlist.write_text('missing imported CLI/TUI')

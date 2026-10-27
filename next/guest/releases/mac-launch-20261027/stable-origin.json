@@ -1,5 +1,8 @@
 {
-  "sha": "7b05503e459b1e555b38083cab79257b60509966",
-  "path": "releases/0.3.39.json",
-  "html_url": "https://github.com/humanitylabs-org/wizard-app-manager/blob/main/releases/0.3.39.json"
+  "repo": "humanitylabs-org/wizard-os",
+  "commit": "3ebcd9f506857825cbea4157c82208d050cdf348",
+  "sha": "40f8fde9d27f5f777224acfbefe3a214b00c08f8",
+  "path": "releases/0.3.68.json",
+  "html_url": "https://github.com/humanitylabs-org/wizard-os/blob/3ebcd9f506857825cbea4157c82208d050cdf348/releases/0.3.68.json",
+  "stablePointerBlob": "6605e914177dd5ab8f6341209e90790cb8b7c58c"
 }

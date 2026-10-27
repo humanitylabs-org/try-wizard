@@ -27,7 +27,7 @@ def guest(command,timeout=600):
     return text
 
 def plan(pins):
-    return {'base':pins['assembly']['base'],'steps':['verify-base-and-boot-sha256','APFS-clone-owned-disposable-VM','boot-owned-host-only','refuse-onboarded-state','generate-validated-runtime-release','sha256-verify-os.sh','WIZARD_RELEASE-install-without-WAM_REF','apply-Mac-overlay-and-managed-runtime','verify-default-sources-and-running-images','security-all-client-closure','seal-empty-identity','clean-shutdown-and-owned-host-exit','offline-fsck-and-zero-free-blocks','BOM-manifest-sparse-archive'],'signing':'unsigned/pluggable','publishing':False}
+    return {'base':pins['assembly']['base'],'steps':['verify-base-and-boot-sha256','APFS-clone-owned-disposable-VM','boot-owned-host-only','refuse-onboarded-state','generate-validated-runtime-release','sha256-verify-os.sh','WIZARD_RELEASE-install-without-WAM_REF','apply-Mac-overlay-and-managed-runtime','verify-default-sources-and-running-images','security-all-client-closure','seal-empty-identity','clean-shutdown-and-owned-host-exit','offline-fsck-shrink-and-zero-free-blocks','BOM-manifest-sparse-archive'],'signing':'unsigned/pluggable','publishing':False}
 
 def runtime_release(pins,root):
     rc=json.loads((HERE/'wizard-os-release-candidate.json').read_text());images={}
@@ -53,41 +53,20 @@ def pack(work,pins):
     for forbidden in ['/var/lib/wizard/setup.json','/home/wizard/.wizard-os/private-access.json']:
         probe=subprocess.run([E2+'debugfs','-R','stat '+forbidden,str(disk)],capture_output=True,check=True)
         assert b'File not found' in probe.stderr, 'identity survived sealing: '+forbidden
-    text=subprocess.check_output([E2+'dumpe2fs',str(disk)],text=True,stderr=subprocess.DEVNULL,timeout=90)
-    block_match=re.search(r'^Block size:\s+(\d+)',text,re.M);assert block_match
-    block=int(block_match[1]);ranges=[]
-    for line in text.splitlines():
-        if line.startswith('  Free blocks:'):
-            for item in line.split(':',1)[1].split(','):
-                item=item.strip()
-                if item:
-                    a,_,b=item.partition('-');ranges.append((int(a),int(b or a)))
-    free_match=re.search(r'^Free blocks:\s+(\d+)',text,re.M);assert free_match
-    assert sum(b-a+1 for a,b in ranges)==int(free_match[1]);ranges.sort()
-    sealed=out/'rootfs.img';run(['cp','-c',disk,sealed]);zero=b'\0'*(8*1024*1024)
-    with sealed.open('r+b') as f:
-        for a,b in ranges:
-            f.seek(a*block);left=(b-a+1)*block
-            while left:
-                n=min(left,len(zero));f.write(zero[:n]);left-=n
-        f.flush();os.fsync(f.fileno())
-    # Read back allocated byte identity and free-block zeros, not only writes.
-    cursor=0
-    with disk.open('rb') as src,sealed.open('rb') as dst:
-        for a,b in ranges+[(disk.stat().st_size//block,disk.stat().st_size//block-1)]:
-            end=a*block;src.seek(cursor);dst.seek(cursor);left=end-cursor
-            while left:
-                n=min(left,len(zero));one=src.read(n);two=dst.read(n);assert len(one)==n and one==two;left-=n
-            dst.seek(a*block);left=(b-a+1)*block
-            while left:
-                chunk=dst.read(min(left,len(zero)));assert chunk and not any(chunk);left-=len(chunk)
-            cursor=(b+1)*block
+    sealed=out/'rootfs.img';run(['cp','-c',disk,sealed])
+    spec=importlib.util.spec_from_file_location('compact_ext4',HERE/'compact-ext4.py');assert spec and spec.loader
+    compactor=importlib.util.module_from_spec(spec);spec.loader.exec_module(compactor)
+    compaction=compactor.compact(sealed,E2,pins['factory']['packedHeadroomMiB']*1024**2)
+    (work/'compaction.json').write_text(json.dumps(compaction,indent=2)+'\n')
     check(sealed)
     for name in ['vmlinux','initrd']:shutil.copy2(work/'data/os/boot'/name,out/'boot'/name)
     files=['rootfs.img','boot/vmlinux','boot/initrd']
-    manifest={'name':'Wizard OS','version':pins['factory']['version'],'stack':'wizard-os-0.3.39-runtipi','sourceCommit':pins['finalPins']['native'],'arch':'arm64','kernel':'boot/vmlinux','initrd':'boot/initrd','rootfs':'rootfs.img','cmdline':'console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false','memoryMiB':4096,'installBytes':sum((out/x).stat().st_size for x in files),'files':{x:sha(out/x) for x in files},'sizes':{x:(out/x).stat().st_size for x in files}}
+    # `stack` is the existing-disk compatibility ID, not release provenance.
+    # Native finish() replaces a disk if this changes; first-install slimming must not reset upgrades.
+    # The actual selected Stable version is recorded separately as baseRelease.
+    manifest={'name':'Wizard OS','version':pins['factory']['version'],'stack':'wizard-os-0.3.39-runtipi','baseRelease':pins['stable']['version'],'sourceCommit':pins['finalPins']['native'],'arch':'arm64','kernel':'boot/vmlinux','initrd':'boot/initrd','rootfs':'rootfs.img','cmdline':'console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false','memoryMiB':4096,'installBytes':sum((out/x).stat().st_size for x in files),'files':{x:sha(out/x) for x in files},'sizes':{x:(out/x).stat().st_size for x in files}}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    bom={'schema':1,'base':pins['assembly']['base'],'sources':pins['finalPins'],'runtimeReleaseSha256':sha(work/'runtime-release.json'),'sealedManifest':manifest,'unsigned':True,'publishing':False}
+    bom={'schema':1,'base':pins['assembly']['base'],'sources':pins['finalPins'],'runtimeReleaseSha256':sha(work/'runtime-release.json'),'defaultAppsReleaseSha256':sha(work/'default-apps-release.json'),'factoryFlavor':pins['factory']['flavor'],'compaction':compaction,'sealedManifest':manifest,'unsigned':True,'publishing':False}
     (out/'bom.json').write_text(json.dumps(bom,indent=2)+'\n')
     archive=work/('wizard-os-'+pins['factory']['version']+'.tar.xz')
     env={**os.environ,'COPYFILE_DISABLE':'1','TMPDIR':str(work)}
@@ -134,9 +113,13 @@ def main():
     for name,item in base['boot'].items():
         assert sha(Path(os.path.expandvars(item['path'])))==item['sha256'];shutil.copy2(os.path.expandvars(item['path']),boot/name)
     host=Path(os.path.expandvars(pins['assembly']['host']['path']));assert sha(host)==pins['assembly']['host']['sha256']
-    (work/'data/os/manifest.json').write_text(json.dumps({'cmdline':'console=hvc0 root=/dev/vda rw','memoryMiB':4096}))
+    (work/'data/os/manifest.json').write_text(json.dumps({'cmdline':'console=hvc0 root=/dev/vda rw wizard.factory=1','memoryMiB':4096}))
     (work/'data/dev-shell').write_text('owned disposable launch factory\n');(work/'data/files-folder.json').write_text(json.dumps({'path':str(root)}))
-    rel=runtime_release(pins,root);(work/'runtime-release.json').write_text(json.dumps(rel,indent=2)+'\n')
+    spec=importlib.util.spec_from_file_location('factory_policy',HERE/'factory-policy.py');assert spec and spec.loader
+    policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
+    rel,background=policy.releases(runtime_release(pins,root))
+    (work/'runtime-release.json').write_text(json.dumps(rel,indent=2)+'\n')
+    (work/'default-apps-release.json').write_text(json.dumps(background,indent=2)+'\n')
     (work/'source-pins.json').write_text(json.dumps({'source':pins['finalPins']['native'],**{x:pins['finalPins'][x] for x in ['ux','service','wam']}}))
     os_sh=root/'final/wam/get.sh';assert sha(os_sh)==pins['osInstaller']['sha256']
     result={'buildStarted':True,'publishing':False,'phase':'booting','baseSha256':base['sha256']};proc=None
@@ -150,7 +133,7 @@ def main():
             try:guest('true',5);break
             except (OSError,RuntimeError):time.sleep(2)
         else:raise TimeoutError('owned guest boot')
-        guest('resize2fs /dev/vda; mkdir -p /mnt/launch; mount -t virtiofs wizard-files /mnt/launch; test ! -e /var/lib/wizard/setup.json')
+        guest('mkdir -p /mnt/launch; mount -t virtiofs wizard-files /mnt/launch; test ! -e /var/lib/wizard/setup.json')
         # Read-only identity refusal happens before network or release installation.
         guest('python3 /mnt/launch/preparation/guest-apply.py --check-pristine > /mnt/launch/assembly-work/pristine.log 2>&1')
         result['phase']='release-and-Mac-layers';save()

@@ -27,7 +27,7 @@ def freeze(pins,stable,stable_bytes,origin):
     for row in defaults.values():
         if row is not None:
             assert len(row['commit'])==40
-    return {'schema':'wizard-mac-unpublished-source-rc-v1', 'version':'0.3.39-mac.20261027-rc.1',
+    return {'schema':'wizard-mac-unpublished-source-rc-v1', 'version':stable['version']+'-mac.20261027-rc.1',
             'status':'blocked-assembly-and-image-gates','promote':False,'publish':False,
             'baseRelease':{'version':stable['version'],'snapshot':'wizard-os-current-stable.json',
                            'sha256':hashlib.sha256(stable_bytes).hexdigest(),'github':origin},
