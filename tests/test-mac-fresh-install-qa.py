@@ -80,7 +80,7 @@ class FreshInstallSafetyTests(unittest.TestCase):
     def test_guest_state_waits_for_qa_shell_after_health_and_retries(self):
         # Regression: guest was healthy but the dev shell answered nothing one second after ready.
         text=SOURCE.read_text()
-        self.assertIn("write_text(shell_when_ready('set -eu;",text)
+        self.assertIn("write_text(shell_when_ready(GUEST_STATE_COMMAND))",text)
         ns=helpers();calls=[]
         def fake_shell(command,timeout=120):
             calls.append(command)
@@ -95,6 +95,31 @@ class FreshInstallSafetyTests(unittest.TestCase):
         ns['bounded_wait']=fake_wait
         self.assertEqual(ns['shell_when_ready']('echo hi'),'ok')
         self.assertEqual(calls,['true','true','true','echo hi'])
+
+    def test_guest_state_checks_paths_the_0_5_0_image_ships(self):
+        # Regression: QA asserted /opt/wizard/release/factory-composition.json, which no image ships.
+        tree=ast.parse(SOURCE.read_text())
+        node=next(n for n in tree.body if isinstance(n,ast.Assign) and getattr(n.targets[0],'id','')=='GUEST_STATE_COMMAND')
+        cmd=ast.literal_eval(node.value)
+        self.assertNotIn('factory-composition',cmd);self.assertNotIn('/mnt/wizard-mac/onboarded.json',cmd)
+        guest=ROOT/'next/guest/releases/mac-launch-20261027'
+        if (guest/'guest-apply.py').is_file() and (guest/'seal-factory.py').is_file():
+            apply=(guest/'guest-apply.py').read_text()
+            self.assertIn("/var/lib/wizard/frozen-release",apply);self.assertIn("/opt/wizard/managed-runtime.json",apply)
+            self.assertIn("/var/lib/wizard/setup.json",(guest/'seal-factory.py').read_text())
+        for path in ['/var/lib/wizard/frozen-release/','/opt/wizard/managed-runtime.json','test ! -e /var/lib/wizard/setup.json']:
+            self.assertIn(path,cmd)
+
+    def test_guest_state_timeout_reports_last_guest_output(self):
+        ns=helpers()
+        ns['shell']=Mock(side_effect=lambda c,timeout=120: 'ok' if c=='true' else (_ for _ in ()).throw(AssertionError('boom-output')))
+        def wait(pred,seconds,label):
+            r=pred()
+            if r:return r
+            raise AssertionError(label+' timed out')
+        ns['bounded_wait']=wait
+        with self.assertRaisesRegex(AssertionError,'last guest output: boom-output'):
+            ns['shell_when_ready']('x')
 
     def test_host_status_must_match_retained_child_pid_and_data_home(self):
         ns=helpers();proc=Mock(pid=123);proc.poll.return_value=None

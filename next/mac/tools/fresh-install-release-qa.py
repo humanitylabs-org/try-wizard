@@ -166,6 +166,13 @@ def shell(command, timeout=120):
     return out
 
 
+# Records the 0.5.0 image really ships (guest-apply.py / seal-factory.py): frozen runtime release,
+# managed runtime pin, and never-onboarded state (no /var/lib/wizard/setup.json).
+GUEST_STATE_COMMAND=('set -eu; ls /var/lib/wizard/frozen-release/*.json; cat /var/lib/wizard/frozen-release/*.json; '
+                     'cat /opt/wizard/managed-runtime.json; test ! -e /var/lib/wizard/setup.json; '
+                     'docker ps --format "{{.Names}} {{.Status}}"')
+
+
 def shell_when_ready(command, ready_seconds=180, retry_seconds=600):
     """The guest dev shell (vsock 9200) starts after product health; wait, then retry like the artifact check."""
     def reachable():
@@ -176,7 +183,9 @@ def shell_when_ready(command, ready_seconds=180, retry_seconds=600):
     def attempt():
         try:return shell(command)
         except (OSError,AssertionError) as error:last[0]=str(error);return False
-    return bounded_wait(attempt,retry_seconds,'guest state command (last: '+last[0][-300:]+')')
+    try:return bounded_wait(attempt,retry_seconds,'guest state command')
+    except AssertionError as error:
+        raise AssertionError(str(error)+'; last guest output: '+last[0][-1500:]) from error
 
 
 def bounded_wait(predicate, seconds, label):
@@ -315,7 +324,7 @@ exit(app.terminate() ? 0 : 3)
         with urllib.request.urlopen('http://127.0.0.1:48030/',timeout=15) as response:
             html=response.read().decode(); assert response.status==200 and ('Wizard' in html or 'wizard' in html)
         (out/'onboarding.html').write_text(html)
-        (out/'guest-state.txt').write_text(shell_when_ready('set -eu; test -f /opt/wizard/release/factory-composition.json; cat /opt/wizard/release/factory-composition.json; test ! -e /mnt/wizard-mac/onboarded.json; docker ps --format "{{.Names}} {{.Status}}"'))
+        (out/'guest-state.txt').write_text(shell_when_ready(GUEST_STATE_COMMAND))
         forbidden=list((data/'updates').glob('legacy-*')) if (data/'updates').exists() else []
         assert not forbidden, 'Precomposed 0.5.0 must never start legacy bootstrap: '+repr(forbidden)
         paths={r['path'] for r in requests};assert '/os/p2/latest.json' in paths
