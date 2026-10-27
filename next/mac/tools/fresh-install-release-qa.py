@@ -97,6 +97,14 @@ def owned_hosts(app, data):
     return [pid for pid,cmd in process_rows() if cmd == executable+' --wizard-data-home '+str(data)]
 
 
+def prepare_os_dir_for_harness_host(data):
+    os_dir=data/'os'
+    assert not os_dir.exists(), 'fresh DataHome must not already contain os/'
+    os_dir.mkdir(parents=True)
+    assert not any(os_dir.iterdir())
+    return os_dir
+
+
 def wait_for_harness_host(hostproc, data, out):
     """Bound privacy-consent stalls before starting the release app/installer."""
     def ready():
@@ -109,6 +117,10 @@ def wait_for_harness_host(hostproc, data, out):
     try:
         return bounded_wait(ready,180,'Host status after harness launch')
     except AssertionError as error:
+        if hostproc.poll() is not None:
+            log=out/'host.log'
+            tail=log.read_text()[-2000:] if log.exists() else ''
+            raise AssertionError('Harness-owned Host exited (code '+str(hostproc.returncode)+') before status: '+tail.strip()) from error
         sample=out/'host-blocked.sample.txt'
         try:
             result=subprocess.run(['/usr/bin/sample',str(hostproc.pid),'5','-file',str(sample)],
@@ -251,10 +263,15 @@ exit(app.terminate() ? 0 : 3)
         assert actual['DataHome']==str(data) and actual['backends']==overlay['backends']
         # Direct child launch retains the SSH harness's removable-volume responsibility.
         # LaunchServices would make the ad-hoc Host its own TCC-responsible process.
+        # Production starts the Host only after install, when os/ exists; the Host takes its
+        # disk-owner lock inside os/ and does not create it. Pre-create the empty folder:
+        # osInstalled stays false, so the app still runs the full download, and the installer's
+        # finish() replaces the folder with the unpacked image.
+        prepare_os_dir_for_harness_host(data)
         with (out/'host.log').open('w') as log:
             hostproc=subprocess.Popen([str(app/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'),
                                        '--wizard-data-home',str(data)],stdout=log,stderr=log)
-        (out/'host-launch.json').write_text(json.dumps({'hostLaunchedByHarness':True,'pid':hostproc.pid,
+        (out/'host-launch.json').write_text(json.dumps({'hostLaunchedByHarness':True,'pid':hostproc.pid,'emptyOsDirPrecreated':True,
                                                        'nativeFinderConsentProven':False},indent=2))
         wait_for_harness_host(hostproc,data,out)
         assert owned_hosts(app,data)==[hostproc.pid]

@@ -53,6 +53,30 @@ class FreshInstallSafetyTests(unittest.TestCase):
                 self.assertTrue((out/'host-blocked-sample-command.txt').is_file())
         finally:ns['subprocess'].run=saved
 
+    def test_harness_host_finds_empty_os_folder_before_install_like_production(self):
+        # Regression: the Host takes its disk-owner lock inside os/ and exited with
+        # "Another process owns this Wizard disk" when started before any install.
+        text=SOURCE.read_text()
+        self.assertLess(text.index('prepare_os_dir_for_harness_host(data)'),text.index('hostproc=subprocess.Popen'))
+        ns=helpers()
+        with tempfile.TemporaryDirectory() as root:
+            data=Path(root)/'data'
+            os_dir=ns['prepare_os_dir_for_harness_host'](data)
+            self.assertTrue(os_dir.is_dir());self.assertEqual(list(os_dir.iterdir()),[])
+            for name in ['manifest.json','boot/vmlinux','boot/initrd','disk.img']:
+                self.assertFalse((os_dir/name).exists())  # app still sees "not installed"
+            with self.assertRaises(AssertionError):ns['prepare_os_dir_for_harness_host'](data)
+        swift=(ROOT/'next/mac/Shared/Shared.swift').read_text()
+        self.assertIn('["manifest.json", "boot/vmlinux", "boot/initrd", "disk.img"].allSatisfy',swift)
+
+    def test_host_that_exits_early_reports_its_own_log_not_privacy_consent(self):
+        ns=helpers();proc=Mock(pid=123,returncode=1);proc.poll.return_value=1
+        ns['bounded_wait']=Mock(side_effect=AssertionError('timeout'))
+        with tempfile.TemporaryDirectory() as root:
+            out=Path(root);(out/'host.log').write_text('Another process owns this Wizard disk')
+            with self.assertRaisesRegex(AssertionError,'exited \\(code 1\\).*Another process owns'):
+                ns['wait_for_harness_host'](proc,out/'data',out)
+
     def test_host_status_must_match_retained_child_pid_and_data_home(self):
         ns=helpers();proc=Mock(pid=123);proc.poll.return_value=None
         ns['bounded_wait']=lambda predicate,seconds,label:predicate()
