@@ -77,6 +77,25 @@ class FreshInstallSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError,'exited \\(code 1\\).*Another process owns'):
                 ns['wait_for_harness_host'](proc,out/'data',out)
 
+    def test_guest_state_waits_for_qa_shell_after_health_and_retries(self):
+        # Regression: guest was healthy but the dev shell answered nothing one second after ready.
+        text=SOURCE.read_text()
+        self.assertIn("write_text(shell_when_ready('set -eu;",text)
+        ns=helpers();calls=[]
+        def fake_shell(command,timeout=120):
+            calls.append(command)
+            if len(calls)<3:raise AssertionError('')
+            return 'ok'
+        ns['shell']=fake_shell
+        def fake_wait(predicate,seconds,label):
+            for _ in range(10):
+                r=predicate()
+                if r:return r
+            raise AssertionError(label)
+        ns['bounded_wait']=fake_wait
+        self.assertEqual(ns['shell_when_ready']('echo hi'),'ok')
+        self.assertEqual(calls,['true','true','true','echo hi'])
+
     def test_host_status_must_match_retained_child_pid_and_data_home(self):
         ns=helpers();proc=Mock(pid=123);proc.poll.return_value=None
         ns['bounded_wait']=lambda predicate,seconds,label:predicate()

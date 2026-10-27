@@ -166,6 +166,19 @@ def shell(command, timeout=120):
     return out
 
 
+def shell_when_ready(command, ready_seconds=180, retry_seconds=600):
+    """The guest dev shell (vsock 9200) starts after product health; wait, then retry like the artifact check."""
+    def reachable():
+        try:shell('true',5);return True
+        except (OSError,AssertionError):return False
+    bounded_wait(reachable,ready_seconds,'guest QA shell after product health')
+    last=['']
+    def attempt():
+        try:return shell(command)
+        except (OSError,AssertionError) as error:last[0]=str(error);return False
+    return bounded_wait(attempt,retry_seconds,'guest state command (last: '+last[0][-300:]+')')
+
+
 def bounded_wait(predicate, seconds, label):
     end=time.monotonic()+seconds
     last='not ready'
@@ -302,7 +315,7 @@ exit(app.terminate() ? 0 : 3)
         with urllib.request.urlopen('http://127.0.0.1:48030/',timeout=15) as response:
             html=response.read().decode(); assert response.status==200 and ('Wizard' in html or 'wizard' in html)
         (out/'onboarding.html').write_text(html)
-        (out/'guest-state.txt').write_text(shell('set -eu; test -f /opt/wizard/release/factory-composition.json; cat /opt/wizard/release/factory-composition.json; test ! -e /mnt/wizard-mac/onboarded.json; docker ps --format "{{.Names}} {{.Status}}"'))
+        (out/'guest-state.txt').write_text(shell_when_ready('set -eu; test -f /opt/wizard/release/factory-composition.json; cat /opt/wizard/release/factory-composition.json; test ! -e /mnt/wizard-mac/onboarded.json; docker ps --format "{{.Names}} {{.Status}}"'))
         forbidden=list((data/'updates').glob('legacy-*')) if (data/'updates').exists() else []
         assert not forbidden, 'Precomposed 0.5.0 must never start legacy bootstrap: '+repr(forbidden)
         paths={r['path'] for r in requests};assert '/os/p2/latest.json' in paths
