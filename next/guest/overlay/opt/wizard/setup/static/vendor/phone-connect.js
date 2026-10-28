@@ -72,20 +72,28 @@
     helper_forbidden: 'Wizard isn’t allowed to use its private-network helper.',
   })[code] || `Phone setup: ${String(code).replace(/_/g, ' ')}`;
 
+  const REQUEST_MS = 8000;
+  /** After this many failed checks in a row the last answer is no longer shown as current. */
+  const LOST_AFTER = 2;
+
   /** The default API: the Agent Service's owner-only Phone Setup endpoints on this origin. */
   function serviceApi(base = '/wizard/v1/setup/phone') {
     const paths = { status: ['GET', base], start: ['POST', base + '/start'], reset: ['POST', base + '/reset'] };
     return async action => {
       const [method, path] = paths[action];
+      // A Wizard this device can't reach (e.g. a phone removed from Tailscale) doesn't fail the request; it hangs.
+      // Give up after a while so the screen can say so instead of keeping the last answer up.
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), REQUEST_MS) : 0;
       try {
-        const r = await fetch(path, { method, credentials: 'same-origin', cache: 'no-store',
+        const r = await fetch(path, { method, credentials: 'same-origin', cache: 'no-store', ...(ctl ? { signal: ctl.signal } : {}),
           ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: '{}' } : {}) });
         if (r.status === 401 || r.status === 403) return { kind: 'denied' };
         if (r.status === 404) return { kind: 'missing' };
         if (!r.ok) return { kind: 'neterr' };
         const data = await r.json().catch(() => null);
         return data && typeof data === 'object' ? { kind: 'ok', data } : { kind: 'neterr' };
-      } catch (e) { return { kind: 'neterr' }; }
+      } catch (e) { return { kind: 'neterr' }; } finally { clearTimeout(timer); }
     };
   }
   function openAnchor(url) {
@@ -95,16 +103,18 @@
   }
 
   function create(options = {}) {
-    const o = { api: serviceApi(), open: openAnchor, layout: 'desktop', active: () => true, onChange() {}, ...options };
+    const o = { api: serviceApi(), open: openAnchor, layout: 'desktop', active: () => true, onChange() {}, offline: () => false, ...options };
     const S = { status: 'loading', view: null, banner: false, starting: false, startUntil: 0, opErr: '', opened: {}, openFailed: false, again: false, busy: false };
     let el = null, timer = 0, seq = 0, lastHtml = '', at = 0, inflight = false;
 
     const changed = () => { try { o.onChange(api); } catch (e) { console.error(e); } };
+    // Lost: Wizard hasn't answered the last checks, or the host already knows this device can't reach it (the
+    // connection pill's evidence), then even one failed check is enough.
+    const lost = () => !!S.view && ((S.fails || 0) >= LOST_AFTER || (S.offline && (S.fails || 0) >= 1));
     function take(r) {
-      if (r.kind === 'ok' && norm(r.data)) { S.status = 'ok'; S.view = norm(r.data); S.raw = r.data; S.banner = false; }
-      else if (r.kind === 'denied' || r.kind === 'missing') { S.status = r.kind; S.view = null; S.starting = false; }
-      else if (S.view) S.banner = true;
-      else S.status = 'neterr';
+      if (r.kind === 'ok' && norm(r.data)) { S.status = 'ok'; S.view = norm(r.data); S.raw = r.data; S.banner = false; S.fails = 0; }
+      else if (r.kind === 'denied' || r.kind === 'missing') { S.status = r.kind; S.view = null; S.starting = false; S.fails = 0; }
+      else { S.fails = (S.fails || 0) + 1; if (S.view) S.banner = true; else S.status = 'neterr'; }
       const v = S.view;
       if (S.starting && v && (v.step !== 'off' || v.error)) S.starting = false;
       if (S.starting && Date.now() > S.startUntil) { S.starting = false; S.opErr = 'That didn’t work. Try again.'; }
@@ -211,6 +221,10 @@
         return `<div class="pc-wall">${note('Phone access isn’t available on this Wizard yet. It comes with a Wizard update; there’s nothing you need to do now.')}</div>`;
       }
       if (!v) return S.status === 'neterr' ? note('Can’t check right now.') + `<div class="pc-act">${btn('retry', 'Try again', 'secondary')}</div>` : spin('Checking…');
+      // The last answer is too old to show as current (e.g. "connected" on a phone that was just removed).
+      if (lost()) return `<div class="pc-banner" role="status">Can’t reach your Wizard from this device right now.</div>`
+        + note('So this can’t show whether a phone is connected. On a phone, check that Tailscale is on and signed in to the same account as your Wizard, and that the computer running your Wizard is on.')
+        + `<div class="pc-act">${btn('retry', 'Try again', 'secondary')}</div>`;
       let h = S.banner ? '<div class="pc-banner" role="status">Wizard can’t check on this right now. Trying again.</div>' : '';
       const err = S.opErr || (v.error ? errText(v.error) : '');
       const errLine = err ? `<p class="pc-note err" role="alert">${esc(err)}</p>` : '';
@@ -283,7 +297,11 @@
       },
       /** Ask now, unless the last answer is younger than `maxAge` ms. Works unattached (for a host's summary). */
       refresh(maxAge = 0) {
-        if (inflight || (maxAge && at && Date.now() - at < maxAge)) return;
+        // While the host knows this device can't reach Wizard, a cached answer is no evidence: always ask.
+        S.offline = !!o.offline();
+        if (S.offline && S.view && !S.fails) S.fails = 1;
+        if (S.offline) { lastHtml = ''; paint(); changed(); }
+        if (inflight || (!S.offline && maxAge && at && Date.now() - at < maxAge)) return;
         inflight = true; load().finally(() => { inflight = false; schedule(interval()); });
       },
       start, reset,
@@ -295,8 +313,10 @@
       get raw() { return S.raw || null; },
       get busy() { return S.busy; },
       /** For hosts: on = a phone can reach Wizard; setting up = signed in halfway; available = Phone Setup exists here. */
-      get on() { return !!S.view && ON.has(S.view.step); },
-      get settingUp() { return !!S.view && ['signin', 'https'].includes(S.view.step); },
+      /** The last answer is stale: Wizard hasn't answered the last checks. Hosts hide what depends on it. */
+      get lost() { return lost(); },
+      get on() { return !lost() && !!S.view && ON.has(S.view.step); },
+      get settingUp() { return !lost() && !!S.view && ['signin', 'https'].includes(S.view.step); },
       get available() { return S.status === 'ok' && !!S.view && S.view.step !== 'unavailable'; },
     };
     return api;
