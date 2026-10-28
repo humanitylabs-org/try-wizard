@@ -84,10 +84,12 @@ install_public_package(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
             'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
+            # server.py loads the backup front door from its own folder; without it the front door doesn't start.
+            'setup/backup_frontdoor.py',
             'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png','setup/static/vendor',
             'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
- if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
+ if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server','setup/backup_frontdoor')): continue
  if src.is_dir(): install_public_package(src,dst)
  else:
   reject_symlink_components(src); reject_symlink_components(dst)
