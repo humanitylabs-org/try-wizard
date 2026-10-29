@@ -1,10 +1,11 @@
 {
   "source": "humanitylabs-org/wizard-ux",
   "path": "web/core",
-  "commit": "fd8933946c7d536b5cd096779ba63fe2590243d6",
+  "commit": "2d85bf3cd61727452d00b996dd03d5fda9f1b8fe",
   "sha256": {
-    "phone-connect.js": "87ab19705fde8379cd8a437a2f7640c0aa014c21fd1528aefccc7ae91330f3e8",
-    "phone-connect.css": "e16eb3e4f5f47b984bc799ee3b3317ad121ab7e7b7dce09c0f65ea18f7e0c2cb"
+    "phone-connect.js": "26c87a3776d6e2fd5d487384f1f8d53bdd4d98ec1de4b7446d5651034b51d24a",
+    "phone-connect.css": "62277997e2161309c1209100e5688dedbcf2feb6edce46d012ecdfae7c4923a4",
+    "../kit/controls.css": "f2ce63afd0992e8cd4eded3759c1e4455eca730dfff347bf88275480f91a1f7b"
   },
   "note": "Vendored by next/guest/tools/sync-phone-connect.sh. Do not edit; change wizard-ux and re-sync."
 }

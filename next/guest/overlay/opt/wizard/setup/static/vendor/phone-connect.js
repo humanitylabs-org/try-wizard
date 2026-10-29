@@ -1,4 +1,4 @@
-/* Phone connect: the one "use Wizard on your phone" component (connect over Tailscale).
+/* Phone connect: the one "use Wizard on your device" component (connect over Tailscale).
  *
  * Every place that connects a phone renders this, so the owner sees the same steps, words and dead ends everywhere:
  *   - Settings › Phones & devices (web/core/settings.js)
@@ -53,7 +53,7 @@
     if (!origin && str(d.connect_url)) { try { origin = httpsOrigin(new URL(d.connect_url).searchParams.get('origin')); } catch (e) {} }
     if (!origin && str(d.address)) origin = httpsOrigin('https://' + d.address);
     const phones = (Array.isArray(d.phones) ? d.phones : []).filter(p => p && typeof p === 'object')
-      .map(p => ({ name: str(p.name) || 'Phone', os: str(p.os), online: p.online === true }));
+      .map(p => ({ name: str(p.name) || 'Device', os: str(p.os), online: p.online === true }));
     return {
       step: d.step,
       error: str(d.error) && d.error !== 'owner_not_recorded' ? d.error : '',
@@ -70,7 +70,7 @@
     tailscale_not_installed: 'This Wizard is missing Tailscale.',
     helper_error: 'Wizard couldn’t reach its private-network helper.',
     helper_forbidden: 'Wizard isn’t allowed to use its private-network helper.',
-  })[code] || `Phone setup: ${String(code).replace(/_/g, ' ')}`;
+  })[code] || `Device setup: ${String(code).replace(/_/g, ' ')}`;
 
   const REQUEST_MS = 8000;
   /** After this many failed checks in a row the last answer is no longer shown as current. */
@@ -184,15 +184,17 @@
       else if (act === 'retry') { S.status = S.view ? S.status : 'loading'; paint(); load().then(() => schedule(interval())); }
       else if (act === 'open') { const url = S.view?.[t.dataset.kind]; if (url) { S.opened[url] = true; launch(url, t.dataset.kind); } }
       else if (act === 'copy') copy(t.dataset.text, t);
-      else if (act === 'again') { S.again = !S.again; paint(); schedule(interval()); }
+      else if (act === 'again') connectAnother();
+      else if (act === 'flow-close' || act === 'flow-done') closeFlow();
+      else if (act === 'step2-done' || act === 'step2-again') { S.step2Done = act === 'step2-done'; paint(); el?.querySelector('[data-pc-step="3"]')?.scrollIntoView({block:'nearest'}); }
     }
 
     /* ---------- render ---------- */
     const spin = text => `<div class="pc-wait"><span class="pc-spin" aria-hidden="true"></span><span>${text}</span></div>`;
-    const btn = (act, label, cls = 'primary', extra = '') => `<button type="button" class="pc-btn ${cls}" data-pc="${act}" ${extra}>${label}</button>`;
+    const btn = (act, label, cls = 'primary', extra = '') => `<button type="button" class="pc-btn wz-button ${cls}" data-pc="${act}" ${extra}>${label}</button>`;
     const note = (html, cls = '') => `<p class="pc-note ${cls}">${html}</p>`;
     const shown = origin => { try { return new URL(origin).host; } catch (e) { return origin; } };
-    const copyRow = (text, label, shownText = text) => `<div class="pc-copy"><span class="pc-copy-t" title="${esc(text)}">${esc(shownText)}</span><button type="button" class="pc-btn quiet small" data-pc="copy" data-text="${esc(text)}" aria-label="${esc(label)}">Copy</button></div>`;
+    const copyRow = (text, label, shownText = text) => `<div class="pc-copy"><span class="pc-copy-t" title="${esc(text)}">${esc(shownText)}</span><button type="button" class="pc-btn wz-button quiet small" data-pc="copy" data-text="${esc(text)}" aria-label="${esc(label)}">Copy</button></div>`;
     function manual(url) {
       return `<div class="pc-manual"><p class="pc-note small ${S.openFailed ? 'warn' : ''}">${S.openFailed ? 'Your browser didn’t open. Copy this link into it:' : 'Nothing opened? Copy this link into your browser:'}</p>${copyRow(url, 'Copy the Tailscale link')}</div>`;
     }
@@ -201,37 +203,55 @@
       const phone = waiting && v.phones.find(p => p.online && isPhone(p));
       const tell = phone
         ? `<b>${esc(phone.name)}</b> is on your private network. One more step: open the Wizard app on it, tap <b>Scan QR code</b> and point it here.`
-        : 'Open the Wizard app on your phone, tap <b>Scan QR code</b> and point it here. The iPhone Camera works too.';
-      const wait = waiting ? spin('Waiting for your phone…') : '';
-      const get = note(`Your phone needs Tailscale too, signed in to the same account. <a href="${esc(v.install)}" target="_blank" rel="noopener noreferrer" data-pc="out">Get Tailscale</a>`, 'small');
+        : 'Open the Wizard app on your device, tap <b>Scan QR code</b> and point it here. The iPhone Camera works too.';
+      const wait = waiting ? spin('Waiting for your device…') : '';
+      const get = note(`Your device needs Tailscale too, signed in to the same account. <a href="${esc(v.install)}" target="_blank" rel="noopener noreferrer" data-pc="out">Get Tailscale</a>`, 'small');
       const payload = connectPayload(v.origin);
       if (!payload) return spin('Getting your Wizard’s address…');
       if (o.layout === 'phone') {
-        return note('On the phone you want to connect, open the Wizard app and enter this address, or open it in the browser.')
+        return note('On the device you want to connect, open the Wizard app and enter this address, or open it in the browser.')
           + copyRow(v.origin, 'Copy your Wizard’s address', shown(v.origin))
-          + `<div class="pc-act"><a class="pc-btn primary" href="${esc(v.origin)}" target="_blank" rel="noopener noreferrer" data-pc="out">Open Wizard at this address</a></div>` + wait + get;
+          + `<div class="pc-act"><a class="pc-btn wz-button primary" href="${esc(v.origin)}" target="_blank" rel="noopener noreferrer" data-pc="out">Open Wizard at this address</a></div>` + wait + get;
       }
-      return `<div class="pc-pair"><div class="pc-qr" data-qr="${esc(payload)}" role="img" aria-label="QR code to connect your phone to ${esc(shown(v.origin))}"><canvas></canvas></div>`
+      return `<div class="pc-pair"><div class="pc-qr" data-qr="${esc(payload)}" role="img" aria-label="QR code to connect your device to ${esc(shown(v.origin))}"><canvas></canvas></div>`
         + `<div class="pc-side">${note(tell)}${wait}</div></div>` + copyRow(v.origin, 'Copy your Wizard’s address', shown(v.origin)) + get;
+    }
+    // James approved 29 Oct: #648's QR/checklist/Done refinements, shared by all hosts.
+    function connectAnother() { S.flow = true; S.step2Done = false; paint(); changed(); }
+    function closeFlow() { S.flow = false; S.step2Done = false; paint(); changed(); }
+    const qr = (payload, label) => `<div class="pc-qr" data-qr="${esc(payload)}" role="img" aria-label="${esc(label)}"><canvas></canvas></div>`;
+    function flowHtml() {
+      const v = S.view, url = v?.origin || '', install = v?.install || 'https://tailscale.com/download';
+      return `<div data-pc-flow><div class="pc-flow-head">${btn('flow-close', '‹', 'quiet', 'aria-label="Back to devices"')}<h4>Connect another device</h4></div>
+        <div class="wz-card pc-flow-step"><h5>✓ 1 · Wizard is on your network</h5><p class="pc-note">Use the same Tailscale account on the device you’re adding.</p></div>
+        <div class="wz-card pc-flow-step" data-pc-step="2"><h5>${S.step2Done ? '✓' : '2 ·'} Get Tailscale on your other device</h5>
+          ${S.step2Done ? note('Tailscale is on your other device.') + btn('step2-again', 'Show again', 'quiet') :
+          note('Install it and sign in with the same Tailscale account. Scan with your device’s camera.') + qr(install, 'QR code to get Tailscale') + copyRow(install, 'Copy the Tailscale download address') + `<div class="pc-act">${btn('step2-done', 'Done', 'secondary')}</div>`}</div>
+        <div class="wz-card pc-flow-step" data-pc-step="3"><h5>3 · Connect your other device to Wizard</h5>
+          <div class="pc-checklist"><b>Before you scan</b><ol><li>Tailscale is installed on the other device.</li><li>You’re signed in to the same account.</li><li>Tailscale is connected.</li></ol></div>
+          ${url ? note('In the Wizard app on the other device, tap Scan QR code and point it here.') + qr(connectPayload(url), 'QR code to connect your other device to Wizard') + copyRow(url, 'Copy your Wizard’s address', shown(url)) : note('Wizard’s address is not ready yet. Go back and finish connecting Wizard first.')}
+          ${note('In a browser, open the address above, then add Wizard to your home screen or bookmark it.', 'small')}</div>
+        <div class="pc-act">${btn('flow-done', 'Done')}</div></div>`;
     }
     function html() {
       const v = S.view;
-      if (S.status === 'denied') return note('Only Wizard’s owner can connect a phone.');
+      if (S.status === 'denied') return note('Only Wizard’s owner can connect a device.');
       if (S.status === 'missing' || v?.step === 'unavailable') {
-        return `<div class="pc-wall">${note('Phone access isn’t available on this Wizard yet. It comes with a Wizard update; there’s nothing you need to do now.')}</div>`;
+        return `<div class="pc-wall">${note('Device access isn’t available on this Wizard yet. It comes with a Wizard update; there’s nothing you need to do now.')}</div>`;
       }
       if (!v) return S.status === 'neterr' ? note('Can’t check right now.') + `<div class="pc-act">${btn('retry', 'Try again', 'secondary')}</div>` : spin('Checking…');
-      // The last answer is too old to show as current (e.g. "connected" on a phone that was just removed).
+      // The last answer is too old to show as current (e.g. "connected" on a device that was just removed).
       if (lost()) return `<div class="pc-banner" role="status">Can’t reach your Wizard from this device right now.</div>`
-        + note('So this can’t show whether a phone is connected. On a phone, check that Tailscale is on and signed in to the same account as your Wizard, and that the computer running your Wizard is on.')
+        + note('So this can’t show whether a device is connected. On a device, check that Tailscale is on and signed in to the same account as your Wizard, and that the computer running your Wizard is on.')
         + `<div class="pc-act">${btn('retry', 'Try again', 'secondary')}</div>`;
+      if (S.flow && v.step === 'phone_seen') return flowHtml();
       let h = S.banner ? '<div class="pc-banner" role="status">Wizard can’t check on this right now. Trying again.</div>' : '';
       const err = S.opErr || (v.error ? errText(v.error) : '');
       const errLine = err ? `<p class="pc-note err" role="alert">${esc(err)}</p>` : '';
       if (S.starting) return h + spin('Starting Tailscale…');
       if (v.step === 'off') {
-        return h + note('Your Wizard joins <b>Tailscale</b>, a free private network, as its own device. Sign in to the same Tailscale account on your phone, and it can reach Wizard from anywhere. Nothing is opened to the internet.')
-          + errLine + `<div class="pc-act">${btn('start', err ? 'Try again' : 'Connect a phone')}</div>`;
+        return h + note('Your Wizard joins <b>Tailscale</b>, a free private network, as its own device. Sign in to the same Tailscale account on your device, and it can reach Wizard from anywhere. Nothing is opened to the internet.')
+          + errLine + `<div class="pc-act">${btn('start', err ? 'Try again' : 'Connect a device')}</div>`;
       }
       if (v.step === 'signin') {
         const again = S.opened[v.signin];
@@ -241,17 +261,17 @@
       }
       if (v.step === 'https') {
         const again = S.opened[v.https];
-        return h + note('One more switch: your Tailscale network needs HTTPS certificates turned on, so your phone gets a secure address.')
+        return h + note('One more switch: your Tailscale network needs HTTPS certificates turned on, so your device gets a secure address.')
           + errLine + (v.https ? `<div class="pc-act">${btn('open', again ? 'Open again' : 'Turn on HTTPS', again ? 'secondary' : 'primary', 'data-kind="https"')}${spin('Waiting…')}</div>` + manual(v.https)
             : `<div class="pc-act">${spin('Setting up the secure address…')}</div>`);
       }
       if (v.step === 'serving') return h + errLine + pair(v, true);
       // phone_seen
       const phone = v.phones.find(p => isPhone(p)) || v.phones[0];
-      return h + `<div class="pc-ok"><span class="pc-check" aria-hidden="true">✓</span><span>${esc(phone ? phone.name : 'Your phone')} is connected</span></div>`
-        + note('Open the Wizard app on your phone any time.') + errLine
-        + `<div class="pc-act">${btn('again', S.again ? 'Hide the code' : 'Connect another phone', 'secondary', `aria-expanded="${S.again}"`)}</div>`
-        + (S.again ? `<div class="pc-again">${pair(v, false)}</div>` : '');
+      return h + `<div class="pc-ok"><span class="pc-check" aria-hidden="true">✓</span><span>${esc(phone ? phone.name : 'Your device')} is connected</span></div>`
+        + note('Open the Wizard app on your device any time.') + errLine
+        + `<div class="pc-act">${btn('again', 'Connect another device', 'secondary')}</div>`
+;
     }
     // The QR library is loaded on first use when the host names it (the shells don't load it up front).
     let qrLoading = null;
@@ -269,7 +289,7 @@
         const c = box.querySelector('canvas'); if (!c || box.dataset.drawn === box.dataset.qr) return;
         const q = window.qrcode(0, 'M'); q.addData(box.dataset.qr); q.make();
         const n = q.getModuleCount(), quiet = 2, cells = n + quiet * 2;
-        const cell = Math.max(1, Math.floor((136 * dpr) / cells)); // whole device pixels per module: crisp edges
+        const cell = Math.max(1, Math.floor(((box.closest('[data-pc-flow]') ? 200 : 136) * dpr) / cells)); // whole device pixels per module: crisp edges
         const px = cell * cells; c.width = px; c.height = px; c.style.width = c.style.height = (px / dpr) + 'px';
         const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, px, px); x.fillStyle = '#000';
         for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) x.fillRect((k + quiet) * cell, (r + quiet) * cell, cell, cell);
@@ -304,7 +324,9 @@
         if (inflight || (!S.offline && maxAge && at && Date.now() - at < maxAge)) return;
         inflight = true; load().finally(() => { inflight = false; schedule(interval()); });
       },
-      start, reset,
+      start, reset, connectAnother,
+      back() { if (!S.flow) return false; closeFlow(); return true; },
+      get connecting() { return !!S.flow; },
       /** 'loading' | 'ok' | 'neterr' | 'denied' | 'missing' */
       get status() { return S.status; },
       /** The normalized view (null until the first answer): step, device, origin, phones, ... */

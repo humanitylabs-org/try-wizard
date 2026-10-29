@@ -22,7 +22,7 @@ class OnboardingPhoneConnectTests(unittest.TestCase):
         provenance = json.loads((VENDOR / "phone-connect.provenance.json").read_text())
         self.assertEqual(provenance["source"], "humanitylabs-org/wizard-ux")
         self.assertRegex(provenance["commit"], r"^[0-9a-f]{40}$")
-        self.assertEqual(set(provenance["sha256"]), {"phone-connect.js", "phone-connect.css"})
+        self.assertEqual(set(provenance["sha256"]), {"phone-connect.js", "phone-connect.css", "../kit/controls.css"})
         for name, digest in provenance["sha256"].items():
             actual = hashlib.sha256((VENDOR / name).read_bytes()).hexdigest()
             self.assertEqual(actual, digest, f"{name} was edited here; change wizard-ux and re-run sync-phone-connect.sh")
@@ -38,6 +38,16 @@ class OnboardingPhoneConnectTests(unittest.TestCase):
         for copy in ("Starting Tailscale", "approve the new device", "Waiting for your phone", "isn't available on this Wizard",
                      "Scan QR code", "createDataURL"):
             self.assertNotIn(copy, page.replace("\\'", "'"), f"onboarding renders {copy!r} itself")
+
+    def test_device_copy_and_shared_kit(self) -> None:
+        page = (STATIC / "index.html").read_text()
+        component = (VENDOR / "phone-connect.js").read_text()
+        self.assertIn("on another device</h1>", page)
+        self.assertNotIn("on your phone</h1>", page)
+        self.assertIn("Connect another device", component)
+        self.assertNotIn("Link another device", component)
+        self.assertIn('../kit/controls.css', (VENDOR / "phone-connect.css").read_text())
+        self.assertTrue((STATIC / "kit/controls.css").is_file())
 
     def test_upgrade_installs_the_vendor_folder(self) -> None:
         upgrade = (REPOSITORY / "next/guest/upgrade-mvp-stack.py").read_text()

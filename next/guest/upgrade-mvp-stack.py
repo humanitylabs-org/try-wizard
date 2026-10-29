@@ -86,7 +86,7 @@ for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.
             'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
             # server.py loads the backup front door from its own folder; without it the front door doesn't start.
             'setup/backup_frontdoor.py',
-            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png','setup/static/vendor',
+            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png','setup/static/vendor', 'setup/static/kit',
             'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server','setup/backup_frontdoor')): continue
