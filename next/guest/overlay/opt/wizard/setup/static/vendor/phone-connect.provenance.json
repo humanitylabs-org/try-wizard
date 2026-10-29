@@ -1,7 +1,7 @@
 {
   "source": "humanitylabs-org/wizard-ux",
   "path": "web/core",
-  "commit": "2d85bf3cd61727452d00b996dd03d5fda9f1b8fe",
+  "commit": "7e6b3819bcf847d7c5fc246788671f5fcf2094d9",
   "sha256": {
     "phone-connect.js": "26c87a3776d6e2fd5d487384f1f8d53bdd4d98ec1de4b7446d5651034b51d24a",
     "phone-connect.css": "62277997e2161309c1209100e5688dedbcf2feb6edce46d012ecdfae7c4923a4",
