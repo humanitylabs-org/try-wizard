@@ -77,11 +77,12 @@
   .phonebox { border: 1px solid var(--line); border-radius: 16px; background: #0f0e18; padding: 18px; }
   /* The shared phone-connect component reads the shell's --wz-* tokens; onboarding maps its own palette onto them. */
   #phoneBox { --wz-text: var(--text); --wz-text-secondary: var(--dim); --wz-text-muted: var(--dim); --wz-border: var(--line);
-    --wz-surface-raised: #221f38; --wz-accent: var(--accent); --wz-on-accent: #fff; --wz-success: var(--ok); --wz-warning: #f2b56b; }
+    --wz-surface: #17152a; --wz-surface-raised: #221f38; --wz-accent: var(--accent); --wz-on-accent: #fff; --wz-success: var(--ok); --wz-warning: #f2b56b; }
   .secondary { background: #221f38; color: var(--text); }
   .wait { color: var(--dim); font-size: 14px; display: flex; align-items: center; gap: 10px; }
   .wait .spinner { border-color: #9a96b555; border-top-color: var(--accent2); margin: 0; }
 </style>
+<link rel="stylesheet" href="/static/vendor/controls.css">
 <link rel="stylesheet" href="/static/vendor/phone-connect.css">
 </head>
 <body>
@@ -401,7 +402,8 @@ $('#next4').addEventListener('click', async () => {
   } catch (err) { $('#err4').textContent = err.message; btn.disabled = false; btn.textContent = 'Start chatting' }
 })
 
-$$('[data-back]').forEach((b) => b.addEventListener('click', () => { stopCodex(); show(Number(b.dataset.back)) }))
+// On the phone step, Back first closes the component's "connect another device" flow, like Back in Settings.
+$$('[data-back]').forEach((b) => b.addEventListener('click', () => { if (b.dataset.back === '3' && phone.back?.()) return; stopCodex(); show(Number(b.dataset.back)) }))
 
 ;(async () => {
   try { state = await api('/api/state') } catch {}
