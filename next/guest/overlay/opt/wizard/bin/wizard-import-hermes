@@ -184,6 +184,13 @@ if keep.get("api_server") is not None:
     platforms["api_server"] = keep["api_server"]
 else:
     platforms.pop("api_server", None)
+# Hermes also reads platform blocks nested under `gateway:` (`gateway.platforms.<p>`, then `gateway.<p>`, which wins
+# last). An imported `gateway.platforms.api_server.enabled: false` (common on a desktop Hermes) would keep the API
+# server the Agent Service talks to switched off, so only Wizard's top-level block may speak for it.
+gw = cfg.get("gateway") if isinstance(cfg.get("gateway"), dict) else {}
+nested = [gw.get("platforms") if isinstance(gw.get("platforms"), dict) else {}, gw]
+for section in nested:
+    section.pop("api_server", None)
 
 # 2. Messaging off: an explicit `enabled: false` beats credentials in .env, and the credentials stay for later.
 from gateway.config import Platform
@@ -194,6 +201,18 @@ except Exception:
 from hermes_cli.config import load_env
 env = load_env() or {}
 names = set(platforms) - {"api_server"}
+for section in nested:
+    for name, block in section.items():
+        if name == "platforms" or not isinstance(block, dict):
+            continue
+        try:
+            Platform(name)
+        except ValueError:
+            continue
+        if block.get("enabled") is not False:
+            names.add(name)
+        if block.get("enabled") is True:   # a nested enable would win over the top-level disable below
+            block["enabled"] = False
 for plat, keys in CREDS.items():
     if any(env.get(k) for k in keys):
         names.add(plat.value)
