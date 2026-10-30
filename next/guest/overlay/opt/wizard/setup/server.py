@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import secrets
+import socket
 import stat
 import re
 import subprocess
@@ -28,7 +29,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 from aiohttp import web
@@ -725,6 +726,86 @@ async def get_agent_import(_: web.Request) -> web.Response:
                                                                  "paused_jobs", "sessions_after")} if last else None})
 
 
+# ── phone: "Use Wizard on your phone" ──────────────────────────────────────
+# The Agent Service owns phone setup (wizard-agent-service docs/phone-setup.md: /wizard/v1/setup/phone*). The front
+# door only relays it and opens the Tailscale links in the Mac's browser; it never touches Tailscale itself.
+PHONE_STEPS = {"unavailable", "off", "signin", "https", "serving", "phone_seen"}
+# Where to get the phone app. Empty until the apps are published (TestFlight / Play testing links can go here).
+PHONE_APPS = {"ios": os.environ.get("WIZARD_IOS_APP_URL", ""), "android": os.environ.get("WIZARD_ANDROID_APP_URL", "")}
+
+
+def _tailscale_link(url: Any) -> str | None:
+    parts = urlsplit(url) if isinstance(url, str) else None
+    if parts and parts.scheme == "https" and (parts.hostname == "tailscale.com" or (parts.hostname or "").endswith(".tailscale.com")):
+        return url
+    return None
+
+
+def _phone_view(status: int, payload: Any) -> dict[str, Any]:
+    if status != 200 or not isinstance(payload, dict) or payload.get("step") not in PHONE_STEPS:
+        return {"step": "unavailable", "apps": {k: bool(v) for k, v in PHONE_APPS.items()}}
+    view = {k: payload.get(k) for k in ("step", "device_name", "error")}
+    view["signin"] = bool(payload.get("auth_url"))
+    view["https"] = bool(payload.get("https_enable_url"))
+    # Shown as a copyable fallback in case the browser doesn't open. Only Tailscale's own https pages.
+    view["signin_url"] = _tailscale_link(payload.get("auth_url"))
+    view["https_url"] = _tailscale_link(payload.get("https_enable_url"))
+    # The name the Wizard joins the tailnet under (the guest's hostname until Tailscale reports one), so the
+    # owner knows which device to approve: it is not the Mac's own Tailscale.
+    view["this_device"] = str(payload.get("device_name") or socket.gethostname() or "wizard").split(".")[0][:64]
+    view["phones"] = [{"name": str(p.get("name") or "phone")[:64], "os": str(p.get("os") or "")[:32],
+                       "online": p.get("online") is True} for p in (payload.get("phones") or []) if isinstance(p, dict)][:8]
+    url = payload.get("wizard_url") or ""
+    parts = urlsplit(url) if isinstance(url, str) else None
+    if parts and parts.scheme == "https" and parts.netloc:
+        origin = f"https://{parts.netloc}"
+        view["address"] = parts.netloc
+        # What the Wizard phone apps (and the iPhone Camera) open: android/CONNECT.md, ios/README.md.
+        view["connect_url"] = "wizard://connect?origin=" + quote(origin, safe="")
+    view["apps"] = {k: bool(v) for k, v in PHONE_APPS.items()}
+    return view
+
+
+async def _phone_status() -> tuple[int, Any]:
+    try:
+        return await shell("GET", "/wizard/v1/setup/phone", timeout=20)
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return 503, None
+
+
+async def get_phone(_: web.Request) -> web.Response:
+    return web.json_response(_phone_view(*await _phone_status()))
+
+
+async def post_phone_start(_: web.Request) -> web.Response:
+    try:
+        # A same-origin write as Wizard UX itself makes it (the Setup API refuses cross-origin writes).
+        status, payload = await shell("POST", "/wizard/v1/setup/phone/start", {}, timeout=30,
+                                      headers={"Origin": PUBLIC_UX_ORIGIN})
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        status, payload = 503, None
+    return web.json_response(_phone_view(status, payload))
+
+
+async def post_phone_open(request: web.Request) -> web.Response:
+    """Open a link in the Mac's browser. Only links the Wizard itself reported, never one from the page."""
+    try:
+        kind = (await request.json()).get("kind")
+    except ValueError:
+        return json_error("Invalid request.")
+    if kind in PHONE_APPS:
+        url = PHONE_APPS[kind]
+    elif kind in ("signin", "https"):
+        status, payload = await _phone_status()
+        url = payload.get("auth_url" if kind == "signin" else "https_enable_url") if status == 200 and isinstance(payload, dict) else None
+    else:
+        return json_error("Unknown link.")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return json_error("That link isn't available right now.", 409)
+    opened = await asyncio.to_thread(open_on_mac, url)
+    return web.json_response({"opened": opened})
+
+
 def build_app() -> web.Application:
     app = web.Application(client_max_size=8 * 1024 * 1024, middlewares=[same_origin_mutations])
     app.add_routes([
@@ -743,6 +824,9 @@ def build_app() -> web.Application:
         web.post("/api/brain/chatgpt/cancel", post_codex_cancel),
         web.post("/api/verify", post_verify),
         web.post("/api/finish", post_finish),
+        web.get("/api/phone", get_phone),
+        web.post("/api/phone/start", post_phone_start),
+        web.post("/api/phone/open", post_phone_open),
         web.post("/api/agent-import", post_agent_import),
         web.post("/api/agent-import/undo", post_agent_import_undo),
         web.get("/api/agent-import", get_agent_import),
