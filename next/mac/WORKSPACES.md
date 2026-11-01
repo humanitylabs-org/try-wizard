@@ -40,10 +40,17 @@ signing or notarisation is included.
 
 ## Acceptance and isolation
 
-**Mac compilation and UI acceptance have not been executed.** Thales was offline
-and SSH timed out during banner exchange when this candidate was prepared. Keep
-the PR draft until the following native checks pass. Linux source/JS tests are
-supporting evidence only, not substitutes for Swift execution or native UI proof.
+The first native run compiled the unsigned app and passed the baseline 7 Swift
+tests, candidate 21 tests (the same 7 plus 14 workspace tests), and a separate
+14-method workspace run. Two-origin acceptance failed before loading a fixture:
+`WizardBrand.image()` trapped because the QA bundle omitted its required PNGs.
+The QA build now copies the same supplied purple/white marks and provenance as
+production; a packaging regression executes the real shell script with a fake
+compiler and compares the copied asset bytes. The runner reports an app exit
+immediately rather than mislabelling a startup crash as a fixture timeout.
+A direct-launch smoke with the missing marks restored received native state and
+served the loopback fixture. This is not a complete switcher acceptance pass.
+Keep the PR draft until the fresh full run and visual inspection below pass.
 
 On Thales, stage the exact pushed revision under the external work root. Check
 free space and `bash ~/wd-heal.sh`, then use the shared durable worker lock/lane.
@@ -94,7 +101,7 @@ snapshot** before accepting the run. These fake pages are not Wizard-skin proof.
 Fast supporting checks (Linux or Mac):
 
 ```sh
-python3 -m unittest discover -s next/mac/Tests -p test_workspaces_source.py -v
+python3 -m unittest discover -s next/mac/Tests -p 'test_workspaces*.py' -v
 python3 next/mac/Tests/test_window_titlebar.py
 bash -n next/mac/tools/build-workspaces-qa.sh next/mac/build.sh
 node --check next/mac/Tests/Workspaces/fixture.cjs

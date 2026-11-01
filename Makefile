@@ -76,6 +76,7 @@ test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-mac-fresh-install-qa.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-self-update-qa.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_cold_boot_wait.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$(ROOT)/next/mac/Tests" -p 'test_workspaces*.py' -v
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-portable-paths.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-configured-endpoints.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-hda-recovery.py"

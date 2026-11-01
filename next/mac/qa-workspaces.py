@@ -45,6 +45,8 @@ def ok(condition, text):
 def wait(fn, timeout=20):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
+        if proc is not None and proc.poll() is not None:
+            raise AssertionError('Native QA app exited with code ' + str(proc.returncode) + '; inspect app log and macOS DiagnosticReports')
         result = fn()
         if result:
             return result
@@ -61,6 +63,8 @@ def ask(suffix, command):
     if command == 'state':
         end = time.monotonic() + 15
         while not target.exists() and time.monotonic() < end:
+            if proc is not None and proc.poll() is not None:
+                break  # wait() reports the real exit instead of a channel timeout.
             time.sleep(.2); qa(command)
     wait(target.exists)
     return target.read_text()
