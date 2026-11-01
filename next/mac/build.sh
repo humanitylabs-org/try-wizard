@@ -57,7 +57,7 @@ $5
 </dict></plist>
 EOF
 }
-plist "$APP/Contents/Info.plist" "Wizard MVP" org.humanitylabs.wizard.mvp Wizard \
+plist "$APP/Contents/Info.plist" "Wizard OS" org.humanitylabs.wizard.mvp Wizard \
   '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
 plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
@@ -143,9 +143,9 @@ du -sh "$APP"
 
 if [[ "${DMG:-1}" == 1 ]]; then
   STAGE=$OUT/obj/dmg; rm -rf "$STAGE"; mkdir -p "$STAGE"
-  ditto "$APP" "$STAGE/Wizard MVP.app"; ln -s /Applications "$STAGE/Applications"
+  ditto "$APP" "$STAGE/Wizard OS.app"; ln -s /Applications "$STAGE/Applications"
   rm -f "$OUT/Wizard-$VER.dmg"
-  hdiutil create -quiet -volname "Wizard" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg"
+  hdiutil create -quiet -volname "Wizard OS" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg"
   shasum -a 256 "$OUT/Wizard-$VER.dmg"; ls -la "$OUT/Wizard-$VER.dmg"
 fi
 echo BUILD_OK

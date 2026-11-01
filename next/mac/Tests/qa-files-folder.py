@@ -16,7 +16,7 @@ def state():
   time.sleep(.1)
  raise AssertionError('native QA state timeout')
 ps=run('ps','-axo','pid=,command=').stdout
-assert not any('Contents/MacOS/Wizard' in l and ('Wizard MVP.app/' in l or str(APP) in l) for l in ps.splitlines()),'Existing MVP app running; preserve it'
+assert not any('Contents/MacOS/Wizard' in l and ('Wizard MVP.app/' in l or 'Wizard OS.app/' in l or str(APP) in l) for l in ps.splitlines()),'Existing MVP app running; preserve it'
 old=run('defaults','export',DOMAIN,'-',check=False);backup=old.stdout if old.returncode==0 else None
 process=None
 try:

@@ -53,6 +53,24 @@ class BrandTests(unittest.TestCase):
         self.assertIn('min(18, 18 * ratio)',(MAC/'Shared/Brand.swift').read_text())
         self.assertIn('next/mac/assets/brand/wizard-icon-1024.png',(ROOT/'macos/build-app.sh').read_text())
 
+    def test_product_name_is_wizard_os(self):
+        # Users see "Wizard OS" in the Dock, Finder, menu bar and DMG. The bundle ID and the
+        # Application Support data folder keep their old names so existing installs and updates keep working.
+        build = (MAC/'build.sh').read_text()
+        self.assertIn('plist "$APP/Contents/Info.plist" "Wizard OS" org.humanitylabs.wizard.mvp Wizard', build)
+        self.assertIn('"$STAGE/Wizard OS.app"', build)
+        self.assertIn('-volname "Wizard OS"', build)
+        self.assertNotIn('"Wizard MVP"', build)
+        self.assertIn('return base.appendingPathComponent("Wizard MVP", isDirectory: true)', (MAC/'Shared/Shared.swift').read_text())
+
+    def test_icon_matches_pwa_on_mac_grid(self):
+        # The Mac icon is the PWA's Void tile on Apple's 824/1024 grid: transparent margin, opaque tile.
+        import zlib
+        data = (ASSETS/'wizard-icon-1024.png').read_bytes()
+        self.assertEqual(struct.unpack('>II', data[16:24]), (1024, 1024))
+        self.assertEqual(data[25], 6)  # RGBA
+        self.assertTrue((MAC/'assets/render-mac-icon.cjs').exists())
+
     def test_guest_onboarding_and_semantic_icon(self):
         static = ROOT/'next/guest/overlay/opt/wizard/setup/static'
         html = (static/'index.html').read_text()
