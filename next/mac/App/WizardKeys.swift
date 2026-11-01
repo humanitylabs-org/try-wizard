@@ -54,15 +54,26 @@ enum WizardBindings {
     }
 
     /// Refetch the Wizard's bindings. The local file is read synchronously so the Mac override always applies.
+    private static var refreshGeneration: UInt64 = 0
+    private static var selectedOrigin: URL?
     static func refresh(origin: URL?) {
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         let local = decode(try? Data(contentsOf: localFile))
+        if selectedOrigin != origin {
+            selectedOrigin = origin
+            apply(merge([defaults, local])) // Never show the previous Wizard's bindings.
+        }
         guard let origin else { apply(merge([defaults, local])); return }
         var req = URLRequest(url: remoteFile(origin), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: req) { data, resp, _ in
             let ok = (resp as? HTTPURLResponse)?.statusCode == 200
             let remote = ok ? decode(data) : []
-            DispatchQueue.main.async { apply(merge([defaults, remote, local])) }
+            DispatchQueue.main.async {
+                guard generation == refreshGeneration else { return }
+                apply(merge([defaults, remote, local]))
+            }
         }.resume()
     }
 
@@ -302,6 +313,12 @@ final class WizardSearch: NSObject, NSTextFieldDelegate, NSTableViewDataSource, 
         filter()
     }
 
+    func workspaceChanged() {
+        panel.orderOut(nil)
+        field.stringValue = ""
+        rebuildCatalog()
+    }
+
     func refreshApps() {
         guard let origin = origin() else { return }
         var req = URLRequest(url: origin.appendingPathComponent("files/api/apps"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
@@ -320,7 +337,10 @@ final class WizardSearch: NSObject, NSTextFieldDelegate, NSTableViewDataSource, 
                 let installed = (a["group"] as? String) == "installed"
                 return SearchItem(title: name, subtitle: installed ? "App" : "Preview", key: nil, open: open)
             }.sorted { ($0.subtitle == "App" ? 0 : 1, $0.title) < ($1.subtitle == "App" ? 0 : 1, $1.title) }
-            DispatchQueue.main.async { self?.rebuildCatalog(apps: items) }
+            DispatchQueue.main.async {
+                guard let self, self.origin() == origin else { return }
+                self.rebuildCatalog(apps: items)
+            }
         }.resume()
     }
 
