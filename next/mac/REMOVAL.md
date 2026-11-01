@@ -30,7 +30,7 @@ reclaimed APFS space.
   store it privately. It does not back up your separately retained Files folder.
 
 The configured **Files folder is never deleted**. The default
-`~/Documents/Wizard Files` is protected too. A Files folder inside, equal to, or
+`~/Documents/Wizard MVP` (the suggested default) is protected too. A Files folder inside, equal to, or
 surrounding the app/data/settings paths is refused, including symlink aliases.
 Move the Files folder somewhere separate and choose it in Wizard first.
 Unreadable Files settings and redirected removal paths are also refused.
