@@ -11,6 +11,10 @@ OUT=${1:?new-output-directory required}
 mkdir -p "$OUT/Wizard Switcher QA.app/Contents/"{MacOS,Frameworks,Resources}
 APP="$OUT/Wizard Switcher QA.app"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# WizardBrand.image() deliberately traps if either required designer asset is
+# missing. App-only QA still constructs the branded overlay and status menu.
+cp assets/brand/wizard-mark-{purple,white}.png "$APP/Contents/Resources/"
+cp assets/brand/provenance.json "$APP/Contents/Resources/WizardBrandProvenance.json"
 set -x
 xcrun swiftc -O -target arm64-apple-macos14.0 -swift-version 5 \
   Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift \
