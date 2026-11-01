@@ -10,6 +10,8 @@ import WebKit
     var admit: (@escaping (Bool) -> Void) -> Void = { $0(true) }
     var freeze: (Bool) -> Void = { _ in }
     var didStartFresh: () -> Void = {}
+    var prepareForDataRemoval: () -> Void = {}
+    private var finalRemovalPlan: WizardRemovalPlan?
     private(set) var busy = false
     private var lease: WizardDiskOwnership?
     private var progress: NSAlert?
@@ -115,21 +117,26 @@ import WebKit
                         // Unregister only this embedded Host. Never terminate a Host process.
                         let service = SMAppService.loginItem(identifier: WizardShared.hostBundleID)
                         if service.status == .enabled || service.status == .requiresApproval { try await service.unregister() }
+                        if plan.removesData { self.prepareForDataRemoval() }
                         try WizardRemoval.execute(plan, isStopped: { !HostControl.isRunning && !HostControl.hasForeignRunner }, backup: backup, effects: Self.effects(dataHome: plan.dataHome))
                         self.lease = nil
-                        if action == .startFresh {
-                            // A running WKWebView can recreate WebKit storage; clear its live store too.
+                        if plan.removesData {
+                            // Also clear the live WK store for Uninstall(delete), not only Start Fresh.
                             let store = WKWebsiteDataStore.default()
                             store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
                                 Task { @MainActor in
-                                    // Keep an external DataHome authoritative for the new install.
-                                    UserDefaults.standard.set(plan.dataHome.path, forKey: "DataHome")
-                                    self.finish(nil); self.didStartFresh()
+                                    if action == .startFresh {
+                                        // Keep only an external DataHome's location for the new install.
+                                        UserDefaults.standard.set(plan.dataHome.path, forKey: "DataHome")
+                                        self.finish(nil); self.didStartFresh()
+                                    } else {
+                                        self.finalRemovalPlan = plan
+                                        self.finish(nil); NSApp.terminate(nil)
+                                    }
                                 }
                             }
                         } else {
-                            self.finish(nil)
-                            NSApp.terminate(nil)
+                            self.finish(nil); NSApp.terminate(nil)
                         }
                     } catch { self.finish(error) }
                     }
@@ -179,6 +186,22 @@ import WebKit
         if let error { fail("\(error.localizedDescription)\n\nThe operation stopped. Some earlier cleanup may already have finished. Your Files folder was not removed. You can retry.") }
     }
     private func fail(_ message: String) { let a = NSAlert(); a.messageText = "Wizard was not removed"; a.informativeText = message; present(a) { _ in } }
+
+    /// Last termination callback: AppKit/Sparkle may have dirtied defaults after the first purge.
+    func willTerminate() {
+        guard let plan = finalRemovalPlan else { return }
+        do {
+            try plan.validate()
+            for id in plan.bundleIDs {
+                let defaults = id == Bundle.main.bundleIdentifier ? UserDefaults.standard : UserDefaults(suiteName: id)!
+                defaults.removePersistentDomain(forName: id)
+                _ = defaults.synchronize()
+            }
+            for entry in plan.inventory where entry.label.hasPrefix("Preferences (") {
+                if FileManager.default.fileExists(atPath: entry.url.path) { try FileManager.default.removeItem(at: entry.url) }
+            }
+        } catch { NSLog("Wizard final preferences cleanup failed: \(error.localizedDescription)") }
+    }
 
     static func effects(dataHome: URL) -> WizardRemovalEffects {
         let fm = FileManager.default

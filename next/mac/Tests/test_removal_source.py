@@ -64,6 +64,13 @@ class RemovalSourceTests(unittest.TestCase):
         self.assertIn('Start Fresh…', self.app)
         self.assertIn('Uninstall Wizard…', self.app)
 
+    def test_live_browser_and_final_preferences_are_cleared(self):
+        self.assertIn('if plan.removesData { self.prepareForDataRemoval() }', self.native)
+        self.assertIn('self.finalRemovalPlan = plan', self.native)
+        self.assertIn('removal?.willTerminate()', self.app)
+        self.assertIn('setFrameAutosaveName("")', self.app)
+        self.assertIn('store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()', self.native)
+
     def test_fixture_runner_does_not_launch_real_app(self):
         script = (ROOT / 'tools/qa-removal-native.sh').read_text()
         self.assertIn('Shared/RemovalContract.swift Tests/RemovalTests.swift', script)

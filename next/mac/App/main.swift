@@ -1558,6 +1558,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.controller.setUpdateFrozen(frozen)
             if frozen { self?.controller.web.stopLoading() }
         }
+        removal.prepareForDataRemoval = { [weak self] in
+            self?.controller.web.stopLoading()
+            self?.controller.web.loadHTMLString("", baseURL: nil)
+            _ = self?.controller.window?.setFrameAutosaveName("")
+        }
         removal.didStartFresh = { [weak self] in
             self?.controller.web.loadHTMLString("", baseURL: nil)
             self?.rebuildWizardMenu(); self?.controller.begin()
@@ -1724,6 +1729,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if CapsLockRemap.active { CapsLockRemap.remove() }
         // Chunks already on disk upload at next launch; flush the current partial chunk now.
         if let s = MeetingRecorder.shared.session { s.me.stop(); s.them?.stop(); MeetingSpool.shared.markDone(s.meetingId) }
+        MainActor.assumeIsolated { removal?.willTerminate() }
     }
 
     @MainActor func buildMenus() {
