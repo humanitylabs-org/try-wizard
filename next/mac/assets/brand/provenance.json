@@ -6,19 +6,19 @@
     "AW-icon-white.png": "66d648382f68615f216adbd557d8223a08e3f768aa94e34a3d89b1519f77e49e"
   },
   "generated_sha256": {
-    "wizard-icon-32.png": "42394dcfec161fc7e12c225b22b2cbe81a791fd8ee162d4a852206c866729d88",
-    "wizard-icon-512.png": "ada1e97aacfa79c3938e58249e1ea84753256b179c4ace5f1bc6e2796595048d",
-    "wizard-icon-192.png": "39c7ed1aab9faa33d85d709877fd5fe7e2829adaa3daf8900804682d33d82da6",
-    "wizard-icon-1024.png": "26a98705172493c1c5773d3150da79f15be1163f560aa8914314065352d96f7b",
+    "wizard-icon-32.png": "bc8a03e026d27415ba12f6482e5b2c920cda035f68096508fe75fd11c1a14700",
+    "wizard-icon-512.png": "8771b378b35c174b291f2596fc93b38b7c882c84e7f815482a784f91cfd47d0a",
+    "wizard-icon-192.png": "d9adae97bac71a40d3eb161cc9cb24516d1c75cfe1787d14aec213c69e786b3c",
+    "wizard-icon-1024.png": "db0f62abd4407347e9a51dca1feb99613510eafe110a0cdb4c59221b9deedc03",
     "wizard-mark-purple.png": "39d00522f07c5e6e07c5caaebbde7921741dbe2a244269c7e214c3990f83caa0",
-    "wizard-icon-256.png": "758347d7497ec6f09e79d53ecb904a88f20ebab802ce1784484106a803f42218",
-    "wizard-icon-128.png": "58f61cd351b157d35047a4aed4d21dcf675719da471fa0e91fcb4733e447276d",
-    "wizard-icon-180.png": "4ac193293c859d291d0a22f43360fdcc096bcc04c648c6f2f55ffdd86515f141",
+    "wizard-icon-256.png": "d4f5fbeaeb22898fe8a1cb44d28e3cee21ade5c4993632c17145a9b2b6728c39",
+    "wizard-icon-128.png": "2b1dd18332b60ccbebc547658c58272a4140feed4caaf050bd3a27f4bcca596a",
+    "wizard-icon-180.png": "8b57624a7f0777571e448f15d5ba3c24b5d5780a00520bb8c3ad65937087818c",
     "wizard.ico": "731ca1251adb7a436d7687b414cdddc2c67aad97b696a05c6ddf371800557bc4",
-    "wizard-icon-16.png": "d723168fbcd85ac1148e1fe7ff86cea57f77501874dd94286bf9fade2ef2b39d",
+    "wizard-icon-16.png": "950a9e6881157c4711192ceac8667e32b4e1a1367098473417d73bfa07cd0a10",
     "wizard-mark-white.png": "05e6cfe39615fa5ca4a04131c94ac9691939cfb428f389565e9ed052e3aac09a",
-    "wizard-icon-64.png": "875e239d1def791de024cade7c83a74ecd32429c553105aa74e6cf400fb3de80",
-    "wizard-icon-48.png": "c2ded2f148fe3f475d7a19b417d0b05daa27f28495289a4d8edfc5fee8d17b18"
+    "wizard-icon-64.png": "952c7ac96b4308f0d2f8886550bc1553d456d8eb548feb8d86b140c58ecb09d7",
+    "wizard-icon-48.png": "146fc02012608ad8a743b0d39222f2d5bc1b730d2c491183f93fd26733088954"
   },
   "transforms": "Transparent hat: crop only transparent padding. Square app icon: downscale supplied AW-icon-sq-purple-white.jpg, preserve composition. ICNS: embed exact generated PNG bytes. Menu bar: use white hat alpha as AppKit template, preserve aspect."
 }

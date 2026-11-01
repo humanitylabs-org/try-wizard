@@ -13,7 +13,7 @@ sign=[a.sign_tool,'--ed-key-file',a.key_file]
 sig=subprocess.check_output([*sign,'-p',str(archive)],text=True).strip()
 ns='http://www.andymatuschak.org/xml-namespaces/sparkle'; wn='https://humanitylabs.co/wizard-updates/v1'
 X.register_namespace('sparkle',ns); X.register_namespace('wizard',wn)
-rss=X.Element('rss',version='2.0'); channel=X.SubElement(rss,'channel'); X.SubElement(channel,'title').text='Wizard MVP staged updates'
+rss=X.Element('rss',version='2.0'); channel=X.SubElement(rss,'channel'); X.SubElement(channel,'title').text='Wizard OS updates'
 item=X.SubElement(channel,'item'); X.SubElement(item,'title').text='Wizard '+d['CFBundleShortVersionString']
 for k,v in [('version',d['CFBundleVersion']),('shortVersionString',d['CFBundleShortVersionString']),('minimumSystemVersion','14.0.0'),('hardwareRequirements','arm64')]: X.SubElement(item,'{'+ns+'}'+k).text=v
 X.SubElement(item,'{'+wn+'}contract').text=json.dumps(manifest,sort_keys=True,separators=(',',':'))

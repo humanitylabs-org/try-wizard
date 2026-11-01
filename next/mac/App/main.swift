@@ -1189,7 +1189,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         let item = folder.standardizedFileURL.path.hasPrefix(documents + "/") ? "Documents Folder" : "this folder"
         showOverlay("Wizard can't use your shared folder",
                     "macOS didn't allow Wizard to open \(path), so Wizard's computer can't start. macOS won't ask again: "
-                    + "open System Settings → Privacy & Security → Files & Folders, turn on \(item) under Wizard MVP, "
+                    + "open System Settings → Privacy & Security → Files & Folders, turn on \(item) under Wizard OS, "
                     + "then click Try Again. Or choose a different folder for your Wizard's files.",
                     spinning: false,
                     actions: [("Try Again", #selector(retry)), ("Open Privacy Settings", #selector(openFilesPrivacy)),
