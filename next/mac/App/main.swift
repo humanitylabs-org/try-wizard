@@ -65,6 +65,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     private var expected: Int64 = 0
     private var lastProgress = Date.distantPast
     private var failure: Error?
+    var isBusy: Bool { busy }
 
     /// A feed names one archive, or the same archive split into ordered parts (each small enough for Cloudflare to
     /// cache at its edge). `sha256` is always the hash of the whole archive; each part also carries its own hash.
@@ -446,6 +447,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
 // MARK: - Wizard Host (back-end service) control
 
 enum HostControl {
+    static var maintenanceInProgress = false
     static var embeddedHostURL: URL {
         Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LoginItems/Wizard Host.app")
     }
@@ -463,7 +465,7 @@ enum HostControl {
 
     /// Internal MVP: start on demand, never register or change daily login services.
     static func ensureRunning() {
-        guard !hasForeignRunner else { NSLog("Wizard: another candidate's Host is running; not launching or controlling it"); return }
+        guard !maintenanceInProgress, !hasForeignRunner else { NSLog("Wizard: maintenance or another candidate Host is active; not launching"); return }
         if !isRunning {
             let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
             cfg.arguments = ["--wizard-data-home", WizardShared.supportDir.path]
@@ -985,6 +987,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: Flow
 
     func begin() {
+        guard !HostControl.maintenanceInProgress else { return }
         clearLocalVoice()
         homeURL = nil; resolvedOrigins = []
         guard let backend = Store.active else { showChooser(); return }
@@ -1462,6 +1465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let statusMenu = WizardStatusMenu()
     let statusActions = WizardStatusActions()
     var backup: WizardBackupController?
+    private var removal: WizardRemovalController?
     var bindingsTimer: Timer?
     var quitDeadline: TimeInterval = 0
     var quitTimer: Timer?
@@ -1542,6 +1546,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         CallDetector.shared.origin = { [weak self] in self?.wizardOrigin }
         CallDetector.shared.install()
 
+        MainActor.assumeIsolated {
+        let removal = WizardRemovalController()
+        removal.window = { [weak self] in self?.controller.window }
+        removal.isBusy = { [weak self] in self?.backup?.isBusy == true || self?.controller.installer.isBusy == true || WizardUpdater.shared.hasPendingWork || MeetingRecorder.shared.isRecording || VoiceKeys.shared.state["mode"] as? String != "idle" }
+        removal.admit = { [weak self] done in
+            guard let self else { done(false); return }
+            if Store.active == nil { done(true) } else { self.controller.admitUpdateRestart(done) }
+        }
+        removal.freeze = { [weak self] frozen in
+            self?.controller.setUpdateFrozen(frozen)
+            if frozen { self?.controller.web.stopLoading() }
+        }
+        removal.didStartFresh = { [weak self] in
+            self?.controller.web.loadHTMLString("", baseURL: nil)
+            self?.rebuildWizardMenu(); self?.controller.begin()
+        }
+        self.removal = removal
+        }
         let vk = VoiceKeys.shared
         vk.origin = { [weak self] in self?.wizardOrigin }
         vk.orb = { [weak self] start in self?.orb(start) }
@@ -1691,6 +1713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if MainActor.assumeIsolated({ removal?.busy == true }) { return .terminateCancel }
         // An ordinary quit must not silently interrupt a backup, restore, undo or switch-over.
         let keepOpen = MainActor.assumeIsolated { backup?.isBusy == true && backup?.confirmQuitWhileBusy() != true }
         if keepOpen { return .terminateCancel }
@@ -1818,6 +1841,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Bring My Hermes into Wizard…", action: #selector(bringHermes), keyEquivalent: "").target = self
+        wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Start Fresh…", action: #selector(startFresh), keyEquivalent: "").target = self
+        wizardsMenu.addItem(withTitle: "Uninstall Wizard…", action: #selector(uninstallWizard), keyEquivalent: "").target = self
     }
 
     // QA hooks (only when `defaults write org.humanitylabs.wizard.mvp QAHooks -bool true`).
@@ -2174,6 +2200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
     /// Backs up the Hermes on this Mac with its own `hermes backup` and makes it the agent in Wizard OS on this Mac
     /// (bundled wizard-bring-hermes posts it to the VM's front door). The Mac's Hermes is left as it is.
+    @objc func uninstallWizard() { MainActor.assumeIsolated { removal?.show(startFresh: false) } }
+    @objc func startFresh() { MainActor.assumeIsolated { removal?.show(startFresh: true) } }
+
     @objc func bringHermes() {
         let alert = NSAlert()
         alert.messageText = "Bring your Hermes into Wizard?"

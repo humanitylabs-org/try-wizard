@@ -23,6 +23,10 @@ Try Wizard is a fork of [Try Omarchy](https://github.com/omacom/try-omarchy) (MI
 
 To update, quit Wizard, drag the new version over the old one (Replace), reopen.
 
+For the native split app, see [Uninstall Wizard / Start Fresh](next/mac/REMOVAL.md),
+including safe manual removal for older builds and the rule that your Files
+folder is never removed.
+
 ## Where things live
 
 | Path | What |

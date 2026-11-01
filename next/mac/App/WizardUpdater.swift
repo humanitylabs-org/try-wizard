@@ -50,7 +50,8 @@ final class NoticeBarView: NSView {
     // The main page owns manual mic/Right Command takes. Unknown activity
     // defers installation; the trusted page freezes new starts atomically.
     var admitWebRestart: (@escaping (Bool) -> Void) -> Void = { done in done(false) }
-    var isPreparing: Bool { preparing || activatingGuest }
+    var isPreparing: Bool { preparing || activatingGuest || HostControl.maintenanceInProgress }
+    var hasPendingWork: Bool { isPreparing || installCycleActive || cancel != nil || ready != nil }
     /// Native recorder callbacks are synchronous. Read the live actor-owned
     /// gate only on the main thread; an unexpected background caller defers.
     nonisolated static var captureStartAllowed: Bool {
