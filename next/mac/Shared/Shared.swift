@@ -65,6 +65,11 @@ enum WizardShared {
            CommandLine.arguments[i + 1].hasPrefix("/") {
             return URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
         }
+        // An isolated app-only QA identity must not fall back to the daily DataHome.
+        if UserDefaults.standard.bool(forKey: "QAHooks"),
+           let p = UserDefaults.standard.string(forKey: "DataHome"), p.hasPrefix("/") {
+            return URL(fileURLWithPath: p, isDirectory: true)
+        }
         // Dedicated internal-test identity; never opens or migrates the daily Wizard VM.
         let defaults = Bundle.main.bundleIdentifier == appBundleID ? UserDefaults.standard : UserDefaults(suiteName: appBundleID)
         if let p = defaults?.string(forKey: "DataHome"), p.hasPrefix("/") {

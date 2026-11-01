@@ -9,27 +9,18 @@ import WebKit
 
 // MARK: - Back-end connections
 
-struct Backend: Codable, Equatable {
-    enum Kind: String, Codable { case thisMac, remote }
-    var kind: Kind
-    var name: String
-    var url: String   // remote: base URL of that computer's Wizard
-}
-
 enum Store {
     static let d = UserDefaults.standard
+    static let workspaces = WorkspaceRegistry(defaults: d)
     static var backends: [Backend] {
-        get { (d.data(forKey: "backends")).flatMap { try? JSONDecoder().decode([Backend].self, from: $0) } ?? [] }
-        set { d.set(try? JSONEncoder().encode(newValue), forKey: "backends") }
+        get { workspaces.backends }
+        set { workspaces.backends = newValue }
     }
     static var activeIndex: Int {
-        get { d.integer(forKey: "activeBackend") }
-        set { d.set(newValue, forKey: "activeBackend") }
+        get { workspaces.activeIndex }
+        set { workspaces.activeIndex = newValue }
     }
-    static var active: Backend? {
-        let b = backends
-        return b.indices.contains(activeIndex) ? b[activeIndex] : b.first
-    }
+    static var active: Backend? { workspaces.active }
     static var osFeedURL: URL {
         // Public download feed on Cloudflare R2 (downloads.aiwizards.com); parts are cached at Cloudflare's edge.
         // Feeds are never repointed under shipped apps: os/latest.json stays frozen at 0.4.0 for 0.7.0 downloads,
@@ -550,7 +541,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let web = message.webView, let body = message.body as? [String: Any],
               let method = body["method"] as? String else { return }
-        let admitted = owner?.web === web && owner?.allowsNative(message.frameInfo) == true
+        let workspaceCall = method.hasPrefix("workspaces.")
+        let admitted = (workspaceCall || owner?.web === web) && owner?.allowsNative(message.frameInfo, in: web) == true
         if UserDefaults.standard.bool(forKey: "QAHooks") {
             qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame,
                                "origin": "\(message.frameInfo.securityOrigin.protocol)://\(message.frameInfo.securityOrigin.host):\(message.frameInfo.securityOrigin.port)",
@@ -578,7 +570,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "null"
             DispatchQueue.main.async {
                 // A navigation while work is in flight must not leak its result.
-                guard self?.owner?.web === web, self?.owner?.isTrustedDocument == true,
+                guard self?.owner?.isTrustedDocument(web) == true,
+                      (workspaceCall || self?.owner?.web === web),
                       web.url.flatMap(NativeOrigin.init) == caller else { return }
                 web.evaluateJavaScript("window.wizardNativeReply && window.wizardNativeReply(\(payload))")
             }
@@ -684,7 +677,19 @@ final class WizardDragView: NSView {
 // MARK: - Window
 
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
-    let web: WKWebView
+    var web: WKWebView
+    let pageContainer = NSView()
+    var pages: [String: WizardPage] = [:]
+    var shownWorkspaceID: String?
+    var pagePolicy = WorkspacePagePolicy()
+    var workspaceStatuses: [String: String] = [:]
+    var workspaceProbeFailures: [String: Int] = [:]
+    var workspaceProbeDue: [String: Date] = [:]
+    var workspaceProbeTasks: [String: URLSessionDataTask] = [:]
+    var workspaceTimer: Timer?
+    var updateFrozen = false
+    var lastWorkspaceSwitchMilliseconds: Double = 0
+    var currentPage: WizardPage? { shownWorkspaceID.flatMap { pages[$0] } }
     let dragView = WizardDragView()
     private var dragMonitor: Any?
     private(set) var qaMedia: [[String: Any]] = []
@@ -694,7 +699,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     let progress = NSProgressIndicator()
     let stack = NSStackView()
     var buttons: [NSButton] = []
-    var loadedAt: Date?
+    var loadedAt: Date? {
+        get { currentPage?.loadedAt }
+        set { currentPage?.loadedAt = newValue }
+    }
     let installer = OSInstaller()
     private let voiceBar = NSView()
     private let voiceLabel = NSTextField(wrappingLabelWithString: "")
@@ -716,14 +724,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     init() {
-        let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = UserDefaults.standard.bool(forKey: "QAHooks") && UserDefaults.standard.bool(forKey: "QAWebStorage") ? .nonPersistent() : .default()
-        cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        cfg.userContentController.add(NativeBridge.shared, name: NativeBridge.name)
-        // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
-        cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        web = WKWebView(frame: .zero, configuration: cfg)
+        web = WizardWindowController.makeWorkspaceWebView()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
@@ -768,7 +769,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                                      voiceLabel.trailingAnchor.constraint(equalTo: voiceRetry.leadingAnchor, constant: -10),
                                      voiceRetry.trailingAnchor.constraint(equalTo: voiceBar.trailingAnchor, constant: -14),
                                      voiceRetry.centerYAnchor.constraint(equalTo: voiceBar.centerYAnchor)])
-        for v in [web, overlay] {
+        for v in [pageContainer, overlay] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
             NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -776,15 +777,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                                          v.topAnchor.constraint(equalTo: updateNotice.bottomAnchor),
                                          v.bottomAnchor.constraint(equalTo: voiceBar.topAnchor)])
         }
+        attachWorkspaceWebView(web)
+        installWorkspaceBridge()
         overlay.wantsLayer = true
         overlay.layer?.backgroundColor = window.backgroundColor.cgColor
         buildOverlay()
         dragView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(dragView)
-        NSLayoutConstraint.activate([dragView.leadingAnchor.constraint(equalTo: web.leadingAnchor),
-                                     dragView.trailingAnchor.constraint(equalTo: web.trailingAnchor),
-                                     dragView.topAnchor.constraint(equalTo: web.topAnchor),
-                                     dragView.bottomAnchor.constraint(equalTo: web.bottomAnchor)])
+        NSLayoutConstraint.activate([dragView.leadingAnchor.constraint(equalTo: pageContainer.leadingAnchor),
+                                     dragView.trailingAnchor.constraint(equalTo: pageContainer.trailingAnchor),
+                                     dragView.topAnchor.constraint(equalTo: pageContainer.topAnchor),
+                                     dragView.bottomAnchor.constraint(equalTo: pageContainer.bottomAnchor)])
         // WKWebView / transparent native chrome can win ordinary view routing.
         // Intercept only this window's authenticated blank header mouseDown;
         // controls, desktop content and other windows retain normal AppKit input.
@@ -797,7 +800,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             return nil
         }
     }
-    deinit { if let dragMonitor { NSEvent.removeMonitor(dragMonitor) } }
+    deinit {
+        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+        workspaceTimer?.invalidate()
+        workspaceProbeTasks.values.forEach { $0.cancel() }
+    }
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildOverlay() {
@@ -881,7 +888,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // The bar belongs to the native window, not onboarding's WK page. It
     // remains monitored after /api/finish redirects into Wizard UX; only
     // preparing/error/recovery states occupy visible layout space.
-    private func clearLocalVoice() {
+    func clearLocalVoice() {
         voiceGeneration = UUID()
         voiceConnectionGeneration = UUID()
         voiceTimer?.invalidate(); voiceTimer = nil
@@ -892,7 +899,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         voiceRetry.isEnabled = false
     }
 
-    private func startLocalVoice() {
+    func startLocalVoice() {
         clearLocalVoice()
         guard Store.active?.kind == .thisMac else { return }
         voiceBar.isHidden = false; voiceHeight.constant = 64
@@ -985,6 +992,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: Flow
 
     func begin() {
+        activateWorkspacePage()
         clearLocalVoice()
         homeURL = nil; resolvedOrigins = []
         guard let backend = Store.active else { showChooser(); return }
@@ -994,16 +1002,25 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard WizardShared.osInstalled else { installOnThisMac(); return }
             guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
             connectLocal()
-        case .remote:
+        case .remote, .company, .managed:
             showOverlay("Connecting…", backend.name, spinning: true)
-            if let url = URL(string: backend.url) { resolveHome(url) { [weak self] home in self?.homeURL = home; self?.load(home) } }
+            if let url = URL(string: backend.url) {
+                let id = backend.id
+                resolveHome(url) { [weak self] home in
+                    guard let self, self.shownWorkspaceID == id else { return }
+                    self.homeURL = home; self.load(home)
+                }
+            }
         }
     }
 
     // MARK: Wizard UX (wizard-ux) and the native bridge (wizard-os spec/NATIVE_BRIDGE.md)
 
     /// Where this window's Wizard lives right now: Wizard UX when the back end serves it, else the address as given.
-    var homeURL: URL?
+    var homeURL: URL? {
+        get { currentPage?.homeURL }
+        set { currentPage?.homeURL = newValue }
+    }
     func loadHome() {
         if let homeURL { load(homeURL); return }
         if let b = Store.active, let u = URL(string: b.url) { load(u) }
@@ -1054,26 +1071,45 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// Freeze admission in the trusted MAIN document in the same JavaScript
     /// turn that reads the voice state. Pending getUserMedia is already listen.
     func admitUpdateRestart(_ done: @escaping (Bool) -> Void) {
-        guard isTrustedDocument, let captured = web.url else { done(false); return }
-        let setup = Store.active?.kind == .thisMac && NativeOrigin(captured) == NativeOrigin(WizardShared.localSetupURL)
-        let js = """
-        (() => {
-          const state = window.__wux?.voice ?? window.__wos?.voice;
-          const shared = window.WizAppCapture?.getState?.();
-          const knownIdle = state === 'idle' || (\(setup ? "true" : "false") && state == null);
-          if (!knownIdle || shared?.active || shared?.recording || shared?.hold) return false;
-          window.__wizardUpdateFrozen = true;
-          return true;
-        })()
-        """
-        web.evaluateJavaScript(js) { [weak self] value, error in
-            guard let self, error == nil, self.isTrustedDocument, self.web.url == captured else { done(false); return }
-            done(value as? Bool == true)
+        // Remote Wizards keep running: only pages backed by this Mac's VM
+        // participate in its shutdown admission, including hidden local pages.
+        let local = pages.values.filter { $0.backend.kind == .thisMac }
+        if local.isEmpty { done(Store.active?.kind != .thisMac); return }
+        guard local.allSatisfy({ isTrustedDocument($0.web) && $0.web.url != nil }) else { done(false); return }
+        var remaining = local.count
+        var idle = true
+        for page in local {
+            let view = page.web
+            guard isTrustedDocument(view), let captured = view.url else {
+                setUpdateFrozen(false); done(false); return
+            }
+            let setup = NativeOrigin(captured) == NativeOrigin(WizardShared.localSetupURL)
+            let js = """
+            (() => {
+              const state = window.__wux?.voice ?? window.__wos?.voice;
+              const shared = window.WizAppCapture?.getState?.();
+              const knownIdle = state === 'idle' || (\(setup ? "true" : "false") && state == null);
+              if (!knownIdle || shared?.active || shared?.recording || shared?.hold) return false;
+              window.__wizardUpdateFrozen = true;
+              return true;
+            })()
+            """
+            view.evaluateJavaScript(js) { [weak self] value, error in
+                guard let self else { done(false); return }
+                idle = idle && error == nil && self.isTrustedDocument(view) && view.url == captured && value as? Bool == true
+                remaining -= 1
+                if remaining == 0 {
+                    if !idle { self.setUpdateFrozen(false) }
+                    done(idle)
+                }
+            }
         }
     }
     func setUpdateFrozen(_ frozen: Bool) {
-        guard isTrustedDocument else { return }
-        web.evaluateJavaScript("window.__wizardUpdateFrozen = \(frozen ? "true" : "false")")
+        updateFrozen = frozen
+        for page in pages.values where page.backend.kind == .thisMac && isTrustedDocument(page.web) {
+            page.web.evaluateJavaScript("window.__wizardUpdateFrozen = \(frozen ? "true" : "false")")
+        }
     }
 
     /// Is the page in the window Wizard UX (bridge ready)?
@@ -1094,13 +1130,14 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     @objc func chooseThisMac() {
-        var list = Store.backends.filter { $0.kind != .thisMac }
-        list.insert(Backend(kind: .thisMac, name: "This Mac", url: WizardShared.localSetupURL.absoluteString), at: 0)
-        Store.backends = list; Store.activeIndex = 0
-        begin()
+        guard !updateFrozen, !WizardUpdater.shared.isPreparing else { return }
+        let id = Store.workspaces.add(Backend(kind: .thisMac, name: "Wizard on this Mac", url: WizardShared.localSetupURL.absoluteString))
+        try? switchWorkspace(id)
+        workspacesChanged()
     }
 
     @objc func chooseRemote() {
+        guard !updateFrozen, !WizardUpdater.shared.isPreparing else { return }
         let alert = NSAlert()
         alert.messageText = "Connect to a Wizard on another computer"
         alert.informativeText = "Paste the address of that computer's Wizard (for example https://wizard.your-tailnet.ts.net or http://192.168.1.20:8923)."
@@ -1116,11 +1153,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             showOverlay("That address doesn't look right", text, spinning: false,
                         actions: [("Try again", #selector(chooseRemote)), ("Back", #selector(backToChooser))]); return
         }
-        var list = Store.backends.filter { $0.url != url.absoluteString }
-        list.append(Backend(kind: .remote, name: host, url: url.absoluteString))
-        Store.backends = list; Store.activeIndex = list.count - 1
-        (NSApp.delegate as? AppDelegate)?.rebuildWizardMenu()
-        begin()
+        let id = Store.workspaces.add(Backend(kind: .remote, name: host, url: url.absoluteString))
+        try? switchWorkspace(id)
+        workspacesChanged()
     }
 
     /// First run on this Mac: where the Wizard keeps its files. The folder is shared into Wizard OS (virtio-fs) as the
@@ -1209,10 +1244,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func installOnThisMac() {
         showOverlay("Setting up Wizard on this Mac", "Downloading Wizard OS, a small Linux computer just for your Wizard. This happens once.", progress: nil)
         installer.onProgress = { [weak self] msg, p in
+            guard Store.active?.kind == .thisMac else { return }
             self?.showOverlay("Setting up Wizard on this Mac", msg, progress: p)
         }
         installer.onDone = { [weak self] err in
-            guard let self else { return }
+            guard let self, Store.active?.kind == .thisMac else { return }
             if let err {
                 // A bad picked file says so; an unreachable feed just shows the manual download steps.
                 if err.localizedDescription.contains("free space") {
@@ -1271,6 +1307,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func connectLocal() {
+        guard Store.active?.kind == .thisMac else { return }
         startLocalVoice()
         let generation = voiceConnectionGeneration
         let started = Date()
@@ -1304,6 +1341,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func load(_ url: URL) {
+        activateWorkspacePage()
         dragView.header = .zero; dragView.controls = []
         loadedAt = nil
         web.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
@@ -1313,13 +1351,21 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     var onNavigate: () -> Void = {}
     /// Origins already checked for Wizard UX this session (so a legacy-only back end isn't probed on every load).
-    var resolvedOrigins: Set<String> = []
+    var resolvedOrigins: Set<String> {
+        get { currentPage?.resolvedOrigins ?? [] }
+        set { currentPage?.resolvedOrigins = newValue }
+    }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        page(for: webView)?.loadedAt = nil
+        guard webView === web else { return }
         dragView.header = .zero; dragView.controls = []
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        page(for: webView)?.loadedAt = Date()
+        workspacesChanged()
+        guard webView === web else { return }
         if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
         // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
         if isTrustedDocument, homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
@@ -1327,7 +1373,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             if !resolvedOrigins.contains(key) {
                 resolvedOrigins.insert(key)
                 resolveHome(u) { [weak self] home in
-                    guard let self, home != u else { return }
+                    guard let self, self.web === webView, home != u else { return }
                     self.homeURL = home; self.load(home)
                 }
             }
@@ -1339,9 +1385,17 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard webView === web else { return }
         loadFailed(error)
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { loadFailed(error) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard webView === web else { return }
+        loadFailed(error)
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        page(for: webView)?.loadedAt = nil
+        if webView === web { begin() }
+    }
 
     private var localRetries = 0
 
@@ -1350,7 +1404,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // Wizard OS on this Mac may still be bringing a service up: retry quietly before showing an error.
         if Store.active?.kind == .thisMac, localRetries < 12 {
             localRetries += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardShared.localSetupURL) }
+            let destination = shownWorkspaceID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, self.shownWorkspaceID == destination else { return }
+                self.load(WizardShared.localSetupURL)
+            }
             return
         }
         localRetries = 0
@@ -1365,8 +1423,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // App-origin iframe navigation is not native authority. Preserve Files /
         // installed-app links in their managed frame without whitelisting the
         // same origin for script controls or silent device permission.
-        let managedAppLink = action.targetFrame?.isMainFrame == false && Store.active?.kind == .thisMac && NativeOrigin(url)?.isInstalledApp == true
-        if action.targetFrame == nil || (action.navigationType == .linkActivated && !isWizardOrigin(url) && !managedAppLink) {
+        let backend = page(for: webView)?.backend
+        let managedAppLink = action.targetFrame?.isMainFrame == false && backend?.kind == .thisMac && NativeOrigin(url)?.isInstalledApp == true
+        let wizardOrigin = NativeOrigin(url).map { origin in backend.map { controlOrigins(for: $0).contains(origin) } ?? false } ?? false
+        if action.targetFrame == nil || (action.navigationType == .linkActivated && !wizardOrigin && !managedAppLink) {
             if ["http", "https", "mailto"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
             decisionHandler(.cancel); return
         }
@@ -1389,7 +1449,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        let allowed = allowsNative(frame) && NativeOrigin(origin) == NativeOrigin(frame.securityOrigin)
+        let allowed = webView === web && allowsNative(frame, in: webView) && NativeOrigin(origin) == NativeOrigin(frame.securityOrigin)
         if UserDefaults.standard.bool(forKey: "QAHooks") {
             qaMedia.append(["mainFrame": frame.isMainFrame, "origin": "\(origin.protocol)://\(origin.host):\(origin.port)",
                             "granted": allowed, "type": type.rawValue])
@@ -1400,7 +1460,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     private var selectedControlOrigins: Set<NativeOrigin> {
-        guard let backend = Store.active else { return [] }
+        guard let backend = currentPage?.backend ?? Store.active else { return [] }
         let urls: [URL]
         if backend.kind == .thisMac {
             if UserDefaults.standard.bool(forKey: "QAHooks"), let qa = qaVoiceOrigin {
@@ -1494,7 +1554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         WizardUpdater.shared.onFreeze = { [weak self] frozen in
             self?.controller.setUpdateFrozen(frozen)
-            self?.controller.web.isHidden = frozen
+            self?.controller.web.isHidden = frozen && Store.active?.kind == .thisMac
         }
         WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
         WizardUpdater.shared.onActivationStatus = { [weak self] text, failed in
@@ -1576,6 +1636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showMainWindow()
         _ = start
         // One toggle: recording → finish and send; idle → start voice (opening a new thread if no chat is open).
+        let workspaceID = controller.shownWorkspaceID
         let legacy = "(() => { const f = document.querySelector('button.voice-fab'); const l = f ? (f.getAttribute('aria-label')||'') : ''; if (f && /Finish and send/.test(l)) { f.click(); return 'sent'; } if (/Opening microphone|Transcribing/.test(l)) return 'busy'; if (f && !f.disabled && /Start voice/.test(l)) { f.click(); return 'voice'; } const n = document.querySelector('button.new-thread-fab'); if (n) { n.click(); return 'new'; } return 'none'; })()"
         var tries = 0
         func retry() {
@@ -1587,8 +1648,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: attempt)
         }
         func attempt() {
+            guard controller.shownWorkspaceID == workspaceID else { return }
             controller.uxSend("wizard:orb", ["action": "toggle"]) { [weak self] state in
-                guard let self else { return }
+                guard let self, self.controller.shownWorkspaceID == workspaceID else { return }
                 // Wizard UX answered (voice / sent / busy / none): it owns the outcome.
                 if let state { MeetingLog.log("orb (bridge): \(state)"); return }
                 guard self.controller.isTrustedDocument else { retry(); return }
@@ -1669,8 +1731,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               url.host == origin.host else { return }
         showMainWindow()
         // Wizard UX opens it as a window on its desktop; anything else navigates the page.
+        let destination = controller.shownWorkspaceID
         controller.uxSend("wizard:open", ["path": path]) { [weak self] r in
-            if r == nil { self?.controller.load(url) }
+            guard let self, self.controller.shownWorkspaceID == destination else { return }
+            if r == nil { self.controller.load(url) }
         }
     }
 
@@ -1810,6 +1874,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             wizardsMenu.addItem(item)
         }
         if !Store.backends.isEmpty { wizardsMenu.addItem(.separator()) }
+        if Store.active != nil {
+            wizardsMenu.addItem(withTitle: "Rename This Wizard…", action: #selector(renameBackend), keyEquivalent: "").target = self
+        }
         wizardsMenu.addItem(withTitle: "Run Wizard on This Mac", action: #selector(addThisMac), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Connect to Another Computer…", action: #selector(addRemote), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Install Wizard OS from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
@@ -1864,10 +1931,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             controller.showOverlay("Setting up Wizard on this Mac", "Checking \(urls.first?.lastPathComponent ?? "")…", progress: nil)
             controller.installer.install(from: urls)
         case "connect":
-            var list = Store.backends.filter { $0.url != arg }
-            list.append(Backend(kind: .remote, name: URL(string: arg)?.host ?? arg, url: arg))
-            Store.backends = list; Store.activeIndex = list.count - 1; rebuildWizardMenu(); controller.begin()
-        case "switch": Store.activeIndex = Int(arg) ?? 0; rebuildWizardMenu(); controller.begin()
+            let id = Store.workspaces.add(Backend(kind: .remote, name: URL(string: arg)?.host ?? arg, url: arg))
+            try? controller.switchWorkspace(id)
+        case "switch":
+            let index = Int(arg) ?? 0
+            if Store.backends.indices.contains(index) { try? controller.switchWorkspace(Store.backends[index].id) }
+        case "workspace-state":
+            var snapshot = controller.workspaceSnapshot
+            snapshot["switchMilliseconds"] = controller.lastWorkspaceSwitchMilliseconds
+            snapshot["pages"] = controller.pages.values.map { page -> [String: Any] in
+                ["id": page.backend.id, "visible": !page.web.isHidden, "trusted": controller.isTrustedDocument(page.web),
+                 "url": page.web.url?.absoluteString ?? "", "loadedAt": page.loadedAt?.timeIntervalSince1970 ?? 0]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: snapshot, options: .prettyPrinted) {
+                try? data.write(to: URL(fileURLWithPath: "/tmp/wizard-mvp-qa-workspaces.json"))
+            }
+        case "workspace-eval":
+            let parts = arg.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let page = controller.pages[parts[0]] else { return }
+            page.web.evaluateJavaScript(parts[1]) { r, e in
+                let s = e.map { "ERROR \($0)" } ?? String(describing: r ?? "nil")
+                try? s.write(toFile: "/tmp/wizard-mvp-qa-eval.txt", atomically: true, encoding: .utf8)
+            }
+        case "workspace-dictation": controller.uxSend("wizard:dictation", ["text": arg]) { _ in }
+        case "workspace-orb": orb(true)
         case "eval":
             controller.web.evaluateJavaScript(arg) { r, e in
                 let s = e.map { "ERROR \($0)" } ?? String(describing: r ?? "nil")
@@ -2163,12 +2250,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func reload() { controller.begin() }
-    @objc func switchBackend(_ sender: NSMenuItem) { Store.activeIndex = sender.tag; rebuildWizardMenu(); controller.begin() }
+    @objc func switchBackend(_ sender: NSMenuItem) {
+        guard Store.backends.indices.contains(sender.tag) else { return }
+        try? controller.switchWorkspace(Store.backends[sender.tag].id)
+    }
     @objc func installFromFile() {
-        var list = Store.backends.filter { $0.kind != .thisMac }
-        list.insert(Backend(kind: .thisMac, name: "This Mac", url: WizardShared.localSetupURL.absoluteString), at: 0)
-        Store.backends = list; Store.activeIndex = 0; rebuildWizardMenu()
+        _ = Store.workspaces.add(Backend(kind: .thisMac, name: "Wizard on this Mac", url: WizardShared.localSetupURL.absoluteString))
+        controller.activateWorkspacePage(); controller.workspacesChanged()
         controller.chooseOSFile()
+    }
+    @objc func renameBackend() {
+        guard let backend = Store.active else { return }
+        let alert = NSAlert(); alert.messageText = "Rename this Wizard"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24)); field.stringValue = backend.name
+        alert.accessoryView = field; alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do { try Store.workspaces.rename(backend.id, to: field.stringValue); controller.workspacesChanged() }
+        catch { let errorAlert = NSAlert(error: error); errorAlert.runModal() }
     }
     @objc func addThisMac() { controller.chooseThisMac(); rebuildWizardMenu() }
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
