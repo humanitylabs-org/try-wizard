@@ -42,6 +42,24 @@ def phone_access(svc):
  groups=[str(g) for g in svc.get('group_add') or []]
  if PHONE_GID not in groups:groups.append(PHONE_GID)
  svc['group_add']=groups
+def phone_setup(svc,runner=None):
+ """Install the phone-access helper, then wire the Service to it. Phone access is optional: if the helper cannot be
+ installed (e.g. gid 980 taken), the runtime still provisions, the Service gets no tailnet listener or socket mount,
+ and the result says phone_enrollment unavailable."""
+ # Reconcile our previous overlay before probing: an upgrade can reuse a successfully provisioned Service.
+ # Remove only phone-owned wiring; retain all unrelated owner environment, ports, mounts and groups.
+ env=svc.get('environment',{})
+ for key in ('WIZARD_TAILNET_PORT','WIZARD_PRIVATE_ACCESS_SOCKET'):env.pop(key,None)
+ for key,value in [('ports','127.0.0.1:'+PHONE_UPSTREAM+':'+PHONE_TAILNET_PORT),
+                   ('volumes',PHONE_SOCKET_DIR+':'+PHONE_SOCKET_DIR)]:
+  if key in svc:svc[key]=[item for item in (svc[key] or []) if item!=value]
+ if 'group_add' in svc:svc['group_add']=[g for g in svc['group_add'] or [] if str(g)!=PHONE_GID]
+ runner=runner or run
+ try:phone=json.loads(runner(['/opt/wizard/bin/wizard-phone-access']))
+ except (subprocess.CalledProcessError,OSError,ValueError) as e:
+  print('wizard-runtime-configure: phone access unavailable: '+str(e),file=sys.stderr);return {'phone_access':'unavailable'}
+ if not isinstance(phone,dict) or phone.get('phone_access')!='ready':return {'phone_access':'unavailable'}
+ phone_access(svc);return phone
 def write(path,text,mode=0o644):
  path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.runtime-new');tmp.write_text(text);os.chmod(tmp,mode);tmp.replace(path)
 def main():
@@ -83,8 +101,7 @@ def main():
  for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
   if mount not in volumes:volumes.append(mount)
  # The helper and its socket group exist before the Service starts with group_add/socket mount.
- phone=json.loads(run(['/opt/wizard/bin/wizard-phone-access']))
- phone_access(svc)
+ phone=phone_setup(svc)
  with CONF.open('w') as f:
   f.write('# Written by wam; extended by Wizard Mac runtime provisioning\n')
   yaml.safe_dump(doc,f,sort_keys=False)

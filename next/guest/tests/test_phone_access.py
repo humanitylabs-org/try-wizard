@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phone access wiring for the Mac guest (wizard-agent-service docs/phone-setup.md), checked without a VM."""
-import ast, copy, pathlib, re, subprocess, unittest
+import ast, copy, json, pathlib, re, subprocess, sys, unittest
 
 GUEST = pathlib.Path(__file__).parents[1]
 CONFIGURE = GUEST / 'overlay/opt/wizard/bin/wizard-runtime-configure'
@@ -13,8 +13,8 @@ def configure_namespace():
     """The production phone_access() and its constants, lifted out of wizard-runtime-configure."""
     tree = ast.parse(CONFIGURE.read_text())
     keep = [n for n in tree.body if (isinstance(n, ast.Assign) and any(getattr(t, 'id', '').startswith('PHONE_') for t in n.targets))
-            or (isinstance(n, ast.FunctionDef) and n.name == 'phone_access')]
-    namespace = {}
+            or (isinstance(n, ast.FunctionDef) and n.name in ('phone_access', 'phone_setup'))]
+    namespace = {'json': json, 'subprocess': subprocess, 'sys': sys, 'run': None}
     exec(compile(ast.Module(body=keep, type_ignores=[]), str(CONFIGURE), 'exec'), namespace)
     return namespace
 
@@ -55,6 +55,70 @@ class PhoneAccess(unittest.TestCase):
         once = copy.deepcopy(self.svc)
         self.ns['phone_access'](self.svc)
         self.assertEqual(self.svc, once)
+
+    def test_helper_failure_leaves_the_runtime_provisionable(self):
+        # A failed helper install (e.g. gid 980 taken) must not stop runtime provisioning, and the Service must not be
+        # given a socket mount, socket group or tailnet listener that does not exist.
+        before = copy.deepcopy(self.svc)
+        def failing(args):
+            raise subprocess.CalledProcessError(1, args)
+        for runner in (failing, lambda args: 'not json', lambda args: '{"phone_access":"blocked"}'):
+            result = self.ns['phone_setup'](self.svc, runner)
+            self.assertEqual(result, {'phone_access': 'unavailable'})
+            self.assertEqual(self.svc, before)
+
+    def test_non_object_helper_json_is_unavailable(self):
+        for output in ('null', '[]', '"ready"', 'true', '0'):
+            with self.subTest(output=output):
+                svc = copy.deepcopy(self.svc)
+                result = self.ns['phone_setup'](svc, lambda args: output)
+                self.assertEqual(result, {'phone_access': 'unavailable'})
+                self.assertEqual(svc, self.svc)
+
+    def test_repeated_provisioning_failure_removes_only_phone_wiring(self):
+        def failed_install(args):
+            raise subprocess.CalledProcessError(1, args)
+        def missing_helper(args):
+            raise FileNotFoundError(args[0])
+        for runner in (failed_install, missing_helper, lambda args: 'not json',
+                       lambda args: '{"phone_access":"blocked"}', lambda args: 'null',
+                       lambda args: '[]', lambda args: '"ready"'):
+            with self.subTest(runner=runner):
+                svc = copy.deepcopy(self.svc)
+                svc['environment']['OWNER_SETTING'] = 'preserved'
+                svc['group_add'] = ['1001', 'owner-group']
+                svc['labels'] = {'owner.label': 'preserved'}
+                svc['volumes'].append('/owner:/owner:ro')
+                svc['ports'].append('127.0.0.1:9000:9000')
+                before = copy.deepcopy(svc)
+                ready = self.ns['phone_setup'](svc, lambda args: '{"phone_access":"ready"}')
+                self.assertEqual(ready['phone_access'], 'ready')
+                self.assertIn('980', svc['group_add'])
+                # A persisted YAML overlay can contain numeric or string gids.
+                svc['group_add'][-1] = 980
+                result = self.ns['phone_setup'](svc, runner)
+                self.assertEqual(result, {'phone_access': 'unavailable'})
+                self.assertEqual(svc, before)
+                # Failure is idempotent, and a subsequent healthy install can recover.
+                self.assertEqual(self.ns['phone_setup'](svc, runner), result)
+                self.assertEqual(svc, before)
+                self.ns['phone_setup'](svc, lambda args: '{"phone_access":"ready"}')
+                self.assertIn('127.0.0.1:8809:8789', svc['ports'])
+                self.assertIn('/run/wizard-private-access:/run/wizard-private-access', svc['volumes'])
+                self.assertIn('980', svc['group_add'])
+
+    def test_null_ports_degrades_without_aborting(self):
+        svc = copy.deepcopy(self.svc)
+        svc['ports'] = None
+        result = self.ns['phone_setup'](svc, lambda args: '{"phone_access":"blocked"}')
+        self.assertEqual(result, {'phone_access': 'unavailable'})
+        self.assertEqual(svc['ports'], [])
+
+    def test_ready_helper_wires_the_service(self):
+        result = self.ns['phone_setup'](self.svc, lambda args: '{"phone_access":"ready","socket_gid":980}')
+        self.assertEqual(result['phone_access'], 'ready')
+        self.assertIn('127.0.0.1:8809:8789', self.svc['ports'])
+        self.assertEqual(self.svc['group_add'], ['980'])
 
     def test_installer_and_overlay_agree(self):
         self.assertEqual(shell_value('UPSTREAM'), self.ns['PHONE_UPSTREAM'])

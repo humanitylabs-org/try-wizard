@@ -722,6 +722,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                               backing: .buffered, defer: false)
         window.title = "Wizard"
         window.titlebarAppearsTransparent = true
+        // Wizard's own top bar is the title bar. A visible system title draws "Wizard" after the window buttons,
+        // on top of the bar's Home button; hidden, it still names the window in Mission Control and the Window menu.
+        window.titleVisibility = .hidden
         window.minSize = NSSize(width: 380, height: 560)
         window.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.06, blue: 0.08, alpha: 1)
         window.appearance = NSAppearance(named: .darkAqua)
