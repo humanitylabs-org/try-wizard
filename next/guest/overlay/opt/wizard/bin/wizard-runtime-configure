@@ -24,6 +24,32 @@ def token(path):
  else:
   with os.fdopen(fd,'w') as f:f.write(secrets.token_urlsafe(48)+'\n')
  os.chown(path,1000,1000);os.chmod(path,0o600)
+# Phone access (wizard-agent-service docs/phone-setup.md). Same values as bin/wizard-phone-access.
+PHONE_TAILNET_PORT='8789'   # the Service's tailnet listener inside the container (owner check always on)
+PHONE_UPSTREAM='8809'       # host loopback port Tailscale Serve forwards to (the helper's serve_upstream)
+PHONE_GID='980'             # dedicated helper-socket group wizard-access
+PHONE_SOCKET_DIR='/run/wizard-private-access'
+def phone_access(svc):
+ """Add the Service's tailnet listener and the helper socket to the wizard-shell overlay. The main port and its
+ owner path are untouched; the listener is published on loopback only, and nothing here sets an identity."""
+ svc.setdefault('environment',{}).update({'WIZARD_TAILNET_PORT':PHONE_TAILNET_PORT,'WIZARD_PRIVATE_ACCESS_SOCKET':PHONE_SOCKET_DIR+'/sock'})
+ ports=svc.setdefault('ports',[]);port='127.0.0.1:'+PHONE_UPSTREAM+':'+PHONE_TAILNET_PORT
+ if port not in ports:ports.append(port)
+ volumes=svc.setdefault('volumes',[]);mount=PHONE_SOCKET_DIR+':'+PHONE_SOCKET_DIR
+ if mount not in volumes:volumes.append(mount)
+ groups=[str(g) for g in svc.get('group_add') or []]
+ if PHONE_GID not in groups:groups.append(PHONE_GID)
+ svc['group_add']=groups
+def phone_setup(svc,runner=None):
+ """Install the phone-access helper, then wire the Service to it. Phone access is optional: if the helper cannot be
+ installed (e.g. gid 980 taken), the runtime still provisions, the Service gets no tailnet listener or socket mount,
+ and the result says phone_enrollment unavailable."""
+ runner=runner or run
+ try:phone=json.loads(runner(['/opt/wizard/bin/wizard-phone-access']))
+ except (subprocess.CalledProcessError,OSError,ValueError) as e:
+  print('wizard-runtime-configure: phone access unavailable: '+str(e),file=sys.stderr);return {'phone_access':'unavailable'}
+ if phone.get('phone_access')!='ready':return {'phone_access':'unavailable'}
+ phone_access(svc);return phone
 def write(path,text,mode=0o644):
  path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.runtime-new');tmp.write_text(text);os.chmod(tmp,mode);tmp.replace(path)
 def main():
@@ -64,6 +90,8 @@ def main():
   if mount not in volumes:volumes.append(mount)
  for mount in [str(OS/'agents')+':/wizard-agents',str(OS/'runtime-secrets')+':/wizard-runtime:ro']:
   if mount not in volumes:volumes.append(mount)
+ # The helper and its socket group exist before the Service starts with group_add/socket mount.
+ phone=phone_setup(svc)
  with CONF.open('w') as f:
   f.write('# Written by wam; extended by Wizard Mac runtime provisioning\n')
   yaml.safe_dump(doc,f,sort_keys=False)
@@ -103,5 +131,5 @@ http { access_log off;
  subprocess.run(['systemctl','daemon-reload'],check=True)
  subprocess.run(['systemctl','enable','--now','wizard-runtime-secrets','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
  subprocess.run(['systemctl','restart','wizard-agent-runtime','wizard-runtime-proxy'],check=True)
- print(json.dumps({'runtime_provisioned':True,'engine_image':image,'architecture':meta['Architecture'],'runtime_bind':'127.0.0.1:7795','bridge':gateway,'credentials':'recipient-generated-preserved','phone_enrollment':'not-activated','builder':'separate-owner-deferred'}))
+ print(json.dumps({'runtime_provisioned':True,'engine_image':image,'architecture':meta['Architecture'],'runtime_bind':'127.0.0.1:7795','bridge':gateway,'credentials':'recipient-generated-preserved','phone_enrollment':'owner-setup' if phone.get('phone_access')=='ready' else 'unavailable','builder':'separate-owner-deferred'}))
 if __name__=='__main__':main()

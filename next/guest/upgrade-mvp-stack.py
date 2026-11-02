@@ -87,7 +87,9 @@ for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.
             # server.py loads the backup front door from its own folder; without it the front door doesn't start.
             'setup/backup_frontdoor.py',
             'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png','setup/static/vendor',
-            'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot'):
+            'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot',
+            # Phone access: the private-access helper (wizard-agent-service ops/private-access) and its installer.
+            'private-access','bin/wizard-phone-access'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
  if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server','setup/backup_frontdoor')): continue
  if src.is_dir(): install_public_package(src,dst)
@@ -96,7 +98,7 @@ for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.
   shutil.copy2(src,dst)
   os.chmod(dst,0o755 if src.stat().st_mode & 0o111 else 0o644)
 install_public_package(a.payload/'agent-runtime',Path('/opt/wizard/agent-runtime'))
-for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure','wizard-media','wizard-ux-bridge','wizard-env','wizard-firstboot'):
+for tool in ('wizard-product-configure','wizard-import-hermes','wizard-agent-ssh-migrate','wizard-apps','wizard-runtime-configure','wizard-media','wizard-ux-bridge','wizard-env','wizard-firstboot','wizard-phone-access'):
  if Path('/opt/wizard/bin',tool).is_file(): os.chmod(Path('/opt/wizard/bin',tool),0o755)
 subprocess.run(['/opt/wizard/bin/wizard-product-configure'],check=True)
 subprocess.run(['docker','load','-i',str(a.payload/'wizard-shell.tar')],check=True,stdout=subprocess.DEVNULL)
