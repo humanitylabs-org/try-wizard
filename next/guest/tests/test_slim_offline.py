@@ -131,6 +131,17 @@ class OfflineSlimTests(unittest.TestCase):
             other = root / 'other.xz'
             self.archive(other, [('unknown', b'bad')])
             bad_cases.append(lzma.compress(unpacked + lzma.decompress(other.read_bytes())))
+            # Valid XZ, complete member data ending in zero blocks, no tar EOF.
+            # Trailer-byte checks alone must not mistake file data for EOF.
+            plain = io.BytesIO()
+            with tarfile.open(fileobj=plain, mode='w') as tar:
+                for name, value in [('manifest.json', b'{}'), ('boot/vmlinux', b'kernel'),
+                                    ('boot/initrd', b'initrd'), ('rootfs.img', bytes(8192))]:
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(value)
+                    tar.addfile(entry, io.BytesIO(value))
+                end_of_data = tar.offset
+            bad_cases.append(lzma.compress(plain.getvalue()[:end_of_data]))
             for index, value in enumerate(bad_cases):
                 with self.subTest(index=index):
                     archive.write_bytes(value)

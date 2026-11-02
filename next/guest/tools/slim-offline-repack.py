@@ -81,7 +81,7 @@ def archive_members(archive, extras=('bom.json',)):
     checked_xz(archive)
     rows, seen = {}, set()
     argv = [*gnu_tar_args(archive), '--list', '--verbose', '--numeric-owner',
-            '--full-time', '--utc', '--ignore-zeros']
+            '--full-time', '--utc', '--ignore-zeros', '--warning=all']
     with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=tar_env()) as proc:
         try:
             for _ in range(17):
