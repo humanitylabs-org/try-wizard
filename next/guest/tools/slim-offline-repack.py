@@ -12,10 +12,13 @@ import json
 import lzma
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import stat
 import subprocess
+import tempfile
+import threading
 import urllib.parse
 
 GIB = 1024 ** 3
@@ -53,19 +56,72 @@ def tar_env():
     return {**os.environ, 'TAR_OPTIONS': '', 'LC_ALL': 'C', 'TZ': 'UTC'}
 
 
-def checked_xz(archive):
-    """Consume through the XZ checksum/footer; tar may stop before that footer.
+def tar_eof_offset(archive):
+    """Ask GNU tar for the first NUL *header*, not zeros inside member data.
 
-    Bound the expanded physical archive, and require complete tar end markers.
+    GNU tar 1.35 src/list.c read_and emits this --block-number record only
+    for HEADER_ZERO_BLOCK, after sparse-aware skip_member. Do not use
+    --ignore-zeros here: the separate allowlisted catalogue retains that scan.
+    This avoids a second, subtly different PAX/old-GNU sparse interpreter.
+    """
+    offset = None
+    argv = [*gnu_tar_args(archive), '--list', '--verbose', '--block-number', '--warning=all']
+    # A warning-heavy PAX header must not fill an unread stderr pipe. The
+    # deadline also covers readline, not only wait after stdout has closed.
+    with tempfile.TemporaryFile() as error, subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=error, env=tar_env(), start_new_session=True) as proc:
+        def kill_scan():
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        deadline = threading.Timer(3600, kill_scan)
+        deadline.daemon = True
+        deadline.start()
+        try:
+            # Existing catalogue admits fewer than 17 entries. Leave space for
+            # its first NUL marker AND the read that observes stdout EOF.
+            for _ in range(19):
+                line = proc.stdout.readline(4097)
+                if not line:
+                    break
+                require(len(line) <= 4096 and line.endswith(b'\n'), 'Oversized tar boundary listing')
+                match = re.fullmatch(rb'block ([0-9]+): \*\* Block of NULs \*\*\n', line)
+                require(offset is None, 'Unexpected output after tar EOF boundary')
+                if match:
+                    offset = int(match[1]) * 512
+                    require(offset <= MAX_ROOTFS + 3 * GIB, 'Tar EOF boundary exceeds bound')
+            else:
+                raise ValueError('Too many tar boundary records')
+            require(proc.wait(timeout=120) == 0 and error.tell() == 0, 'GNU tar boundary scan failed')
+        finally:
+            deadline.cancel()
+            if proc.poll() is None:
+                kill_scan()
+                proc.wait(timeout=30)
+    if offset is None:
+        raise ValueError('Missing tar end markers at header boundary')
+    return offset
+
+
+def checked_xz(archive):
+    """Verify XZ through its footer and two real TAR EOF blocks plus padding.
+
+    The bounded streaming pass verifies physical bytes at GNU's header boundary,
+    even if GNU pads a short input record. Payload zeros cannot stand in for EOF.
     No decompressed spool or additional disk-sized allocation is needed.
     """
-    count, tail = 0, b''
+    count, trailing_zeros = 0, 0
     with lzma.open(archive) as stream:
         for chunk in iter(lambda: stream.read(8 * 1024 ** 2), b''):
             count += len(chunk)
             require(count <= MAX_ROOTFS + 3 * GIB, 'Expanded archive exceeds bound')
-            tail = (tail + chunk)[-1024:]
-    require(count % 512 == 0 and tail == bytes(1024), 'Missing tar end markers')
+            nonzero = chunk.rstrip(b'\0')
+            trailing_zeros = len(chunk) - len(nonzero) if nonzero else trailing_zeros + len(chunk)
+    # Validate compressed integrity and the expansion bound BEFORE invoking tar.
+    eof = tar_eof_offset(archive)
+    require(count % 512 == 0 and count >= eof + 1024, 'Missing tar end markers')
+    require(count - eof <= trailing_zeros, 'Nonzero data after tar EOF boundary')
     return count
 
 

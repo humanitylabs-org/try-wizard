@@ -211,6 +211,146 @@ class OfflineSlimTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Invalid member size'):
                     module.extract(root / 'source.xz', root / 'out')
 
+    def eof_fixture(self, payload):
+        plain = io.BytesIO()
+        data = {'manifest.json': b'{}', 'boot/vmlinux': b'kernel', 'boot/initrd': b'initrd',
+                'rootfs.img': payload}
+        with tarfile.open(fileobj=plain, mode='w') as tar:
+            for name, value in data.items():
+                entry = tarfile.TarInfo(name)
+                entry.size = len(value)
+                tar.addfile(entry, io.BytesIO(value))
+            end = tar.offset
+        return plain.getvalue()[:end], data
+
+    def assert_eof_rejected(self, archive, raw, destination):
+        archive.write_bytes(lzma.compress(raw))
+        reason = 'Missing tar end markers|GNU tar boundary scan failed|Nonzero data after tar EOF boundary'
+        with self.assertRaisesRegex(ValueError, reason):
+            module.checked_xz(archive)
+        with self.assertRaisesRegex(ValueError, reason):
+            module.extract(archive, destination)
+        self.assertFalse(destination.exists())
+
+    def test_eof_boundary_accepts_zero_and_nonzero_payload_and_padding(self):
+        # Aligned zero blocks inside payload must not be interpreted as headers.
+        for payload in (bytes(6656), bytes(8192), b'X' * 8192,
+                        b'X' * 512 + bytes(8192) + b'Y' * 512,
+                        b'X' * 512 + bytes(8 * 1024 ** 2)):
+            for padding in (1024, 10240):
+                with self.subTest(tail=payload[-1:], padding=padding), tempfile.TemporaryDirectory() as d:
+                    root = Path(d)
+                    raw, data = self.eof_fixture(payload)
+                    archive = root / 'source.xz'
+                    archive.write_bytes(lzma.compress(raw + bytes(padding)))
+                    self.assertEqual(module.tar_eof_offset(archive), len(raw))
+                    self.assertEqual(module.checked_xz(archive), len(raw) + padding)
+                    module.extract(archive, root / 'out')
+                    self.assertEqual((root / 'out/rootfs.img').read_bytes(), data['rootfs.img'])
+
+    def test_eof_boundary_rejects_missing_one_and_both_blocks(self):
+        for payload in (bytes(8192), b'X' * 8192):
+            for remaining in (0, 512):
+                with self.subTest(zero=not payload.strip(b'\0'), remaining=remaining), tempfile.TemporaryDirectory() as d:
+                    root = Path(d)
+                    raw, _ = self.eof_fixture(payload)
+                    self.assert_eof_rejected(root / 'source.xz', raw + bytes(remaining), root / 'out')
+
+    def test_eof_boundary_rejects_truncated_header_and_data(self):
+        for payload in (bytes(8192), b'X' * 8192):
+            raw, _ = self.eof_fixture(payload)
+            # Last member: a 512-byte header followed by 8192 bytes of data.
+            header = len(raw) - len(payload) - 512
+            for end in (header + 100, header + 511, len(raw) - 1, len(raw) - 512):
+                with self.subTest(zero=not payload.strip(b'\0'), end=end), tempfile.TemporaryDirectory() as d:
+                    root = Path(d)
+                    self.assert_eof_rejected(root / 'source.xz', raw[:end], root / 'out')
+
+    def test_eof_boundary_rejects_nonzero_suffix_and_hidden_members(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            raw, _ = self.eof_fixture(bytes(8192))
+            other = root / 'other.xz'
+            self.archive(other, [('unknown', b'bad')])
+            hidden = lzma.decompress(other.read_bytes())
+            for index, suffix in enumerate((b'X', b'X' + bytes(1023), bytes(512) + hidden,
+                                            bytes(1024) + hidden, bytes(1024) + b'X' + bytes(1023))):
+                with self.subTest(index=index):
+                    self.assert_eof_rejected(root / 'source.xz', raw + suffix, root / ('out' + str(index)))
+
+    def test_eof_boundary_valid_sparse_and_missing_footer(self):
+        # Retain exact PAX size ordering and both member orders, with real GNU
+        # parsing supplying the physical EOF offset instead of logical size.
+        for boot_first in (False, True):
+            with self.subTest(boot_first=boot_first), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                archive = root / 'source.xz'
+                expected = self.sparse_archive(archive, boot_first)
+                good = archive.read_bytes()
+                raw = lzma.decompress(good)
+                eof = module.tar_eof_offset(archive)
+                self.assertGreater(eof, 0)
+                self.assertEqual(module.checked_xz(archive), len(raw))
+                self.assertEqual(raw[eof:], bytes(len(raw) - eof))
+                module.extract(archive, root / 'good')
+                self.assertEqual(module.sha(root / 'good/rootfs.img'), hashlib.sha256(expected['rootfs.img']).hexdigest())
+                for remaining in (0, 512):
+                    self.assert_eof_rejected(archive, raw[:eof] + bytes(remaining), root / ('bad' + str(remaining)))
+                for index, truncated in enumerate((good[:-1], good[:-12], good[:-32])):
+                    archive.write_bytes(truncated)
+                    with self.assertRaises((ValueError, EOFError, lzma.LZMAError)):
+                        module.extract(archive, root / ('xz' + str(index)))
+                    self.assertFalse((root / ('xz' + str(index))).exists())
+
+    def test_eof_boundary_gnu_sparse_variants_and_longname(self):
+        variants = (('gnu', None), ('pax', '0.0'), ('pax', '0.1'), ('pax', '1.0'))
+        for fmt, version in variants:
+            with self.subTest(fmt=fmt, version=version), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                source = root / 'source'
+                source.mkdir()
+                # More than four extents exercises old-GNU extension blocks;
+                # final physical data zeros must still never become EOF.
+                with (source / 'rootfs.img').open('wb') as f:
+                    for index in range(8):
+                        f.seek(index * 1024 ** 2)
+                        f.write(b'extent')
+                    f.truncate(9 * 1024 ** 2)
+                archive = root / 'source.xz'
+                options = ['--sparse-version=' + version] if version else []
+                subprocess.run(['tar', '-C', str(source), '--format=' + fmt, '--sparse', *options,
+                                '-cJf', str(archive), 'rootfs.img'], check=True)
+                raw = lzma.decompress(archive.read_bytes())
+                eof = module.tar_eof_offset(archive)
+                self.assertEqual(module.checked_xz(archive), len(raw))
+                for remaining in (0, 512):
+                    archive.write_bytes(lzma.compress(raw[:eof] + bytes(remaining)))
+                    with self.assertRaises(ValueError):
+                        module.checked_xz(archive)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            archive = root / 'long.xz'
+            with tarfile.open(archive, 'w:xz', format=tarfile.GNU_FORMAT) as tar:
+                entry = tarfile.TarInfo('unknown/' + 'long' * 50)
+                entry.size = 8192
+                tar.addfile(entry, io.BytesIO(bytes(8192)))
+            module.checked_xz(archive)  # Structurally valid GNU longname.
+            with self.assertRaises(ValueError):
+                module.extract(archive, root / 'out')  # Still not allowlisted.
+            self.assertFalse((root / 'out').exists())
+
+    def test_eof_boundary_warning_flood_is_rejected_without_pipe_deadlock(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            archive = root / 'warnings.xz'
+            with tarfile.open(archive, 'w:xz', format=tarfile.PAX_FORMAT) as tar:
+                entry = tarfile.TarInfo('rootfs.img')
+                entry.size = 8192
+                entry.pax_headers = {'unknown-key-' + str(i): 'value' for i in range(3000)}
+                tar.addfile(entry, io.BytesIO(bytes(8192)))
+            with self.assertRaisesRegex(ValueError, 'GNU tar boundary scan failed'):
+                module.checked_xz(archive)
+
     def test_cached_feed_revalidates_parts_whole_size_and_symlink(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
