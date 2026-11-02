@@ -81,6 +81,7 @@ test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-backup-test-dependencies.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_cold_boot_wait.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_native_bridge_frames.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-portable-paths.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-configured-endpoints.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/macos/Tests/test-hda-recovery.py"
