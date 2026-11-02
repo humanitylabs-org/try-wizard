@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/wizard/bin/wizard-open-url "$1"

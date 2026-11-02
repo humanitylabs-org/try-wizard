@@ -1,0 +1,10 @@
+[Unit]
+Description=Wizard first-boot secrets and state directory
+Before=wizard-hermes.service wizard-ux.service wizard-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/wizard/bin/wizard-firstboot
+
+[Install]
+WantedBy=multi-user.target

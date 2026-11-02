@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Install the Mac product plugin and app-origin opt-in, without changing SOUL/accounts/history.
+Run as root after the Hermes data directory exists; restart the engine once after an existing-disk upgrade.
+"""
+import json, os, shutil
+from pathlib import Path
+import yaml
+ROOT = Path('/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data')
+SOURCE = Path('/opt/wizard/product-plugin')
+HOME = Path('/home/wizard/.wizard-os')
+
+def write(path, data, mode, uid, gid):
+    if path.is_symlink(): raise RuntimeError(f'Refusing symlink: {path}')
+    if path.is_file() and path.read_bytes() == data: return
+    tmp = path.with_name(path.name + '.wizard-product-tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, 'wb') as out: out.write(data); out.flush(); os.fsync(out.fileno())
+        os.chown(tmp, uid, gid); os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+if not ROOT.is_dir(): raise SystemExit('Hermes data directory not ready; run after installing Hermes')
+for p in (ROOT, ROOT/'plugins', ROOT/'plugins/wizard-product'):
+    if p.is_symlink(): raise RuntimeError('Refusing plugin symlink')
+    p.mkdir(exist_ok=True); os.chown(p, 1000, 1000)
+for name in ('__init__.py', 'plugin.yaml'):
+    write(ROOT/'plugins/wizard-product'/name, (SOURCE/name).read_bytes(), 0o644, 1000, 1000)
+cfg = ROOT/'config.yaml'
+if cfg.is_symlink(): raise RuntimeError('Refusing config symlink')
+raw = cfg.read_bytes() if cfg.exists() else b''
+doc = yaml.safe_load(raw) or {}
+if not isinstance(doc, dict): raise RuntimeError('Unsupported Hermes config')
+plugins = doc.setdefault('plugins', {})
+if not isinstance(plugins, dict): raise RuntimeError('Unsupported plugins config')
+enabled = plugins.setdefault('enabled', [])
+if not isinstance(enabled, list): raise RuntimeError('Unsupported plugins.enabled')
+if 'wizard-product' not in enabled:
+    backup = ROOT/'backups/wizard-product-v1'; backup.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chown(backup, 1000, 1000)
+    if raw and not (backup/'config.yaml').exists(): write(backup/'config.yaml', raw, 0o600, 1000, 1000)
+    enabled.append('wizard-product')
+    write(cfg, yaml.safe_dump(doc, sort_keys=False).encode(), 0o600, 1000, 1000)
+HOME.mkdir(exist_ok=True)
+p = HOME/'app-manager.json'
+if p.is_symlink(): raise RuntimeError('Refusing manager config symlink')
+c = json.loads(p.read_text()) if p.exists() else {}
+c['mac_apps_origin'] = 'http://localhost:48023'
+write(p, (json.dumps(c, indent=2)+'\n').encode(), 0o600, 1000, 1000)
+print('Wizard product plugin enabled; SOUL, model, credentials, sessions and files untouched')

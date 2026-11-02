@@ -1,0 +1,15 @@
+[Unit]
+Description=Install Wizard OS with os.sh (image build only)
+ConditionKernelCommandLine=wizard.provision=1
+Wants=network-online.target
+After=network-online.target systemd-resolved.service wizard-firstboot.service
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/opt/wizard/bin/wizard-provision
+TimeoutStartSec=3h
+
+[Install]
+WantedBy=multi-user.target

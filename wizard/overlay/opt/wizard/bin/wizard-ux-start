@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+. /opt/wizard/bin/wizard-env
+mkdir -p /var/lib/wizard/ux
+export HERMES_ORIGIN=http://127.0.0.1:8865
+export WIZARD_HOST=127.0.0.1 WIZARD_PORT=8923
+export WIZARD_REQUIRE_CF_ACCESS=0
+export WIZARD_STATIC_DIR=/opt/wizard/ux/dist
+export WIZARD_OPERATOR_STATE_PATH=/var/lib/wizard/ux/operator.json
+export WIZARD_THREAD_DISPOSITION_STATE_PATH=/var/lib/wizard/ux/thread-dispositions.json
+export WIZARD_AGENT_ARTIFACT_ROOTS=/home/wizard:/var/lib/wizard
+export WIZARD_HERMES_STATE_PATH=/var/lib/wizard/hermes/state.db
+export WIZARD_HELM_DB_PATH=/var/lib/wizard/ux/none.db
+cd /opt/wizard/ux
+exec /opt/wizard/node/bin/node server/index.mjs

@@ -1,0 +1,16 @@
+[Unit]
+Description=Wizard onboarding and front door
+After=wizard-firstboot.service
+Requires=wizard-firstboot.service
+
+[Service]
+User=wizard
+Group=wizard
+WorkingDirectory=/home/wizard
+Environment=HOME=/home/wizard
+ExecStart=/opt/wizard/bin/wizard-setup-start
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

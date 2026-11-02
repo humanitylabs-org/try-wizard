@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "nativeVersion": "0.7.0",
+  "nativeBuild": "306",
+  "guestVersion": "0.4.0",
+  "sourceBase": "f0a302329b39a8c14c028d70239543e062d0cb4f",
+  "service": "24a2b3ac9e941c595bb60dc826b52c9308260c8e",
+  "wam": "0696805fe000dfc616abd0cf772c52ff83d580d9",
+  "ux": "31bdc3ecb0586f61323b72227ab70506d2627e5d",
+  "guestSoftware": {
+    "filename": "wizard-guest-software-f0a302329b39.tar.gz",
+    "bytes": 921284645,
+    "sha256": "46cbabc72d8386383d4d1f015ce1f7a43955bb71049eb3fc03dbbf7eeb9e3121"
+  },
+  "nativeFeed": "https://downloads.aiwizards.com/mac/appcast.xml",
+  "imageFeed": "https://downloads.aiwizards.com/os/latest.json",
+  "buildSelection": "Installed and staged Wizard Info.plist inventory max304; reserve305 for isolated manual-bootstrap updater QA, final306. Neither is an Apple notarization claim.",
+  "deferred": ["stock builder handoff arriving after scope cutoff"]
+}

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Print the loopback port of the app in the `shell` parking spot (wizard-shell by default).
+set -euo pipefail
+for f in /home/wizard/runtipi/app-data/*/wizard-shell/app.env /home/wizard/runtipi/app-data/wizard-shell/app.env; do
+  [ -r "$f" ] || continue
+  p=$(sed -n 's/^APP_PORT=//p' "$f" | tail -1)
+  [ -n "$p" ] && { echo "$p"; exit 0; }
+done
+echo 8796

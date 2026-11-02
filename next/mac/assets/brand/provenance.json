@@ -1,0 +1,24 @@
+{
+  "source_folder": "https://drive.google.com/drive/folders/1NstTcGF7tIrH3Mgb-sHrmaHNRaewoBcr",
+  "source_sha256": {
+    "AW-icon-sq-purple-white.jpg": "2423bd632b171b3dc86411507b530836109fbb3ed469c15c735e7cbcd50bbd12",
+    "AW-logo-select-hat.png": "0e5286e67f9ce7065c0acace5fcd292489df0af58a0e4034c8ac2f5cc4b08a4c",
+    "AW-icon-white.png": "66d648382f68615f216adbd557d8223a08e3f768aa94e34a3d89b1519f77e49e"
+  },
+  "generated_sha256": {
+    "wizard-icon-32.png": "42394dcfec161fc7e12c225b22b2cbe81a791fd8ee162d4a852206c866729d88",
+    "wizard-icon-512.png": "ada1e97aacfa79c3938e58249e1ea84753256b179c4ace5f1bc6e2796595048d",
+    "wizard-icon-192.png": "39c7ed1aab9faa33d85d709877fd5fe7e2829adaa3daf8900804682d33d82da6",
+    "wizard-icon-1024.png": "26a98705172493c1c5773d3150da79f15be1163f560aa8914314065352d96f7b",
+    "wizard-mark-purple.png": "39d00522f07c5e6e07c5caaebbde7921741dbe2a244269c7e214c3990f83caa0",
+    "wizard-icon-256.png": "758347d7497ec6f09e79d53ecb904a88f20ebab802ce1784484106a803f42218",
+    "wizard-icon-128.png": "58f61cd351b157d35047a4aed4d21dcf675719da471fa0e91fcb4733e447276d",
+    "wizard-icon-180.png": "4ac193293c859d291d0a22f43360fdcc096bcc04c648c6f2f55ffdd86515f141",
+    "wizard.ico": "731ca1251adb7a436d7687b414cdddc2c67aad97b696a05c6ddf371800557bc4",
+    "wizard-icon-16.png": "d723168fbcd85ac1148e1fe7ff86cea57f77501874dd94286bf9fade2ef2b39d",
+    "wizard-mark-white.png": "05e6cfe39615fa5ca4a04131c94ac9691939cfb428f389565e9ed052e3aac09a",
+    "wizard-icon-64.png": "875e239d1def791de024cade7c83a74ecd32429c553105aa74e6cf400fb3de80",
+    "wizard-icon-48.png": "c2ded2f148fe3f475d7a19b417d0b05daa27f28495289a4d8edfc5fee8d17b18"
+  },
+  "transforms": "Transparent hat: crop only transparent padding. Square app icon: downscale supplied AW-icon-sq-purple-white.jpg, preserve composition. ICNS: embed exact generated PNG bytes. Menu bar: use white hat alpha as AppKit template, preserve aspect."
+}

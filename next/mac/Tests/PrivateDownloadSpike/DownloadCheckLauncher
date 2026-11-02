@@ -1,0 +1,24 @@
+#!/bin/bash
+# Launch only the isolated native GitHub download check; never touches Wizard data.
+set -euo pipefail
+BASE=$(cd "$(dirname "$0")/../Resources" && pwd)
+DEST="$HOME/Downloads/Wizard Download Check/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$DEST"
+/usr/bin/osascript -e 'display dialog "This check opens GitHub sign-in, then automatically downloads the 1.27 GB Wizard OS test image. It verifies the file and leaves your installed Wizard and VM untouched. Your sign-in stays inside this temporary native window." with title "Wizard Download Check" buttons {"Cancel", "Start"} default button "Start"' >/dev/null
+export WIZARD_SPIKE_AUTH_SECONDS=900
+"$BASE/PrivateDownloadSpike" \
+ 'https://github.com/login?return_to=%2Fhumanitylabs-org%2Ftry-wizard%2Freleases%2Ftag%2Fmac-mvp-0.6.0' \
+ 'https://github.com/humanitylabs-org/try-wizard/releases/tag/mac-mvp-0.6.0' \
+ "$DEST/wizard-os-0.3.0.tar.xz" \
+ 'https://github.com/humanitylabs-org/try-wizard/releases/download/mac-mvp-0.6.0/wizard-os-0.3.0.tar.xz' >"$DEST/check.log" 2>&1
+FILE="$DEST/wizard-os-0.3.0.tar.xz"
+if [[ -f "$FILE" ]]; then
+  read -r HASH _ < <(/usr/bin/shasum -a 256 "$FILE")
+  BYTES=$(/usr/bin/stat -f %z "$FILE")
+  if [[ "$HASH" == f2bbbbb18800d369925b95ba3d5be7c0ea11820a967b2ce3c6f2e0f6a2ec4d0e && "$BYTES" == 1269879876 ]]; then
+    /usr/bin/osascript -e 'display dialog "Download verified. The private GitHub route works on this Mac. Reply ‘download verified’ in Wizard so Archimedes can finish connecting this route to the installer. The verified file is in Downloads → Wizard Download Check." with title "Wizard Download Check" buttons {"Done"} default button "Done"' >/dev/null
+    exit 0
+  fi
+fi
+/usr/bin/osascript -e 'display dialog "The automatic download did not finish and verify. Reply in Wizard with the step where it stopped. Safe diagnostic files are in Downloads → Wizard Download Check. This check did not change your installed Wizard or VM." with title "Wizard Download Check" buttons {"Done"} default button "Done"' >/dev/null
+exit 1
