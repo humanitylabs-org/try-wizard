@@ -1,0 +1,27 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pem
+.env*
+
+# Local secrets and Apple signing/notarization exports
+/.secrets/
+*.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.crt
+*.developerprofile
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
+
+/dist/
+/.build/
+/guest/.work/
+/macos/.swiftpm/
+/next/mac/.build/
+/next/mac/.swiftpm/
+/next/mac/dist/

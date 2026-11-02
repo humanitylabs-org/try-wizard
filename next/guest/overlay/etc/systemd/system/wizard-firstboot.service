@@ -1,0 +1,13 @@
+[Unit]
+Description=Wizard first-boot state directory
+Before=wizard-setup.service
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/wizard/bin/wizard-firstboot
+
+[Install]
+WantedBy=multi-user.target

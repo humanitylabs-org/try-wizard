@@ -1,0 +1,11 @@
+[Unit]
+Description=Developer root shell on vsock 9200 (only with wizard.dev=1 on the kernel command line)
+ConditionKernelCommandLine=wizard.dev=1
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat -t 3600 VSOCK-LISTEN:9200,fork,reuseaddr EXEC:/bin/bash,stderr
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

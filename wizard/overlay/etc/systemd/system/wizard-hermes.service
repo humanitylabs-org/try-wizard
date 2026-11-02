@@ -1,0 +1,17 @@
+[Unit]
+Description=Wizard mind (Hermes agent API)
+After=network-online.target wizard-firstboot.service
+Wants=network-online.target
+Requires=wizard-firstboot.service
+
+[Service]
+User=wizard
+Group=wizard
+WorkingDirectory=/home/wizard
+Environment=HOME=/home/wizard
+ExecStart=/opt/wizard/bin/wizard-hermes-start
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

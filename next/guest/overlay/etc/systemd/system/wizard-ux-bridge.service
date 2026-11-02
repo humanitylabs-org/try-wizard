@@ -1,0 +1,11 @@
+[Unit]
+Description=Wizard UX bridge: vsock 8923 -> the wizard-shell app (Wizard UX + Agent Service)
+After=network.target docker.service
+
+[Service]
+ExecStart=/opt/wizard/bin/wizard-ux-bridge
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

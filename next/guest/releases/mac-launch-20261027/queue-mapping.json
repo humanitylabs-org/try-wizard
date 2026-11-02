@@ -1,0 +1,2006 @@
+{
+  "schema": 1,
+  "queueSha256": "d8d4f8aab1bcf9a26238a27f4892560ddb2f8d2709bac1a3f0c76bf08d90a53b",
+  "sourceSelectionSha256": "e9b2dbfb0cc88bfd6604a040622d87b1c3a7fd91745fc5d6d81689dbb55a3e6c",
+  "entryCount": 84,
+  "counts": {
+    "source-carried": 61,
+    "deferred-to-next-release": 19,
+    "no-guest-change": 1,
+    "superseded": 2,
+    "carried-mandatory-security-gate": 1
+  },
+  "notFullyCarried": [
+    9,
+    14,
+    15,
+    17,
+    21,
+    23,
+    26,
+    29,
+    31,
+    32,
+    36,
+    39,
+    40,
+    41,
+    42,
+    43,
+    45,
+    51,
+    54,
+    75,
+    80,
+    81
+  ],
+  "entries": [
+    {
+      "id": 1,
+      "queueLine": 14,
+      "entry": "- 2026-10-23 \u2014 Snooze unifies Defer + Boomerang (timed returns and Someday, exact Bangkok-aware confirmation, Snoozed labels/search aliases): wizard-ux #365, merge `475577e6e2e98a179ce5183c096fa0764dbf3457`, live `87dda85c7592c23133322c284f6dd4220f11649e`; npm656/656, Thales phone/desktop Sepia+Novairecito100/100 plus pins52/52, served assets/tree verified. Existing scheduler/disposition APIs unchanged; no service restart, APK or guest rebuild. Screenshots `[local evidence omitted]`.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "475577e6e2e98a179ce5183c096fa0764dbf3457",
+              "commit": "475577e6e2e98a179ce5183c096fa0764dbf3457",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "87dda85c7592c23133322c284f6dd4220f11649e",
+              "commit": "87dda85c7592c23133322c284f6dd4220f11649e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 2,
+      "queueLine": 16,
+      "entry": "- 2026-10-22 \u2014 DECISIONS #83 curator custody: wizard-app-manager #164 (`b51e7b42`) + #165 (`d6cf6cd9`), wizard-os docs #159/#160. Thales scheduled custody is commissioned: 17 exact commits in public Git bundle release assets, 7 non-org digest copies, 17 image references verified; run 39750122931 passed. Corrected Python WAM CLI/API integration `68aebf57` is live, 16 apps unchanged; unreachable-origin recovery from the real public Files bundle verified in Python and Bun 1.3.0. Pin an approved WAM release containing these changes for fresh guests; stable release/component pins were not promoted by this task. No guest archive rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "wam",
+          "pinnedCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
+          "ancestry": [
+            {
+              "queueReference": "b51e7b42",
+              "commit": "b51e7b42cd771515d8ae82b8189f8b7a89a5871c",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "d6cf6cd9",
+              "commit": "d6cf6cd9eb339b52cc029c73df386c0f117b3284",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 3,
+      "queueLine": 18,
+      "entry": "- 2026-10-22 \u2014 Backup launch lane: try-wizard#22 now projects WAM#61/#127 newer-app refusals as an explicit paused partial restore (engine exit 3), with no false all-apps-arrived success. Include approved `setup/server.py` + `backup_frontdoor.py` and the matching backup engine at the next significant rebuild. Native-only build/tests are staged; no guest image rebuilt or live deployment in this lane.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "02f9a00",
+              "commit": "02f9a005c9542491bf8b096e696821d825d2763f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "wam",
+          "pinnedCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
+          "ancestry": [
+            {
+              "queueReference": "850cfe32",
+              "commit": "850cfe3252576b3a9ae9bea54c4fedd173691443",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 4,
+      "queueLine": 20,
+      "entry": "- 2026-10-22 \u2014 Launch v1 phone lane: refreshed `try-wizard#32` at `4a5d2b2` (vendored iPhone peer-name helper) with phone wiring tests 8/8; `wizard-agent-service#74` helper tests 24/24. Still pending real helper deployment and #74 merge; do not rebuild a guest or mark the Mac phone change shipped from these source tests alone.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "dab55ba",
+              "commit": "dab55ba7f2701eb45a724ce99aa9b88092760a6a",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "ee5229f",
+              "commit": "ee5229f5675fc302b46dfd1f2cd9505eef20ebbd",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 5,
+      "queueLine": 22,
+      "entry": "- 2026-10-22: Approved wizard-ux UI PRs #175 semantic Store status colours, #245 skin-tinted notification reply bubble, #247 real provider brand marks on all skins, #230 My custom skin label, and #214 notification bell hiding are merged and live. #227 full topic emoji picker was also merged and verified at `a3f71b1c9ac6dd6ee2c4e27654f7bd291fd64dab`, then concurrently reverted by #305 at James's skin-specific direction: it must be re-landed for Novairecito only, not shell-wide. Current main/live `f88413f40e28dfcbd207525408452b4ad3b73c7e`; Node536/536 (before revert553/553), Thales desktop55/55, and live phone/desktop Nebula+Grove browser acceptance. No APK or guest rebuild. Evidence `[local evidence omitted]`.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "a3f71b1c9ac6dd6ee2c4e27654f7bd291fd64dab",
+              "commit": "a3f71b1c9ac6dd6ee2c4e27654f7bd291fd64dab",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "f88413f40e28dfcbd207525408452b4ad3b73c7e",
+              "commit": "f88413f40e28dfcbd207525408452b4ad3b73c7e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 6,
+      "queueLine": 24,
+      "entry": "- 2026-10-21: Tap voice is always an agent message on phone and desktop; only held/explicit command takes run the command grammar. Registered app voice input, dictation and typed behaviour preserved. wizard-ux PR #240, merge `073b73904959756e1657cc05136e50279acc0e09`. Live web exact served-asset/tree verified; Node431/431, candidate tap regression222/222, required-phrase negative control92/132 before. No APK or guest rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "073b73904959756e1657cc05136e50279acc0e09",
+              "commit": "073b73904959756e1657cc05136e50279acc0e09",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 7,
+      "queueLine": 26,
+      "entry": "- 2026-10-20: Never-silently-offline shell: indefinite transient outbox retry, safe stale-failure revival, plain-language layer diagnosis and Open Troubleshooter actions, launchable Troubleshooter app with aliases. wizard-ux PR #209; merge `8551664080e20b294a3645365d7f4ff107d57640`. Live web assets byte-verified; npm353/353, outbox26/26, phone+desktop status24/24 on Nebula/Signal. No APK or guest rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "8551664080e20b294a3645365d7f4ff107d57640",
+              "commit": "8551664080e20b294a3645365d7f4ff107d57640",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 8,
+      "queueLine": 28,
+      "entry": "- 2026-10-20: Compact Chats-list send pill restored to 34px with 26px buttons and invisible >=44px touch targets; wizard-ux PR #207, merge `dfecf710471e2659e1af6ffe32ad592d30435840`. Live web verified; Nebula/Grove/Obsidian phone+desktop30/30, dock9/9, recovery52/52. No APK or guest rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "dfecf710471e2659e1af6ffe32ad592d30435840",
+              "commit": "dfecf710471e2659e1af6ffe32ad592d30435840",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 9,
+      "queueLine": 32,
+      "entry": "| 2026-10-19 | Claude/ChatGPT 0.2.1 and Connection Router 0.1.1 adopt Appearance v1, strict same-origin assets, live skin changes and dark standalone fallback | wizard-app-store PR #9; claude-connection #4/#5; chatgpt-connection #4/#5; wizard-connection-router #3 | Dual-arch GHCR pins published. Live Claude/router upgraded with login volume unchanged; Thales Nebula/Signal screenshots and phone-UA/standalone verified. ChatGPT remains uninstalled. No guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Optional Connectors/Domains source packaging is outside the stock Mac default set; release core/default pins remain unchanged.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 10,
+      "queueLine": 33,
+      "entry": "| 2026-10-19 | Configured canonical-origin preview routing: different HTTPS ports are isolated, canonical links stay inside their preview; retired aliases and obsolete Android preview flavors removed | wizard-ux PR #178, merge `4b00a9e2d5e7a7de743c41bd5ddc0708d441f2af` | Thales unit 268/268 and live exact-origin browser checks passed. No main Android flavor changes, no APK or guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4b00a9e2d5e7a7de743c41bd5ddc0708d441f2af",
+              "commit": "4b00a9e2d5e7a7de743c41bd5ddc0708d441f2af",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 11,
+      "queueLine": 34,
+      "entry": "| 2026-10-18 | Wizard backup native-only front-door jobs: export/download, private streamed upload, verify/import, undo/activation and one-shot recovery key; no shared-Files staging | `try-wizard` branch `feature/wizard-backup-mac`, `next/mac/BACKUP.md`; disposable-clone proof tracked under `WizardBackup/evidence/mac/` on the build worker | Include `setup/server.py` and adjacent `backup_frontdoor.py`, plus approved WAM with `wam backup`; existing guests can receive these files and a WAM checkout update in place. No guest rebuild in this lane. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "02f9a00",
+              "commit": "02f9a005c9542491bf8b096e696821d825d2763f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "wam",
+          "pinnedCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
+          "ancestry": [
+            {
+              "queueReference": "850cfe32",
+              "commit": "850cfe3252576b3a9ae9bea54c4fedd173691443",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 12,
+      "queueLine": 35,
+      "entry": "| 2026-10-18 | Composer mic reply during a recording Mizel meeting borrows the meeting mic via startVoice (same handoff as the in-app orb) instead of refusing | wizard-ux PR #131 `2e81b33` (`fix/reply-mic-meeting-loan-20261018`) | Web shell change for the guest. No guest rebuild now. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "2e81b33",
+              "commit": "2e81b339bbfb74cc8dc6b735d3f51d857ba1c57e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 13,
+      "queueLine": 36,
+      "entry": "| 2026-10-18 | Android-only: floating orb and side button borrow a recording Mizel meeting's mic, resume it after the take, sync meeting markers | wizard-ux PR #130 merge `8e22c3a`; Android 0.9.24/48 published | Native APK only; nothing for the guest. |",
+      "status": "no-guest-change",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "8e22c3a",
+              "commit": "8e22c3aa00ee8487a9db8359d12b27d0ceaf4705",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Explicit Android-only queue row; APK is not part of guest assembly",
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 14,
+      "queueLine": 37,
+      "entry": "| 2026-10-18 | Wisdom 0.4.0-private.2: all open Wisdom PRs (#5 #6 #8 #9 #10) plus checked author receipts (option C) merged; live Wizard moved off file overrides onto the release image | wisdom PR #11, main `10d87bd`, release `v0.4.0-private.2`; Alpha catalog PR #8 `3f3fe7b` | Unit145 + 14 Thales browser suites; live 390/360 long-press/Look up ~1s first text/~2s final/Ask AI/reload; data unchanged. No guest/APK rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Profiles contact-vCard portable source and native Android action are not in the selected stock/default recipes.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 15,
+      "queueLine": 38,
+      "entry": "| 2026-10-16 | Hardware Back retains pending app history ownership; Wisdom reader uses the visible book-parent Back action from shortcut/deep-link/restored routes | wizard-ux PR #77 live `da1f4b5`; Wisdom PR #7 upstream `44337e8`, private composed reader `6602b6d` | Parent exact canonical route 9/9 with no overrides; concurrent highlighting/ratings preserved; 33 initial nested journeys passed with explicit remaining coverage. No APK/guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "da1f4b5",
+              "commit": "da1f4b5d5dd891c166c02577bcdc595cc56004fc",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Carry UX ancestor 44ff7bcf; defer wisdom-chapters c93ee356 because the private collection app is not a stock Mac default.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 16,
+      "queueLine": 39,
+      "entry": "| 2026-10-16 | Completed synchronous voice commands release browser audio without agent admission; pending/unknown recordings preserved | wizard-ux PR #76, live `5ca484f`, branch `fix/completed-local-voice-20261016` | Thales focused55/55, recovery52/52, live served55/55; actual canonical phone/desktop Settings and asset hashes verified. Historical handset rows uninspected; no APK/guest build. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "5ca484f",
+              "commit": "5ca484fa6e2c4ce7f438251ef083c1b6a56da92f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 17,
+      "queueLine": 40,
+      "entry": "| 2026-10-16 | Wisdom optional entry `epigraph_author`, escaped epigraph-only attribution with old thinker fallback | wisdom `fix/epigraph-author-live-20261016`, `88187214e98d10a4b285fa4821774c5ae5d3822b` | Narrow private JS overlay preserves current lookup/appearance baseline; Thales13 revision tests,16 attribution cases, existing epigraph selection at3 widths and live-served synthetic reader verified. No Tarot content applied, no guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Owner-local Topics has no portable stock recipe; do not silently install private local state.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 18,
+      "queueLine": 41,
+      "entry": "| 2026-10-16 | Supervisor moved to System \u2192 Maintenance; ordinary Apps excludes it, deep links retained; lifecycle copy clarified to Backend running | wizard-ux PR #75, live `8df5b07` | Thales baseline21/34, candidate34/34, live34/34; five exact served-asset matches. Frontend-only, service not restarted, no native/guest build. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "8df5b07",
+              "commit": "8df5b07e0f223b10321101b4b88bd49c85a8cc95",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 19,
+      "queueLine": 42,
+      "entry": "| 2026-10-16 | Voice retry eligibility, retained-note recovery controls, upgrade-safe old outbox recovery and aligned slow-transcription deadlines | wizard-ux PR #74, live `0fb8dd4` | Thales integrated158/158; live served recovery52/52; real phone/desktop read-only smoke and exact assets verified. Handset-specific historical notes not inspected; no APK/guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "0fb8dd4",
+              "commit": "0fb8dd4e8f3e00f5d754a4ec6281d44020585c5f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 20,
+      "queueLine": 43,
+      "entry": "| 2026-10-16 | Explicit Music window/desk Close pauses native playback; reopening retains paused queue; navigation/lock/reload keep playing | wizard-ux PR #73, live `3190f46` | Thales real native baseline7/candidate26, unit8, live4 checks. Web-only, no APK/guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "3190f46",
+              "commit": "3190f46fb73595525954644d539c663546ce4242",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 21,
+      "queueLine": 44,
+      "entry": "| 2026-10-16 | Mizel confirmed Delete releases matching retained capture and clears warning/hint; failed Delete preserves audio | meeting-recorder PR #6 `af0d0c4` | Live immutable adoption verified; browser18 + real gateway7 checks. Preserve validated gateway HTTP Origin allowlist; no APK/guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Art-wall owner collection/import layout is not in the portable default set.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 22,
+      "queueLine": 45,
+      "entry": "| 2026-10-16 | Mizel focused-note long-press commands, false-offline STT/marker persistence, single save notice, completed controls and compact participant hint | wizard-ux PR #71 `03576bf`; meeting-recorder PR #5 `14282d9` | Live shell/backend verified; Thales native15/browser17 plus app16 checks and source-preservation guard8. Existing code44 retained; no APK/guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "03576bf",
+              "commit": "03576bf08b443b30650613beb1dd145d54a5e5f4",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 23,
+      "queueLine": 46,
+      "entry": "| 2026-10-16 | Store prominent uniform Alpha badges, Alpha-first order, shell exclusion, canonical installed status and release-aware Open/Switch | wizard-ux PR #69, daily `e46998c6e0edcc2f07bd4471a0a31bd8fa61b8d6` | Live phone/desktop browser verified,5 actual opens and Back;19 focused tests plus Standard Get merge fixture. Include `store-status.js` and read-only feed endpoint together. Catalog now `humanitylabs-org/wizard-alpha`; subscriber credentials remain owner-local. No native/guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "coverage": "carried",
+          "method": "live-ancestor-and-accepted-appearance-baseline",
+          "reference": "8fa98040195db2f8f86a1f0dffc6c3292b67679c"
+        }
+      ],
+      "reason": "Corrected prior mapping: UX live orb/app badge behavior is carried by exact accepted UX branch; no legacy recorder dependency.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "carry",
+      "decisionAuthority": "Archimedes launch instruction 2026-10-24"
+    },
+    {
+      "id": 24,
+      "queueLine": 47,
+      "entry": "| 2026-10-16 | Shared app-client Back re-arms at root after a cold collection launch; Wisdom collection-first discovery update | wizard-ux PR #70, merge `3191123`; Wisdom PR #4, private `0.3.0-private.3` / `60bd0c7` | Live canonical phone 412/360px and standalone cold-root checks passed; shared guard43 + Wisdom8 simulations on Thales. Personal library/state unchanged. No APK or guest rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "76367561",
+              "commit": "76367561f827e96f0c6d2d68015c326e7116e662",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 25,
+      "queueLine": 48,
+      "entry": "| 2026-10-16 | Automatic-start notices show incoming source/context, requested action and expandable original | wizard-ux PR #65; WAS reviewed `ae9a922`, included in combined live `76367561` | Real original-thread phone/desktop verification passed on Thales; sensitive values/private context omitted, machine input remains separate from human messages. No guest or native rebuild. Evidence `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4cdedced03a57c2dd95306b8375c1ef260b867a0",
+              "commit": "4cdedced03a57c2dd95306b8375c1ef260b867a0",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 26,
+      "queueLine": 49,
+      "entry": "| 2026-10-15 | Mizel orb microphone handoff, separate retained questions, immediate same-meeting resume and timestamped discussion links | wizard-ux PR #66, live `c2a28ca`; meeting-recorder PR #4, adoption `796c704` | Web/backend live; Android0.9.20/code44 signed from `f0ca449` published and normal updater verified. Browser15, native27, Music9, signed upgrade11 passed. PR54 native identity remains successor after signed cutoff. Take approved web/backend for next significant guest build; no guest rebuild now. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "c2a28ca",
+              "commit": "c2a28caa6e314b7d817d7357d0ae64df50dc3fb5",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "f0ca449",
+              "commit": "f0ca449b6c3572c46aff0ab2ba6ec95c482697c4",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Optional Apps Gallery source and owner-managed catalog layout are not part of this stock release.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 27,
+      "queueLine": 50,
+      "entry": "| 2026-10-15 | Optional private Wizard Alpha source merged into ordinary Store, exact-pin installation/publishing helper and alias-aware Open | wizard-ux PR #56/#67, `4863792e98e6a6940abb83ba94dbfa1cb38ea256` | Live Store phone/desktop and real Shopping install/Open verified; private catalog credentials/subscription and owner-local host adapters remain personal configuration. No guest rebuild; include portable tools only on next significant release. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4863792e98e6a6940abb83ba94dbfa1cb38ea256",
+              "commit": "4863792e98e6a6940abb83ba94dbfa1cb38ea256",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 28,
+      "queueLine": 51,
+      "entry": "| 2026-10-16 | Canonical Hermes unknown-run recovery UI, generation-bound approval/clarification and stale-control refresh; legacy approval preserved | wizard-ux PR #68, daily `63b266a` | Live web tree `22547085`; Thales142 unit/16 fixture phone checks plus real served-shell existing-chat smoke and exact asset readback. Companion WAS compatibility is live in combined `76367561` (contains PR #40), migration/health verified and real-model canary completed exactly once with same-key replay. Hermes remains v0.21.6. No guest/native rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "63b266a",
+              "commit": "63b266a2d392a460c04cb7a61014c0130066d54e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "76367561",
+              "commit": "76367561f827e96f0c6d2d68015c326e7116e662",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 29,
+      "queueLine": 52,
+      "entry": "| 2026-10-15 | Wizard Files 0.1.2 large decoded video thumbnails/tap-to-play and verified photo-provenance v1 sender reader | private wizard-files PR #3, build/main `876b2040b4e0dda1644aa2ac213062724dbda2bd`; test-only PR #4 | Live WAM update; Thales backend22, fixture gallery32/scopes20, real phone+desktop gallery116 (all7 videos), live scopes13. Photo sender proof fixture-only until separate producer publishes actual eligible photos. Read-only sole media mount, existing app-data policy and shared client/uploads retained; no guest/APK. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "No portable Wisdom collection default is admitted; retain owner-local collection on the running install.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 30,
+      "queueLine": 53,
+      "entry": "| 2026-10-15 | Fresh successful Wizard reads clear stale browser Offline hints; cached reads cannot hide real outages | wizard-ux PR #64, daily `518d3a3` | Live phone/desktop real-read QA on Thales passed with no asset overlay; false-offline boot/event, genuine outage and recovery without online event covered. Focused tests5/5; no APK or guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "518d3a3",
+              "commit": "518d3a3e2350c0bf212d5c242dcbc415fd44383e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 31,
+      "queueLine": 54,
+      "entry": "| 2026-10-15 | Manager retrospectively suppresses canonical hidden-source updates, purges retained browser cards/target metadata, and guards model history/pending summaries without deleting diagnostics | wizard-manager PR #7, branch `fix/manager-hidden-sources` `553cf8f`, live merge `a656f4076a1cb26dfd828a3597f31d7a4ea36fc2` | Thales Python91/91, browser34 pass/1 optional skip, package14; live installed phone/desktop exact assets and all12 prior hidden cards absent, all198 genuine baseline messages preserved. Idle Manager-only restart; no gateway, APK or guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "X app is optional, not in the stock default source set.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 32,
+      "queueLine": 55,
+      "entry": "| 2026-10-15 | Wizard Files 0.1.1 defaults to Your files; explicit per-install app-data prefixes browse separately, no migration | private wizard-files PR #2, main `0d195666968aae307e40062c3bb098c521cff25a` | Live actual WAM update; Thales backend16/16, fixture browser20/20, canonical phone33/33; 280 app-source hashes unchanged. Portable policy empty; this box configures Wisdom and Meditate/recordings.json. No guest/APK rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Legacy Meeting Recorder row is not proven equivalent to selected portable wizard-recorder; no legacy rename or data migration is authorized.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 33,
+      "queueLine": 56,
+      "entry": "| 2026-10-15 | Remove persistent phone general-voice bubble; active status hugs orb; temporary hold-slide bypass preserves command routing | wizard-ux PR #59, merge `72df4b0` | Live web verified on later daily `b5f078a`: Thales label42/42, live phone/Wisdom/desktop11/11, exact HTTPS and :8923 assets/version matched. Web-only; no APK or guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "72df4b0",
+              "commit": "72df4b0f476d13a5c843f77d62cdea9ad1a35516",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "b5f078a",
+              "commit": "b5f078a12c8b55ea7fda5f06bc755ee7ccd8e7df",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 34,
+      "queueLine": 57,
+      "entry": "| 2026-10-16 | Sent-note presentation Dismiss and immediate Manager hosted-thread outbox refresh on phone/desktop | wizard-ux PR #61, daily `b5f078a` | Thales live assets 32/32, integrated 32/32, held/empty 40/40; accepted message/recording receipts preserved, reload and canonical arrival checked. Web-only; no guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "b5f078a",
+              "commit": "b5f078a12c8b55ea7fda5f06bc755ee7ccd8e7df",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 35,
+      "queueLine": 58,
+      "entry": "| 2026-10-15 | Shared Appearance v1 static review and desktop fullscreen presentation context; CSP-safe external demo handlers | wizard-ux PR #58 `faf6854`, PR #60 `5916dd6` | Live owner review link; Thales direct uninjected phone/desktop182/182, unit120/120, screenshots inspected. Original shared provenance retained; no Service/WAM/OS pin edits, restart, APK or guest rebuild. Handoff `[local evidence omitted]`. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "faf6854",
+              "commit": "faf685403e1105b1542b0f84ffc9975446c04b10",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "5916dd6",
+              "commit": "5916dd6053038aa1051ae96be6fc3f0b8bcefa23",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 36,
+      "queueLine": 59,
+      "entry": "| 2026-10-15 | Managed Wizard Files clean fork: approved interface, confined read-only media root, shared resumable uploads; keep Files Legacy separate, no migration | private wizard-files `feature/managed-owner-files` `bc77f6fa5773ee293ebdfe7555851bafd88e6bbb`; wizard-os PR #50 | Real WAM staged `wizard-files-next` installed and Thales-verified; canonical activation awaits parent independent confinement review. Preserve media contents and no global defaults change. No guest/APK rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Optional Studio local-skin integration is not a stock Mac default.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 37,
+      "queueLine": 60,
+      "entry": "| 2026-10-15 | Quote/code/full-reply/selection sharing uses configured wizard name; dynamic spoken-name parsing replaces personal aliases | wizard-ux PR #55, daily `a476860` | Live Thales46/46 plus unit119/119; neutral Wizard fallback, owner words unattributed, Copy unchanged. Web-only; native notification/voice identity correction is separate in progress. No guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "a476860",
+              "commit": "a476860be4a48fdf0e3e41f73d1cec62f7bad803",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 38,
+      "queueLine": 61,
+      "entry": "| 2026-10-15 | Held/local voice notes gain persistent bubble Dismiss, matching empty-note recovery; original audio and destination retained | wizard-ux PR #53, daily `a65a3ec` | Live served-shell40/40; integrated40/40; custody89/89; live phone/desktop smoke and asset hashes verified on Thales. Web-only, no guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "a65a3ec",
+              "commit": "a65a3ecdbcdfd56ae7958def691e2eb8530caa3f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 39,
+      "queueLine": 62,
+      "entry": "| 2026-10-15 | Native Music companion: origin-scoped Android playback transport with shared Music browser fallback and preserved capture/manifest | wizard-ux PR #49 (`1f7249b`); wizard-music PR #1 (`c2ccd66`) | Live companions and normal Android 0.9.18/code42 feed published; Thales native40/40, signed upgrade11/11, HTTPS6/6. Take web/source on next significant guest build; no guest rebuild now. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "1f7249b",
+              "commit": "1f7249bed9a85bb772f5c4aa8458846f14b24be8",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Optional Events recipe is outside the stock set.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 40,
+      "queueLine": 63,
+      "entry": "| 2026-10-15 | Manager answers operational queue/capacity questions from authoritative Agent Service health without history fan-out; retains bounded history failure diagnostics distinct from task failures | wizard-manager PR #6, `01615b529f01243be1182ae09d7a878a8f955dd5` | Live service restarted idle; state preserved. Thales Python79/browser32 (1 optional skip), real-model plan6/6, deployed phone/desktop2/2. No cap, host, core, schema or guest rebuild change. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Optional Reports recipe is outside the stock set.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 41,
+      "queueLine": 64,
+      "entry": "| 2026-10-15 | James-approved Files restyling promoted to his live Files; unchanged My files/Upload and five-skin Appearance v1 | files-browser local branch `feature/files-restyle-live-20261015`, `e3fb027623979e61cc23fe8bdc9fe127d448fbb5` (no remote) | James-box only; stylesheet + index hook + static CSS allowlist. Take styling when Files is packaged for guest; no rebuild. Receipt `[local evidence omitted]`. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Lists requires privileged/local hardware admission; do not grant it by default.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 42,
+      "queueLine": 65,
+      "entry": "| 2026-10-15 | Manager return/catch-up correction: migrate stranded historical unread markers; preserve last-read position; show first new message boundary with previous-message context | wizard-manager PR #5, `c62582a` | Reproduced baseline failure. Live phone/desktop return, further arrivals and reload verified on Thales; no shell/native/guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Browsing cache/report state is owner-local and not a stock portable recipe.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 43,
+      "queueLine": 66,
+      "entry": "| 2026-10-15 | Manager opens exact canonical chats in its own window using shared Chats; replies/Back return to retained draft/position; persistent New messages boundary | wizard-ux PR #51, daily `e5399b2`; Manager PR #4, `3b60dcd` | Live served-assets phone/desktop46/46; merged-source unit117/117; readback hashes matched. Writes intercepted during QA; no backend restart, APK or minor guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "e5399b2",
+              "commit": "e5399b258eaea8c25f4ed890f7e788dafebb3a6b",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Clips queued write actions need separate approval-gated app admission.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 44,
+      "queueLine": 67,
+      "entry": "| 2026-10-15 | Shared responsive commands, reviews/Maps, bound feedback, capture controls and future-feature registry complete the desktop/mobile parity work | wizard-ux PR #42, merge `6bed643`; current live also preserves PR #46 | Thales live parity91/91, app-voice38/38, general gestures17/17; unit98/98, candidate92/92, custody89/89, empty-voice24/24. Native capability gates retained; no minor guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "6bed643",
+              "commit": "6bed643a95d5eaabc96221f2d5b3e79bbd8a6ecf",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 45,
+      "queueLine": 68,
+      "entry": "| 2026-10-15 | Receives voice input capability: Manager, Search and Video Editor; sealed app destination, in-app feedback, continuous general-agent bypass | wizard-os PR #48; wizard-ux PRs #44/#45/#47 (aff35d9); WAS PR #34; Manager #3; Video Editor #1; Search #2/#3 | Private trial live, Thales real STT and six app/layout admissions plus continuous general route verified. WAM #40 remains draft; no installer cutover, APK or guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "aff35d9",
+              "commit": "aff35d911a503ebe0870d81ba979fc3d5d287884",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "f24f921c7fb3ac8a9fcc4a88e5fa69b6c826a17e",
+              "commit": "f24f921c7fb3ac8a9fcc4a88e5fa69b6c826a17e",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Recording start/stop legacy scope is not proven equivalent to the pinned portable Recorder; no capture grants implied.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 46,
+      "queueLine": 69,
+      "entry": "| 2026-10-15 | Chats quote blocks have nested Copy/Share controls exporting only the quote; full response controls unchanged | wizard-ux PR #50, daily `30bb96f` | Web live; Thales candidate and live30/30 each on phone/desktop, formatting, nested quotes, fallback/cancel. No APK or minor guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "30bb96f",
+              "commit": "30bb96f4c227c8cecb4473009ddc2857b04b1b08",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 47,
+      "queueLine": 70,
+      "entry": "| 2026-10-15 | Retained no-speech voice notes show their true state instead of Sending; bubble-only Dismiss retains recordings | wizard-ux PR #48, daily `fdb7624` | Thales live-served shell24/24; custody regression52/52; two-thread/reload/retry and exact audio retention verified. Web-only; no guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "fdb7624",
+              "commit": "fdb7624cedbeabf320d81360af460e7a1280f4f7",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 48,
+      "queueLine": 71,
+      "entry": "| 2026-10-15 | Canonical app deep links wait for installed registry; Outline no longer fuzzy-matches native LINE on cold Android startup | wizard-ux PR #43, daily `4f68e1b` | Actual-handler tests2/2 and final live phone/desktop embedded Outline QA passed. Web-only; no guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4f68e1b",
+              "commit": "4f68e1b47af7cd800f2662c0edcf41f16bbe1dea",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 49,
+      "queueLine": 72,
+      "entry": "| 2026-10-15 | Shared non-meeting PCM capture inside Android WebView for Outline, with native recorder ownership checks | wizard-ux PR #41, daily `e477ac4` | Thales focused19/existing19/unit72; live installed Outline real-provider speech passed. Web-only; physical handset/background survival unverified; no guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "e477ac4",
+              "commit": "e477ac4cb75031f9fb91f5c4c65927d1cbce52e0",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 50,
+      "queueLine": 73,
+      "entry": "| 2026-10-15 | Shared responsive Settings and desktop skin selector; common recovery controls and feature-registration parity tests | wizard-ux PR #31, daily `cd9c92d` | Live Thales79/79, integrated custody52/52 and unit72/72. Five skins/reload/hosted app verified; remaining browser parity shipped in PR #42 below. No minor guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "cd9c92d",
+              "commit": "cd9c92d04c7ec6134cc75365626a024f52612954",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 51,
+      "queueLine": 74,
+      "entry": "| 2026-10-15 | Foreground Manager orb destination with recording-start pinning and durable retry | wizard-ux PR #40, daily 1c76195; Manager PR #1, 9ec676c | Live phone/desktop real STT/admission, lost-ack single-admission retry verified on Thales. No APK or minor guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "1c76195",
+              "commit": "1c7619538a9dad160e49ccc587f1eea29bda05d4",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Studio portrait history/storage migration is owner-app-specific; defer without moving existing files.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 52,
+      "queueLine": 75,
+      "entry": "| 2026-10-15 | Phone tab overview accepts a first-app drop on Home: Music or any app before Chats, saved order retained | wizard-ux PR #39, daily `7fdccf9` | Live Thales touch/reload checks 22/22; exact served asset/tree readback; web-only, no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "7fdccf9",
+              "commit": "7fdccf940f88cb1e18f79e001c3b2da1192d328b",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 53,
+      "queueLine": 76,
+      "entry": "| 2026-10-15 | Mobile text and voice replies return one linked-thread level to the source roundup, preserving draft/reading position | wizard-ux PR #36, daily `038b9d8` | Live Thales 45/45 plus Android-UA/desktop real-thread smoke and exact asset/version hashes; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "038b9d8",
+              "commit": "038b9d87782905347bd137bf53118e81036202ed",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 54,
+      "queueLine": 77,
+      "entry": "| 2026-10-15 | Movies 0.2.1: complete display/icon rename, public Batman Begins first-install seed, shared interface and Opus card styling | cinequeue PRs #1/#2; image source `574c96d`, merge `29d2cee` | Daily and managed runtime updated; original data preserved. Private image/catalog auth and managed Agent Service origin wiring remain parent-owned. No minor guest rebuild. |",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "Studio image previews belong to the optional Studio app, not the stock Mac default set.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 55,
+      "queueLine": 78,
+      "entry": "| 2026-10-15 | Thread links normalize root/legacy paths into canonical native thread navigation; source-to-target Back preserved | wizard-ux PR #35, daily `9a7bcc8` | Live Thales107/107; all ten original roundup destinations on phone/desktop; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "9a7bcc8",
+              "commit": "9a7bcc89f15cb733462d12e7c84bcade47cebc27",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 56,
+      "queueLine": 79,
+      "entry": "| 2026-10-15 | Hosted-app source links open existing Chats through the canonical deeplink router | wizard-ux PR #34, daily e0a6a21 | Live phone/desktop navigation verified on Thales; generic shell fix only, optional Manager app remains separate; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "e0a6a21",
+              "commit": "e0a6a21613097488fd85e527ddfdc432a0b88b1a",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 57,
+      "queueLine": 80,
+      "entry": "| 2026-10-15 | Voice custody recovery: durable original audio, no dismissed-message resurrection, safe native read/restart, immediate steering with uncertain-send protection | wizard-ux PR #27, daily `795d9bc` | Live web verified from Thales; 303 browser gating checks, 103 native-emulator checks, 63 live shell checks. No APK change; take current daily in next significant guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "795d9bc",
+              "commit": "795d9bc7a2c847df3c33e220d0d291375eee640d",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 58,
+      "queueLine": 81,
+      "entry": "| 2026-10-15 | Stock app builder: OS-owned skill/tool bundle, automatic fresh/alongside discovery, agent routing, doctor and VM factory mount restoration | WAM PR #34 `eaf33cac` (full tests `443d0ab1`, focused bundle30/30 at head); Agent Service PR #30 `6db5046`; Try Wizard PR #21 `91ff7e4` | Staged, not merged/deployed. Thales WAM141 pass/1 skip; Service542 pass/3 skip; factory3 pass; real empty-profile agent built and modified habit app; mobile browser CRUD/persistence passed. Independent review PASS at eaf33cac; all must-fix findings closed. Try Wizard full CI blocked by unchanged native branding-test failures; release owner owns baseline resolution/firstboot SSH gate. James: include only if cutoff permits, otherwise next significant build; never hold up or restart current build. Handoff: `[local evidence omitted]` |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "d786206",
+              "commit": "d786206c68c86d3e17d663c293114e1328fb5622",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "wam",
+          "pinnedCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
+          "ancestry": [
+            {
+              "queueReference": "cd3d0593",
+              "commit": "cd3d0593dbeb5ebb62585dc7c9ce825ebba36b25",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "6db5046",
+              "commit": "6db5046292daad9f34eefad7b06e49fe23fc22db",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 59,
+      "queueLine": 82,
+      "entry": "| 2026-10-15 | Larger Private keyhole matching main hat; layered green/purple Agents; new desktop opens square-icon app picker with focused search; Ctrl/Cmd+O | wizard-ux PR #29, daily 3d53b91 | Opus design; live Thales 63/63; latest configured-agent launcher behavior preserved; web-only, no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "3d53b91",
+              "commit": "3d53b9177d5df752edc07d40d555fee105db53c9",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 60,
+      "queueLine": 83,
+      "entry": "| 2026-10-15 | Every configured agent appears as a searchable app and opens scoped chats directly; Private Agent launcher/deep-link support | wizard-ux PR #28, daily 0bf27fe | Web live; Thales live QA57/57, phone and desktop; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "0bf27fe",
+              "commit": "0bf27fe43c3a467840f426b96db3a9fc03e8f733",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 61,
+      "queueLine": 84,
+      "entry": "| 2026-10-15 | Restore white/neutral agent titles and remove vertical agent chat stripes; privacy tint remains proposal | wizard-ux PR #26, daily 7b3f9da | Web live; Thales60/60; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "7b3f9da",
+              "commit": "7b3f9da095a1abbc82106dcfa7d3aa4a644f2b68",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 62,
+      "queueLine": 85,
+      "entry": "| 2026-10-15 | Private-agent file shares stay in their own inbox and route through their agent; cold Android share notification waits for owning-agent lookup | wizard-agent-service PR #29 (`260f517` live); wizard-ux PR #25 (`14068d1` daily) | Live synthetic nonce-reading proof, replay/privacy negatives, Thales full backend suite and cold-notification browser check; no native or guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "260f517",
+              "commit": "260f517954587a4cc7d34de894ef6e44dc2e527b",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "14068d1",
+              "commit": "14068d1f67b7b08bd5e02ab93417e51daa655e0a",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 63,
+      "queueLine": 86,
+      "entry": "| 2026-10-15 | Agent logos and coloured names live in Chats title bars; repeated agent banners removed; title icons lose purple tile backgrounds | wizard-ux PR #24, daily 1355141 | Web live; candidate Thales QA56/56 \u00d73 and icons32/32; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "1355141",
+              "commit": "13551416d5da00dee83955edd34fc979cfded76b",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 64,
+      "queueLine": 87,
+      "entry": "| 2026-10-15 | New-chat composer has a usable first-frame height before typing; hidden-pane measurement guarded and remeasured after reveal | wizard-ux PR #23, daily 749d60d | Web live; Thales live layout QA 38/38; port of prior staged Mac repair; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "749d60d",
+              "commit": "749d60ddbb33d59e20ab229e13c9b70f559320cf",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 65,
+      "queueLine": 88,
+      "entry": "| 2026-10-15 | Desktop Home Resources (Devices / AI), centered house, shared phone/desktop workspace icons; Home Alt+1 and app desktops Alt+2\u20139 | wizard-ux PR #22, daily 4a2371d | Web live, Thales live QA56/56; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4a2371d",
+              "commit": "4a2371dc281104e58e6b16482a3164e74b77d869",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 66,
+      "queueLine": 89,
+      "entry": "| 2026-10-15 | Home restored to house; Chats uses purple company hat, Private green keyhole hat; Messenger keeps bubbles | wizard-ux PR #21, daily f4e5a7e | Supersedes Hat Home icon entries below; web live, no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "f4e5a7e",
+              "commit": "f4e5a7e0894f795233a392243cf2e29bfb3d78a7",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 67,
+      "queueLine": 90,
+      "entry": "| 2026-10-14 | Supplied hat replaces the purple star across the UX, favicons, PWA icons and setup onboarding | wizard-ux `daily` 4fbafd5; try-wizard `branding/mac-hat-20261014` 95f8176 (onboarding overlay) | The private hat.2 guest candidate predates the sizing fix; take current `daily` UX instead of reusing it |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4fbafd5",
+              "commit": "4fbafd556ff1b33d4848b1fd2ad8bc606c3354cd",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [],
+          "equivalentFiles": [
+            {
+              "path": "next/mac/Shared/Brand.swift",
+              "blob": "6fe0d325f9f12b977d09c74f2c4c66b70963ea31",
+              "reference": "95f8176"
+            },
+            {
+              "path": "next/mac/Tests/test-branding.py",
+              "blob": "3e9419e803614bf15318766ecc2a69d8474266d0",
+              "reference": "95f8176"
+            }
+          ],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 68,
+      "queueLine": 91,
+      "entry": "| 2026-10-14 | Hat Home: phone Home icon is the hat at sigil size; desktop hat opens the Home screen, Search has its own button | wizard-ux `daily` 4fbafd5 | Live on James's Wizard since 14 Oct |",
+      "status": "superseded",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4fbafd5",
+              "commit": "4fbafd556ff1b33d4848b1fd2ad8bc606c3354cd",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Home hat policy superseded by row 66 (Home house); original branding and sizing ancestry recorded, not a request to restore old Home",
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 69,
+      "queueLine": 92,
+      "entry": "| 2026-10-14 | Hat sized to its neighbours everywhere (dock 62% sigil mask, inline 0.8em, desktop bar 13px) | wizard-ux `daily` 4fbafd5 | |",
+      "status": "superseded",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "4fbafd5",
+              "commit": "4fbafd556ff1b33d4848b1fd2ad8bc606c3354cd",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": "Home hat policy superseded by row 66 (Home house); original branding and sizing ancestry recorded, not a request to restore old Home",
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 70,
+      "queueLine": 93,
+      "entry": "| 2026-10-15 | Files app Upload: uploads with a destination land in the user-files root (folder being browsed, else Inbox/<date>); /wizard/v1/user-files read API | wizard-agent-service `feature/files-upload-dest` de9222c (PR #28); spec wizard-os PR #46 | Guest needs `WIZARD_USER_FILES_ROOT` = its media root. The Files folder view (files-browser) is James-box only, with no GitHub remote |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "de9222c",
+              "commit": "de9222cd97333149b4f20591508550f42c42d932",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 71,
+      "queueLine": 94,
+      "entry": "| 2026-10-16 | Heavy admission reads canonical compacted history with bounded, race-checked pagination; preserves genuine latest steering | wizard-agent-service `fix/heavy-compacted-watermark-20261016` `95c6e4f24e32aaa3b32141edf02457a99283e56c` | Live narrow service release; Thales focused28/28, real compressed-thread watermark verified; no core Hermes change, Mac job submission, or guest rebuild. |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "95c6e4f24e32aaa3b32141edf02457a99283e56c",
+              "commit": "95c6e4f24e32aaa3b32141edf02457a99283e56c",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 72,
+      "queueLine": 95,
+      "entry": "| 2026-10-18 | Update banner: Reload works mid-recording for Android native Mizel meetings (meeting keeps recording, Mizel reattaches); in-page recordings get \"Reload when recording ends\" | wizard-ux `daily` 44e3d23 (PR #129, `fix/mizel-reload-persist-20261018`) | Web only; Mac app recordings use the deferred reload |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "44e3d23",
+              "commit": "44e3d23b5beab6d6c64fc18c7c565137ab44d56c",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 73,
+      "queueLine": 96,
+      "entry": "| 2026-10-18 | Unified Chats (#64): main Chats lists every agent's threads (private with a lock); picker Private group routes new chats to the private agent; Private pick in a standard thread continues privately with quoted context; Tinfoil DeepSeek V4.1 Flash | wizard-ux PR #127 merge b144b62; wizard-agent-service PR #45 (release ref e7a6b9b, merge f7536b5); spec wizard-os PR #55 a43a17c | Web live 18 Oct; Agent Service release pending deploy; no minor guest rebuild |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "b144b62",
+              "commit": "b144b624a697bc2de2fa093399993e59e8cd0084",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "e7a6b9b",
+              "commit": "e7a6b9b1da8f8e345ed30195279a84b08d531769",
+              "isAncestor": true
+            },
+            {
+              "queueReference": "f7536b5",
+              "commit": "f7536b5423856a3d0b3c9bca28a6e835c43b0b9d",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 74,
+      "queueLine": 97,
+      "entry": "| 2026-10-19 | Backup & move: Mac menus (Back Up / Restore / Move to This Mac) + guest backup front door; guest engine `wam backup` | try-wizard `feature/wizard-backup-mac` 02f9a00; wizard-app-manager `integration/wizard-backup-mac-0696805f` 850cfe32 | Proven Linux\u21c4Mac on a real 0.4.0 guest (Undo exact both ways). Needs guest + native app in the next significant Mac release |",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "02f9a00",
+              "commit": "02f9a005c9542491bf8b096e696821d825d2763f",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        },
+        {
+          "component": "wam",
+          "pinnedCommit": "ae6a2ba582dac1733d577cc6996e95cbb55683c9",
+          "ancestry": [
+            {
+              "queueReference": "850cfe32",
+              "commit": "850cfe3252576b3a9ae9bea54c4fedd173691443",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 75,
+      "queueLine": 98,
+      "entry": "- 2026-10-19 Wisdom 0.4.0-private.15 (5708ab0): chapter done on rating screen, gloss drop caps, copyable pop-ups, swipe anywhere \u2014 live app only, no guest rebuild.",
+      "status": "deferred-to-next-release",
+      "components": [],
+      "reason": "DeFleur lane integration is not arm64/default admitted; legacy owner workflow remains untouched.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "defer",
+      "decisionAuthority": "Archimedes launch scope instruction 2026-10-24"
+    },
+    {
+      "id": 76,
+      "queueLine": 99,
+      "entry": "- Desktop voice capture chrome (edge glow + compact timer pill, wizard-ux PR #174, ef5b0fb2) \u2014 web-only; guest picks it up at next significant rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "ef5b0fb2",
+              "commit": "ef5b0fb27df3029d98c1924c1ee1a056379cecbc",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 77,
+      "queueLine": 100,
+      "entry": "- Desktop voice Escape-cancel + short cancels deleted (<20 s), wizard-ux PR #176, 1edfe29a \u2014 web-only.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "1edfe29a",
+              "commit": "1edfe29a07c352a86102cff79953d0e29103c36d",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 78,
+      "queueLine": 101,
+      "entry": "- 2026-10-19 wizard-ux #185 (d4c308e6): closing an app's last window stops its shared-capture mic and keeps the take for recovery (desktop + phone shells).",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "d4c308e6",
+              "commit": "d4c308e623f62116aa4bd9c9195fb2ba9dbc8c77",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 79,
+      "queueLine": 102,
+      "entry": "- 2026-10-20 \u2014 Pending approval: Jan's try-wizard #27 (`087d6b4630618febc96029efcad481a48e02e1e1`) adds `backlog=128` to `wizard-ux-bridge` and `wizard-vsock@.service`. Test only by patching a disposable saved-disk copy; include approved files in the next significant guest/software payload, never rebuild for this fix alone. L5 real-vsock burst acceptance is staged, not yet claimed passed.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "75c1f19f",
+              "commit": "75c1f19f9f9614f8bc97ace15f87ba9d5b73f3e7",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 80,
+      "queueLine": 103,
+      "entry": "- 2026-10-20 \u2014 Pending approval: wizard-agent-service #64 (`d2aefaafa2ac4f2796e60a84f623c6456b015a63`) includes stock imported CLI/TUI chats in all three session-list gates. Synthetic regression 3 failed before / 3 passed after; full CI 815 Vitest + 15 Node + 5 Python passed. Include the approved service revision at the next significant guest/software payload; native-only replacement does not deliver this guest fix. Full-size private-Hermes import rehearsal remains open.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "coverage": "carried",
+          "method": "cherry-pick-exact-three-allowlists-and-regression-test",
+          "reference": "d2aefaafa2ac4f2796e60a84f623c6456b015a63",
+          "paths": [
+            "server/service.mjs",
+            "server/hermes-http-readers.mjs",
+            "server/read-human-sessions.py",
+            "tests/imported-hermes-chats.test.ts"
+          ]
+        }
+      ],
+      "reason": "Service #64 d2aefaaf cherry-picked as 15d501a36a07ab24ca8409ee0be30b91446c9202; all three CLI/TUI imported-chat allowlists and its regression test are carried.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "carry",
+      "decisionAuthority": "Archimedes launch instruction 2026-10-24"
+    },
+    {
+      "id": 81,
+      "queueLine": 104,
+      "entry": "- 2026-10-21 \u2014 Security (eMudhra compromised intermediate-CA keys): every app/core container image still trusts `emSign ECC Root CA - G3` (+ `AAA Certificate Services`); containers run read-only, so no live hotfix. Rebuild images on patched bases (Alpine ca-certificates 20261020-r0, Debian 20250419~deb12u2/+deb13u1, Ubuntu 20260816ubuntu0.*), certifi \u2265 2026.10.19 (private Hermes v2026.9.24-wizard2 ships 2026.05.20; connectors 2026.07.22; speaches 2024.08.30), Node \u2265 22.23.4 for Agent Service. Guest gets the patched `ca-certificates` apt package. Test: `curl https://dv-g3b-emudhra.we-have-a-problem.com/` must fail. Source: emudhra.we-have-a-problem.com.",
+      "status": "carried-mandatory-security-gate",
+      "components": [],
+      "reason": "MANDATORY, never deferred: retained host trust-store remediation plus all selected/default/inherited image certifi/Node/curl closure. Admission requires actual passing security-preflight.json; no old image is relabelled patched.",
+      "acceptance": "not-run-on-final-guest",
+      "decision": "carry",
+      "decisionAuthority": "Archimedes launch instruction 2026-10-24",
+      "securityRecipe": "security-closure.py",
+      "securityStatus": "pending-execution-not-deferred",
+      "securityRecipeCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f"
+    },
+    {
+      "id": 82,
+      "queueLine": 105,
+      "entry": "- 2026-10-21 \u00b7 try-wizard#27 (75c1f19f, Jan): socat vsock listener backlog raised; fixes dropped phone requests over Tailscale (52/72 \u2192 72/72 on Thales). Source merged; ships with next significant guest rebuild.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "native",
+          "pinnedCommit": "ecd99b1a1eee0d3a524c4f1cbb0bb6f1116df95f",
+          "ancestry": [
+            {
+              "queueReference": "75c1f19f",
+              "commit": "75c1f19f9f9614f8bc97ace15f87ba9d5b73f3e7",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 83,
+      "queueLine": 106,
+      "entry": "- 2026-10-22 \u00b7 wizard-agent-service PR #96 merged into `fix/mac-release-recovery-20261015` at `77650c65f9c80b999ffd78ee58a23ecd99bdfbeb`: same-site entry navigation fix so fresh Mac onboarding hands off to Wizard without {\"error\":\"same_origin_required\"} (issue #95). Full suite 585/585 passed; six historical SHA-256 evidence-digest gitleaks false positives narrowly allowlisted, both checks green. Bump the agent-service pin from 24a2b3a to this merge (or its approved descendant) at next significant guest rebuild; no guest image rebuilt for this fix.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "service",
+          "pinnedCommit": "15d501a36a07ab24ca8409ee0be30b91446c9202",
+          "ancestry": [
+            {
+              "queueReference": "77650c65f9c80b999ffd78ee58a23ecd99bdfbeb",
+              "commit": "77650c65f9c80b999ffd78ee58a23ecd99bdfbeb",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    },
+    {
+      "id": 84,
+      "queueLine": 107,
+      "entry": "- 2026-10-22 wizard-ux#321 (56a17f96): Photos backup settings screen on web + Settings text follows --wz-text on light skins. Web live; APK change ships with next APK release.",
+      "status": "source-carried",
+      "components": [
+        {
+          "component": "ux",
+          "pinnedCommit": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
+          "ancestry": [
+            {
+              "queueReference": "56a17f96",
+              "commit": "56a17f969ddaeeae37961fb5bd2030af5b04dda3",
+              "isAncestor": true
+            }
+          ],
+          "equivalentFiles": [],
+          "status": "source-carried"
+        }
+      ],
+      "reason": null,
+      "acceptance": "not-run-on-final-guest"
+    }
+  ],
+  "launchDecisions": {
+    "previouslyUncarried": 22,
+    "carried": 3,
+    "deferredToNextRelease": 19,
+    "mandatorySecurityDeferred": false,
+    "cliTuiAllowlistsCarried": true
+  }
+}
