@@ -50,7 +50,7 @@ def phone_setup(svc,runner=None):
  for key in ('WIZARD_TAILNET_PORT','WIZARD_PRIVATE_ACCESS_SOCKET'):env.pop(key,None)
  for key,value in [('ports','127.0.0.1:'+PHONE_UPSTREAM+':'+PHONE_TAILNET_PORT),
                    ('volumes',PHONE_SOCKET_DIR+':'+PHONE_SOCKET_DIR)]:
-  if key in svc:svc[key]=[item for item in svc[key] if item!=value]
+  if key in svc:svc[key]=[item for item in (svc[key] or []) if item!=value]
  if 'group_add' in svc:svc['group_add']=[g for g in svc['group_add'] or [] if str(g)!=PHONE_GID]
  runner=runner or run
  try:phone=json.loads(runner(['/opt/wizard/bin/wizard-phone-access']))

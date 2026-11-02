@@ -107,6 +107,13 @@ class PhoneAccess(unittest.TestCase):
                 self.assertIn('/run/wizard-private-access:/run/wizard-private-access', svc['volumes'])
                 self.assertIn('980', svc['group_add'])
 
+    def test_null_ports_degrades_without_aborting(self):
+        svc = copy.deepcopy(self.svc)
+        svc['ports'] = None
+        result = self.ns['phone_setup'](svc, lambda args: '{"phone_access":"blocked"}')
+        self.assertEqual(result, {'phone_access': 'unavailable'})
+        self.assertEqual(svc['ports'], [])
+
     def test_ready_helper_wires_the_service(self):
         result = self.ns['phone_setup'](self.svc, lambda args: '{"phone_access":"ready","socket_gid":980}')
         self.assertEqual(result['phone_access'], 'ready')
