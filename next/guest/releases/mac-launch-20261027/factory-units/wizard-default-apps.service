@@ -1,0 +1,16 @@
+[Unit]
+Description=Install default Wizard apps after setup using App Manager
+ConditionPathExists=/var/lib/wizard/default-apps-release.json
+ConditionPathExists=!/home/wizard/.wizard-os/factory-default-apps.done
+After=network-online.target docker.service wizard-setup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wizard
+Group=wizard
+Environment=HOME=/home/wizard
+ExecStart=/usr/bin/python3 /opt/wizard/bin/wizard-default-apps
+TimeoutStartSec=65min
+Nice=19
+IOSchedulingClass=idle

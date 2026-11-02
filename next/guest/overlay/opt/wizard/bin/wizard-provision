@@ -1,0 +1,102 @@
+#!/bin/bash
+# Build-time only (kernel command line has wizard.provision=1): install Wizard OS 0.2.0 with the real
+# one-liner (os.sh = wizard-app-manager get.sh, fresh mode), check it, strip per-box identity, power off.
+# Every step's time goes to /var/lib/wizard/provision.json so the build can report it.
+set -uo pipefail
+exec > >(tee -a /var/log/wizard-provision.log) 2>&1
+P=/var/lib/wizard/provision.env           # written by build-image.sh: pins
+[ -r "$P" ] && . "$P"
+WAM_COMMIT="${WAM_COMMIT:-}"
+WIZARD_RELEASE="${WIZARD_RELEASE:?frozen Wizard OS release required}"
+WIZARD_RELEASE_BASE="${WIZARD_RELEASE_BASE:?immutable local release base required}"
+WAM_IMAGE="${WAM_IMAGE:-}"
+OS_SH_URL="${OS_SH_URL:?pinned os.sh URL required}"
+OS_SH_SHA256="${OS_SH_SHA256:?pinned os.sh sha256 required}"
+FACTORY="${FACTORY:-slim}"
+HERMES_IMAGE="${HERMES_IMAGE:-}"
+T0=$(date +%s.%N)
+declare -A T
+stamp() { T[$1]=$(python3 -c "import sys;print(round($(date +%s.%N)-$T0,1))"); echo "== [$(date -u +%T)] $1 at ${T[$1]}s"; }
+fail() { echo "PROVISION_FAIL: $*"; write_report fail "$*"; sync; systemctl poweroff; exit 1; }
+write_report() {
+  python3 - "$1" "${2:-}" <<PY
+import json, sys
+t = {$(for k in "${!T[@]}"; do printf '"%s": %s, ' "$k" "${T[$k]}"; done)}
+json.dump({"result": sys.argv[1], "error": sys.argv[2], "seconds": t, "wam_commit": "$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD 2>/dev/null)",
+           "wam_image": "$WAM_IMAGE"}, open("/var/lib/wizard/provision.json", "w"), indent=2)
+PY
+}
+as_wizard() { sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
+
+stamp start
+# Build-time only: if the Mac's NAT DNS proxy doesn't answer (it can wedge on the build Mac), resolve through public
+# DNS for the build. The drop-in is removed with the other build leftovers below, so shipped boxes use their own.
+for _ in $(seq 1 10); do getent hosts github.com >/dev/null && break; sleep 2; done
+if ! getent hosts github.com >/dev/null; then
+  echo "NAT DNS not answering; using public DNS for the build"
+  mkdir -p /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNS=1.1.1.1 8.8.8.8\n' > /etc/systemd/resolved.conf.d/90-wizard-provision.conf
+  systemctl restart systemd-resolved
+fi
+for _ in $(seq 1 60); do curl -fsS -o /dev/null --max-time 5 https://github.com && break; sleep 2; done
+stamp network
+# The real one-liner. Root mode installs Docker, creates/uses the `wizard` user (uid 1000, made by the image),
+# then runs get.sh as that user: clone wizard-app-manager main, install.sh (Runtipi box-only, wam, defaults).
+curl -fsSL "$OS_SH_URL" -o /tmp/os.sh || fail "download os.sh"
+printf '%s  %s\n' "$OS_SH_SHA256" /tmp/os.sh | sha256sum -c - || fail "os.sh digest mismatch (not executed)"
+env -u WAM_IMAGE -u WIZARD_SHELL_IMAGE -u WIZARD_UX_IMAGE -u WIZARD_AGENT_SERVICE_IMAGE -u WAM_REF WIZARD_RELEASE="$WIZARD_RELEASE" WIZARD_RELEASE_BASE="$WIZARD_RELEASE_BASE" WIZARD_STRICT=1 WIZARD_MODE=fresh WIZARD_PRIVATE_ACCESS=tailscale bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
+stamp os_sh
+# Verify the release selected its immutable WAM commit before any Mac layers.
+if [ -n "$WAM_COMMIT" ]; then
+  head=$(sudo -u wizard git -C /home/wizard/wizard-app-manager rev-parse HEAD)
+  [ "$head" = "$WAM_COMMIT" ] || fail "os.sh did not install the frozen release WAM commit"
+fi
+stamp pinned
+# Wait until every default app answers (bootstrap installs them in the background of Runtipi's queue).
+for _ in $(seq 1 120); do
+  as_wizard /home/wizard/.local/bin/wam slots --json >/tmp/slots.json 2>/dev/null && \
+    python3 - <<'PY' && break
+import json, sys
+rows = json.load(open("/tmp/slots.json"))
+missing = [r["slot"] for r in rows if r.get("state") == "empty"]
+if missing: print("waiting for", missing)
+sys.exit(1 if missing else 0)
+PY
+  sleep 10
+done
+stamp apps_installed
+as_wizard /home/wizard/.local/bin/wam slots || true
+as_wizard /home/wizard/.local/bin/wam apps || true
+as_wizard /home/wizard/.local/bin/wam doctor | tee /var/lib/wizard/provision-doctor.txt || true
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | tee /var/lib/wizard/provision-containers.txt
+docker images --digests --format '{{.Repository}}:{{.Tag}}@{{.Digest}}\t{{.Size}}' | tee /var/lib/wizard/provision-images.txt
+docker info --format 'storage driver: {{.Driver}}' | tee -a /var/lib/wizard/provision-images.txt
+du -sh /var/lib/docker /var/lib/containerd 2>/dev/null | tee -a /var/lib/wizard/provision-images.txt
+stamp checked
+# Slim factory: only what reaches a first chat ships in the download (wizard-apps factory).
+if [ "${FACTORY:-slim}" = slim ]; then
+  as_wizard /opt/wizard/bin/wizard-apps factory ${HERMES_IMAGE:+--hermes-image "$HERMES_IMAGE"} || fail "factory trim"
+  as_wizard /home/wizard/.local/bin/wam slots | tee -a /var/lib/wizard/provision-doctor.txt || true
+  as_wizard /home/wizard/.local/bin/wam doctor | tee /var/lib/wizard/provision-doctor.txt || true
+  docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | tee /var/lib/wizard/provision-containers.txt
+  docker images --digests --format '{{.Repository}}:{{.Tag}}@{{.Digest}}\t{{.Size}}' | tee /var/lib/wizard/provision-images.txt
+  du -sh /var/lib/docker | tee -a /var/lib/wizard/provision-images.txt
+  stamp factory
+fi
+/opt/wizard/bin/wizard-shell-port >/dev/null && echo "shell port $(/opt/wizard/bin/wizard-shell-port)"
+
+# ---- strip per-box identity so every Mac gets its own ----
+systemctl stop tailscaled 2>/dev/null || true
+rm -f /var/lib/tailscale/tailscaled.state /var/lib/tailscale/*.state
+rm -f /home/wizard/.wizard-os/private-access.json
+truncate -s 0 /etc/machine-id; rm -f /var/lib/dbus/machine-id
+rm -f /etc/ssh/ssh_host_* 2>/dev/null || true
+rm -f /etc/systemd/resolved.conf.d/90-wizard-provision.conf
+apt-get clean; rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+journalctl --rotate >/dev/null 2>&1; journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+stamp done
+write_report ok
+touch /var/lib/wizard/provisioned
+sync
+echo PROVISION_OK
+systemctl poweroff

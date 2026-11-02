@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+. /opt/wizard/bin/wizard-env
+export WIZARD_SETUP_HOST=127.0.0.1 WIZARD_SETUP_PORT=8930
+export WIZARD_SHELL_ORIGIN="http://127.0.0.1:8924" # authenticated local-owner ingress
+exec /usr/bin/python3 /opt/wizard/setup/server.py

@@ -1,0 +1,8 @@
+#!/bin/bash
+# One-line control channel from the Mac (vsock 9100): poweroff | ping
+read -r cmd || exit 0
+case "$cmd" in
+  poweroff) echo ok; systemctl poweroff ;;
+  ping) echo pong ;;
+  *) echo unknown ;;
+esac

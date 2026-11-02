@@ -1,0 +1,30 @@
+#!/bin/bash
+# Full-screen Wizard surface. Started by Hyprland on session start; restarts
+# Chromium if it ever exits so the user never lands on an empty compositor.
+set -u
+profile="$HOME/.local/share/wizard-kiosk"
+mkdir -p "$profile"
+# A crash or hard VM stop must not surface Chromium's "restore pages" bubble.
+prefs="$profile/Default/Preferences"
+if [[ -f $prefs ]]; then
+  sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/; s/"exited_cleanly":false/"exited_cleanly":true/' "$prefs" 2>/dev/null || true
+fi
+while true; do
+  /usr/bin/chromium \
+    --user-data-dir="$profile" \
+    --kiosk \
+    --no-first-run \
+    --no-default-browser-check \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --disable-features=Translate,MediaRouter \
+    --password-store=basic \
+    --force-dark-mode \
+    --enable-features=WebUIDarkMode \
+    --ozone-platform=wayland \
+    --enable-wayland-ime \
+    --check-for-update-interval=31536000 \
+    "file:///opt/wizard/share/splash.html"
+  sleep 1
+done

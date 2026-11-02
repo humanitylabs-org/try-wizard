@@ -1,0 +1,24 @@
+#!/bin/bash
+# Per-box state for the onboarding server. Idempotent; runs before it on every boot.
+set -euo pipefail
+install -d -o wizard -g wizard -m 0750 /var/lib/wizard
+chown wizard:wizard /var/lib/wizard
+# The image ships without a machine id (and without Tailscale's node key); systemd makes a fresh one.
+[ -s /etc/machine-id ] || systemd-machine-id-setup >/dev/null 2>&1 || true
+
+# The agent's shell in this VM (Hermes terminal backend `ssh` to wizard@wizard-vm, set by the factory build): host keys
+# and the agent's key are made here, per box. The key may only be used from the Docker networks on this VM.
+ssh-keygen -A >/dev/null 2>&1 || true
+K=/home/wizard/.wizard-os/agent-ssh
+install -d -o wizard -g wizard -m 0700 /home/wizard/.wizard-os "$K" /home/wizard/.ssh
+[ -s "$K/id_ed25519" ] || sudo -u wizard ssh-keygen -q -t ed25519 -N "" -C "hermes-agent@wizard-vm" -f "$K/id_ed25519"
+AK=/home/wizard/.ssh/authorized_keys
+if ! grep -qF "$(cut -d' ' -f2 "$K/id_ed25519.pub")" "$AK" 2>/dev/null; then
+  echo "from=\"10.0.0.0/8,172.16.0.0/12\",no-agent-forwarding,no-X11-forwarding $(cat "$K/id_ed25519.pub")" >> "$AK"
+fi
+chown wizard:wizard "$AK"; chmod 0600 "$AK"
+HD=/home/wizard/runtipi/app-data/wizardapps/hermes-agent/data
+if [ -d "$HD" ]; then
+  install -d -o 1000 -g 1000 -m 0700 "$HD/.ssh-vm"
+  install -o 1000 -g 1000 -m 0600 "$K/id_ed25519" "$HD/.ssh-vm/id_ed25519"
+fi

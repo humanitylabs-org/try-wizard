@@ -1,0 +1,15 @@
+[Unit]
+Description=Wizard user files (Mac folder over virtio-fs, or the VM disk)
+After=local-fs.target remote-fs.target
+Before=docker.service wizard-setup.service
+ConditionKernelCommandLine=!wizard.provision=1
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+StandardOutput=journal+console
+ExecStart=/opt/wizard/bin/wizard-media
+ExecStop=-/usr/bin/fusermount3 -u /home/wizard/runtipi/media
+
+[Install]
+WantedBy=multi-user.target

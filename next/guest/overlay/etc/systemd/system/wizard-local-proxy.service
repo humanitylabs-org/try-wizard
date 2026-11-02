@@ -1,0 +1,8 @@
+[Unit]
+Description=Wizard local VM owner ingress (loopback/vsock only)
+After=network.target docker.service
+[Service]
+ExecStart=/usr/sbin/nginx -c /opt/wizard/local-proxy.conf -g "daemon off;"
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target

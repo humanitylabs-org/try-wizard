@@ -1,0 +1,13 @@
+[Unit]
+Description=Wizard developer relay (only active with developer SSH forwarding)
+After=wizard-firstboot.service
+
+[Service]
+User=wizard
+Group=wizard
+ExecStart=/opt/wizard/venv/bin/python /opt/wizard/bin/wizard-dev-relay
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

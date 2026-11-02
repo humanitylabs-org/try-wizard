@@ -1,0 +1,49 @@
+#!/bin/bash
+# Phone access for Wizard for Mac, the way wizard-agent-service docs/phone-setup.md lays it out ("Try Wizard guest").
+# Root, idempotent; wizard-runtime-configure runs it before it writes the Service overlay.
+#
+#   phone ─tailnet─▶ tailscaled Serve :443 ─▶ 127.0.0.1:8809 ─▶ Service tailnet listener (container 8789, owner check)
+#   Mac app ─▶ 127.0.0.1:48023 ─▶ wizard-local-proxy :8924 ─▶ Service main port   (unchanged)
+#
+# Installs the private-access helper (the only process that drives `tailscale`; the Service reaches it on a unix
+# socket owned by a dedicated group) and keeps SSH off the tailnet. It never signs in or starts Serve: the owner does
+# that in Setup → Use Wizard on your phone, which records the owner's own Tailscale login.
+set -euo pipefail
+# Keep these in step with wizard-runtime-configure (PHONE_* constants) and tests/test_phone_access.py.
+GROUP=wizard-access
+GID=980          # dedicated socket group: never the wizard user's own group (members can sign the box out)
+UPSTREAM=8809    # 127.0.0.1 port Serve forwards to. Not 8799: the Wizard app template's default port.
+SRC=/opt/wizard/private-access
+[ "$(id -u)" = 0 ] || { echo "wizard-phone-access: run as root" >&2; exit 1; }
+
+if ! getent group "$GROUP" >/dev/null; then
+  if getent group "$GID" >/dev/null; then echo "wizard-phone-access: gid $GID is taken by $(getent group "$GID" | cut -d: -f1)" >&2; exit 1; fi
+  groupadd --system --gid "$GID" "$GROUP"
+fi
+[ "$(getent group "$GROUP" | cut -d: -f3)" = "$GID" ] || { echo "wizard-phone-access: $GROUP must have gid $GID" >&2; exit 1; }
+
+sh "$SRC/install.sh" --serve-upstream "$UPSTREAM" --socket-group "$GROUP" --no-start >/dev/null
+systemctl daemon-reload
+systemctl enable wizard-private-access >/dev/null 2>&1
+systemctl restart wizard-private-access
+
+# Rule 0 of phone-setup.md: on the tailnet only Serve may answer. sshd (the agent's terminal into this VM, reached over
+# the Docker bridge) listens on every interface, so drop SSH that arrives on tailscale0. The raw table runs before
+# Tailscale's own filter chain, which accepts all tailscale0 traffic.
+cat > /etc/systemd/system/wizard-tailnet-guard.service <<'UNIT'
+[Unit]
+Description=Wizard: drop SSH arriving from the tailnet (only Tailscale Serve answers there)
+Before=tailscaled.service ssh.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for t in iptables ip6tables; do $t -t raw -C PREROUTING -i tailscale0 -p tcp --dport 22 -j DROP 2>/dev/null || $t -t raw -I PREROUTING -i tailscale0 -p tcp --dport 22 -j DROP; done'
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now wizard-tailnet-guard >/dev/null 2>&1
+systemctl restart wizard-tailnet-guard
+
+printf '{"phone_access":"ready","helper":"%s","socket_group":"%s","socket_gid":%s,"serve_upstream":%s}\n' \
+  "$(cat "$SRC/SOURCE")" "$GROUP" "$GID" "$UPSTREAM"
