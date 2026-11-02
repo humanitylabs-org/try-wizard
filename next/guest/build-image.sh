@@ -116,6 +116,8 @@ fi
 if [ "$STEP" = all ] || [ "$STEP" = pack ]; then
 echo "== 3. shrink, manifest, compress"
 cp "$HERE/check-image.sh" "$WORK/g/"
+# REUSE the existing minimal-factory implementation, including independent zero readback.
+cp "$HERE/releases/mac-launch-20261027/compact-ext4.py" "$WORK/g/compact-ext4.py"
 docker run --rm --privileged -v "$WORK:/w" debian:trixie bash -euc '
 apt-get update -qq >/dev/null && apt-get install -y -qq e2fsprogs zerofree >/dev/null
 # The provisioned disk must come back clean: any repair here means writes were lost in the VM.
@@ -125,23 +127,11 @@ for f in provision.json provision-doctor.txt provision-containers.txt provision-
   debugfs -R "cat /var/lib/wizard/$f" /w/build.img > /w/$f 2>/dev/null || true
 done
 rm -f /w/rootfs.img; cp --sparse=always /w/build.img /w/rootfs.img
-# resize2fs needs a fresh recorded check on the copy. Only fsck 0/1 are acceptable;
-# then require a read-only clean pass (never hide a failed repair).
-rc=0; e2fsck -fy /w/rootfs.img > /w/fsck-copy.txt 2>&1 || rc=$?
-[ "$rc" -le 1 ] || { cat /w/fsck-copy.txt; exit 1; }
-e2fsck -fn /w/rootfs.img >> /w/fsck-copy.txt 2>&1 || { cat /w/fsck-copy.txt; exit 1; }
-resize2fs -M /w/rootfs.img >/dev/null 2>&1 || { echo "resize2fs -M failed"; resize2fs -M /w/rootfs.img; exit 1; }
-BS=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Block size: *//p"); BC=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Block count: *//p")
-# 2 GiB of headroom so the first boot has room before the Mac grows the disk.
-NEW=$(( BC + 2*1024*1024*1024/BS )); resize2fs /w/rootfs.img $NEW >/dev/null 2>&1
-zerofree /w/rootfs.img
-truncate -s $(( NEW * BS )) /w/rootfs.img
-e2fsck -fn /w/rootfs.img >/dev/null && echo fsck-clean
+# Exact same compactor as the minimal factory: bounded 512 MiB headroom,
+# full free-block zero/readback and final read-only fsck. The input stays sealed.
 apt-get install -y -qq python3 >/dev/null
+python3 -c "import importlib.util,json,pathlib; s=importlib.util.spec_from_file_location(\"compact\",\"/w/g/compact-ext4.py\"); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(json.dumps(m.compact(pathlib.Path(\"/w/rootfs.img\"),\"\",512*1024**2)))" > /w/compaction.json
 bash /w/g/check-image.sh /w/rootfs.img
-FREE=$(dumpe2fs -h /w/rootfs.img 2>/dev/null | sed -n "s/^Free blocks: *//p")
-echo $(( (NEW - FREE) * BS )) > /w/used-bytes
-echo "rootfs $(( NEW * BS / 1048576 )) MiB, used $(( (NEW - FREE) * BS / 1048576 )) MiB"
 '
 cp "$WORK/provision.json" "$OUT/provision-$VER.json"
 cd "$WORK"
@@ -159,8 +149,8 @@ m = {"name": "Wizard OS", "version": v, "stack": "wizard-os-0.2-runtipi",
      "kernel": "boot/vmlinux", "initrd": "boot/initrd", "rootfs": "rootfs.img",
      "cmdline": "console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false",
      "memoryMiB": 6144,
-     # Space the unpacked image takes on the Mac (used blocks; the rest of rootfs.img unpacks as holes).
-     "installBytes": int(open("used-bytes").read()) + os.path.getsize("boot/vmlinux") + os.path.getsize("boot/initrd"),
+     # Conservative logical floor until exact Mac sparse extraction is measured.
+     "installBytes": sum(os.path.getsize(p) for p in files),
      "files": {p: sha(p) for p in files}, "sizes": {p: os.path.getsize(p) for p in files}}
 try: m["provision"] = json.load(open("provision.json"))
 except Exception: pass

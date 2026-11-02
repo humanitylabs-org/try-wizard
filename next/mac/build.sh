@@ -65,8 +65,10 @@ p.write_bytes(plistlib.dumps(d))
 files=['Contents/MacOS/Wizard','Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host']
 guest=os.environ.get('GUEST_UPDATE_PAYLOAD')
 if guest:
- import shutil
- shutil.copytree(guest,a/'Contents/Resources/GuestUpdate',symlinks=False)
+ import subprocess,sys
+ subprocess.run([sys.executable,'tools/compress-guest-payload.py',guest,
+                 str(a/'Contents/Resources/GuestUpdate'),'--receipt',
+                 str(a.parent/'obj/guest-payload-compression.json')],check=True)
  files += [str(p.relative_to(a)) for p in (a/'Contents/Resources/GuestUpdate').rglob('*') if p.is_file()]
 def digest(f):
  if '/Contents/MacOS/' in '/'+f:
