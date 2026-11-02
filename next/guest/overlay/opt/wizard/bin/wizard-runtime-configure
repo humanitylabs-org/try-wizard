@@ -44,11 +44,19 @@ def phone_setup(svc,runner=None):
  """Install the phone-access helper, then wire the Service to it. Phone access is optional: if the helper cannot be
  installed (e.g. gid 980 taken), the runtime still provisions, the Service gets no tailnet listener or socket mount,
  and the result says phone_enrollment unavailable."""
+ # Reconcile our previous overlay before probing: an upgrade can reuse a successfully provisioned Service.
+ # Remove only phone-owned wiring; retain all unrelated owner environment, ports, mounts and groups.
+ env=svc.get('environment',{})
+ for key in ('WIZARD_TAILNET_PORT','WIZARD_PRIVATE_ACCESS_SOCKET'):env.pop(key,None)
+ for key,value in [('ports','127.0.0.1:'+PHONE_UPSTREAM+':'+PHONE_TAILNET_PORT),
+                   ('volumes',PHONE_SOCKET_DIR+':'+PHONE_SOCKET_DIR)]:
+  if key in svc:svc[key]=[item for item in svc[key] if item!=value]
+ if 'group_add' in svc:svc['group_add']=[g for g in svc['group_add'] or [] if str(g)!=PHONE_GID]
  runner=runner or run
  try:phone=json.loads(runner(['/opt/wizard/bin/wizard-phone-access']))
  except (subprocess.CalledProcessError,OSError,ValueError) as e:
   print('wizard-runtime-configure: phone access unavailable: '+str(e),file=sys.stderr);return {'phone_access':'unavailable'}
- if phone.get('phone_access')!='ready':return {'phone_access':'unavailable'}
+ if not isinstance(phone,dict) or phone.get('phone_access')!='ready':return {'phone_access':'unavailable'}
  phone_access(svc);return phone
 def write(path,text,mode=0o644):
  path.parent.mkdir(parents=True,exist_ok=True);tmp=path.with_suffix(path.suffix+'.runtime-new');tmp.write_text(text);os.chmod(tmp,mode);tmp.replace(path)

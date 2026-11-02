@@ -67,6 +67,46 @@ class PhoneAccess(unittest.TestCase):
             self.assertEqual(result, {'phone_access': 'unavailable'})
             self.assertEqual(self.svc, before)
 
+    def test_non_object_helper_json_is_unavailable(self):
+        for output in ('null', '[]', '"ready"', 'true', '0'):
+            with self.subTest(output=output):
+                svc = copy.deepcopy(self.svc)
+                result = self.ns['phone_setup'](svc, lambda args: output)
+                self.assertEqual(result, {'phone_access': 'unavailable'})
+                self.assertEqual(svc, self.svc)
+
+    def test_repeated_provisioning_failure_removes_only_phone_wiring(self):
+        def failed_install(args):
+            raise subprocess.CalledProcessError(1, args)
+        def missing_helper(args):
+            raise FileNotFoundError(args[0])
+        for runner in (failed_install, missing_helper, lambda args: 'not json',
+                       lambda args: '{"phone_access":"blocked"}', lambda args: 'null',
+                       lambda args: '[]', lambda args: '"ready"'):
+            with self.subTest(runner=runner):
+                svc = copy.deepcopy(self.svc)
+                svc['environment']['OWNER_SETTING'] = 'preserved'
+                svc['group_add'] = ['1001', 'owner-group']
+                svc['labels'] = {'owner.label': 'preserved'}
+                svc['volumes'].append('/owner:/owner:ro')
+                svc['ports'].append('127.0.0.1:9000:9000')
+                before = copy.deepcopy(svc)
+                ready = self.ns['phone_setup'](svc, lambda args: '{"phone_access":"ready"}')
+                self.assertEqual(ready['phone_access'], 'ready')
+                self.assertIn('980', svc['group_add'])
+                # A persisted YAML overlay can contain numeric or string gids.
+                svc['group_add'][-1] = 980
+                result = self.ns['phone_setup'](svc, runner)
+                self.assertEqual(result, {'phone_access': 'unavailable'})
+                self.assertEqual(svc, before)
+                # Failure is idempotent, and a subsequent healthy install can recover.
+                self.assertEqual(self.ns['phone_setup'](svc, runner), result)
+                self.assertEqual(svc, before)
+                self.ns['phone_setup'](svc, lambda args: '{"phone_access":"ready"}')
+                self.assertIn('127.0.0.1:8809:8789', svc['ports'])
+                self.assertIn('/run/wizard-private-access:/run/wizard-private-access', svc['volumes'])
+                self.assertIn('980', svc['group_add'])
+
     def test_ready_helper_wires_the_service(self):
         result = self.ns['phone_setup'](self.svc, lambda args: '{"phone_access":"ready","socket_gid":980}')
         self.assertEqual(result['phone_access'], 'ready')
