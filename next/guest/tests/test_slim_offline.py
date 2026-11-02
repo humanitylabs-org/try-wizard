@@ -91,6 +91,8 @@ class OfflineSlimTests(unittest.TestCase):
         generic = (HERE / 'build-image.sh').read_text()
         self.assertIn('releases/mac-launch-20261027/compact-ext4.py', generic)
         self.assertIn('m.compact(', generic)
+        self.assertNotIn('> /w/compaction.json', generic)  # fsck stdout is not JSON
+        self.assertIn('write_text(json.dumps(r,indent=2))', generic)
         self.assertNotIn('zerofree /w/rootfs.img', generic)
         self.assertIn('sum(os.path.getsize(p) for p in files)', generic)
         self.assertGreaterEqual(module.REQUIRED, 2 * module.MAX_ROOTFS + module.RESERVE)

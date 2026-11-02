@@ -130,7 +130,7 @@ rm -f /w/rootfs.img; cp --sparse=always /w/build.img /w/rootfs.img
 # Exact same compactor as the minimal factory: bounded 512 MiB headroom,
 # full free-block zero/readback and final read-only fsck. The input stays sealed.
 apt-get install -y -qq python3 >/dev/null
-python3 -c "import importlib.util,json,pathlib; s=importlib.util.spec_from_file_location(\"compact\",\"/w/g/compact-ext4.py\"); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(json.dumps(m.compact(pathlib.Path(\"/w/rootfs.img\"),\"\",512*1024**2)))" > /w/compaction.json
+python3 -c "import importlib.util,json,pathlib; s=importlib.util.spec_from_file_location(\"compact\",\"/w/g/compact-ext4.py\"); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); r=m.compact(pathlib.Path(\"/w/rootfs.img\"),\"\",512*1024**2); pathlib.Path(\"/w/compaction.json\").write_text(json.dumps(r,indent=2))"
 bash /w/g/check-image.sh /w/rootfs.img
 '
 cp "$WORK/provision.json" "$OUT/provision-$VER.json"
