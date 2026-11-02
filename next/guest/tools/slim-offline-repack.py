@@ -124,8 +124,10 @@ def archive_members(archive, extras=('bom.json',)):
 def extract(archive, destination):
     rows = archive_members(archive)
     destination.mkdir(mode=0o700)
+    # GNU tar rejects --no-overwrite-dir together with --keep-old-files.
+    # Keep fail-on-existing-file semantics in the fresh exclusive destination.
     run([*gnu_tar_args(archive), '--extract', '--sparse', '--no-same-owner',
-         '--no-same-permissions', '--keep-old-files', '--no-overwrite-dir',
+         '--no-same-permissions', '--keep-old-files',
          '--no-recursion', '-C', destination, '--', *[r['raw'] for r in rows.values()]],
         timeout=3600, env=tar_env())
     for name, row in rows.items():

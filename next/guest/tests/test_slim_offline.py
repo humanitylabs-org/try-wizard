@@ -40,6 +40,51 @@ class OfflineSlimTests(unittest.TestCase):
             module.extract(root / 'source.xz', root / 'out')
             self.assertEqual({name: (root / 'out' / name).read_bytes() for name in data}, data)
 
+    def test_gnu_extraction_options_are_compatible(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            data = {name: b'archive bytes' for name in sorted(module.FILES)}
+            self.archive(root / 'source.xz', list(data.items()))
+            # Spy only: execute the actual production argv against real GNU tar.
+            with mock.patch.object(module, 'run', wraps=module.run) as executed:
+                module.extract(root / 'source.xz', root / 'out')
+            argv = executed.call_args.args[0]
+            self.assertIn('--keep-old-files', argv)
+            self.assertNotIn('--no-overwrite-dir', argv)
+            self.assertEqual({n: (root / 'out' / n).read_bytes() for n in data}, data)
+
+    def test_existing_destination_is_refused_without_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.archive(root / 'source.xz', [(n, b'archive') for n in sorted(module.FILES)])
+            destination = root / 'out'
+            destination.mkdir()
+            sentinel = destination / 'rootfs.img'
+            sentinel.write_bytes(b'preserve existing bytes')
+            before = module.census(destination, root / 'before.jsonl')
+            with mock.patch.object(module, 'run', wraps=module.run) as executed:
+                with self.assertRaises(FileExistsError):
+                    module.extract(root / 'source.xz', destination)
+            executed.assert_not_called()
+            self.assertEqual(before, module.census(destination, root / 'after.jsonl'))
+
+    def test_gnu_preexisting_file_is_not_clobbered(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.archive(root / 'source.xz', [(n, b'archive') for n in sorted(module.FILES)])
+            destination = root / 'out'
+            actual_run = module.run
+            def collide_then_run(argv, **kwargs):
+                # Inject after exclusive mkdir, immediately before real GNU tar.
+                (destination / 'rootfs.img').write_bytes(b'preserve collision')
+                return actual_run(argv, **{**kwargs, 'capture_output': True})
+            with mock.patch.object(module, 'run', side_effect=collide_then_run):
+                with self.assertRaises(subprocess.CalledProcessError) as raised:
+                    module.extract(root / 'source.xz', destination)
+            self.assertEqual(raised.exception.returncode, 2)
+            self.assertIn(b'Cannot open: File exists', raised.exception.stderr)
+            self.assertEqual((destination / 'rootfs.img').read_bytes(), b'preserve collision')
+
     def test_archive_escape_duplicate_link_and_incomplete_fail(self):
         for rows in ([('../outside', b'x')], [('rootfs.img', None)],
                      [('rootfs.img', b'x'), ('rootfs.img', b'y')], [('rootfs.img', b'x')]):
