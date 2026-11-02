@@ -1,0 +1,20 @@
+[Unit]
+Description=Wizard onboarding and front door
+After=wizard-firstboot.service docker.service
+Requires=wizard-firstboot.service
+ConditionKernelCommandLine=!wizard.provision=1
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+User=wizard
+Group=wizard
+SupplementaryGroups=docker
+WorkingDirectory=/home/wizard
+Environment=HOME=/home/wizard
+ExecStart=/opt/wizard/bin/wizard-setup-start
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

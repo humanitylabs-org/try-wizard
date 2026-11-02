@@ -1,0 +1,14 @@
+[Unit]
+Description=Grow Wizard OS filesystem to the disk size
+DefaultDependencies=no
+After=local-fs.target
+Before=wizard-firstboot.service
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+Type=oneshot
+ExecStart=/opt/wizard/bin/wizard-grow
+
+[Install]
+WantedBy=multi-user.target

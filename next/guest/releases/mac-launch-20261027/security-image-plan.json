@@ -1,0 +1,57 @@
+{
+  "complete": false,
+  "status": "SECURITY_IMAGE_CLOSURE",
+  "mandatoryQueueId": 81,
+  "images": [],
+  "requiredCoverage": [
+    "selected Service",
+    "selected UX",
+    "selected WAM",
+    "Hermes stock and managed packaging",
+    "Recorder",
+    "every default-app recipe image",
+    "retained Runtipi DB/queue/reverse proxy",
+    "retained Files/Secret Drop/transcriber/helper images"
+  ],
+  "reason": "Complete source recipe and retained manifest discovery recorded; mandatory remediation/pullable replacement identities and TLS-client execution for inherited/default images (not only the three reconciled core images) are still absent. Do not set complete=true to bypass this.",
+  "discovery": {
+    "defaultRecipeEvidence": "evidence/default-image-recipes.json",
+    "defaultRecipeSha256": "ce51849ee222448602b40cc1adfe9e590672e48a447c8c72ee88c7b8bb1868b0",
+    "retainedRepositoryEvidence": "evidence/build307-image-repositories.json",
+    "retainedRepositorySha256": "2975b5db5262cae5c0191d60f40d5ab901c67cd7aea1939c2e0c4584e1a29db7",
+    "retainedFactorySha256": "64ddc2b8123b3185668aab666cd93843a228d769a2ab55c68e64e00a4c1f1366"
+  },
+  "defaultRecipeImages": [
+    "binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f",
+    "chromedp/headless-shell:155.0.8059.40@sha256:0dc9356ce1428962cddcf938dab712a8c56de79adc326f9138298f13df440071",
+    "filebrowser/filebrowser:v2.63.23@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard2@sha256:ac89f5f9fa16eda6c7aba3de3ba7235da3d867914e3ae2dcf13135ee078fd3b0",
+    "ghcr.io/humanitylabs-org/secret-drop:0.1.1@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+    "ghcr.io/humanitylabs-org/wizard-chatgpt:0.1.4@sha256:0cb8fb715f8f06b2225b7dd93d22d84fe58d4ef218586a9f4c8009afc90462c2",
+    "ghcr.io/humanitylabs-org/wizard-claude:0.1.2@sha256:a3e5ec97211a7c088529be600afeb3cf05decc5ff2eac3374afa0a2106215d87",
+    "ghcr.io/humanitylabs-org/wizard-recorder:0.3.5",
+    "ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu@sha256:2163775b6df5e451a71200e8f675fed68dbd8ab184fc604453d549e486f22fd2",
+    "python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4"
+  ],
+  "retainedManifestRefs": [
+    "filebrowser/filebrowser@sha256:a469ea076d4a1b4b1d86a41d130f2f536cd9da996a2b1fb39c0d7635f9d89b9a",
+    "ghcr.io/humanitylabs-org/secret-drop@sha256:29ebc6a7846e6036afc471dc6ddcee31a9cac3a0ce8f00d59cd1186c80c03302",
+    "ghcr.io/humanitylabs-org/wizard-app-manager@sha256:8afef790d701d8bdd6728187f943c5d4de50cd09da5dc29f245f636af32c1117",
+    "postgres@sha256:14bfab572eec6abf65892e1db7c3ba8d41b2a2855c1b143664907d6e146eb6e1",
+    "python@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+    "rabbitmq@sha256:2cb43283d8bbd3caa6c0f0dc00e96c8de772df33df7fd8af6aee4d605aeb8ada",
+    "traefik@sha256:4cda3393930dceff030e144b46260e96e1337c9cfaa4fed81c90cb8f4d498f57"
+  ],
+  "unresolvedLocalImages": {
+    "ghcr.io/humanitylabs-org/hermes-agent": {
+      "ghcr.io/humanitylabs-org/hermes-agent:v2026.9.24-wizard-slim1": "sha256:666d6c659574fa09c1ea47b7ec5f03e8d2c35a8aa8055fe60c1e2fe3d3e03e9b"
+    },
+    "wizard-hermes": {
+      "wizard-hermes:managed-f0a302329b39": "sha256:6c77d3d763f44b8b3f2fb219d90c5875c841c7c3c0fb3098a65c58e8aece36b7"
+    },
+    "wizard-shell": {
+      "wizard-shell:mac-mvp-20261013": "sha256:e6f833245f04c374286011fcc175c31c6ae10a0fd3a0761aa281219ab055a7c9",
+      "wizard-shell:mac-release-f0a302329b39": "sha256:e6f833245f04c374286011fcc175c31c6ae10a0fd3a0761aa281219ab055a7c9"
+    }
+  }
+}

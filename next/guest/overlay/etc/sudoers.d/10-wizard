@@ -1,0 +1,2 @@
+# The Wizard runs as this user and administers its own machine.
+wizard ALL=(ALL:ALL) NOPASSWD: ALL

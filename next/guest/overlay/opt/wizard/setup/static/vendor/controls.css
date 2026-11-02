@@ -1,0 +1,16 @@
+/* Shared controls from wizard-ui.css: no root aliases or global reset, safe inside the shell. */
+.wz-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px; border-radius: var(--wz-radius, 16px); text-align: left; transition: background 140ms; }
+.wz-row:active { background: var(--wz-surface); }
+.wz-row .wz-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wz-row .wz-main b { font-size: 15px; font-weight: 600; color: var(--wz-text); overflow-wrap: anywhere; }
+.wz-row .wz-main small { font-size: 13px; color: var(--wz-text-muted); }
+.wz-row:disabled { opacity: .6; cursor: progress; }
+.wz-card { padding: var(--wz-space-4, 16px); border: 1px solid color-mix(in srgb, var(--wz-border) 55%, transparent); border-radius: var(--wz-radius, 16px); background: var(--wz-surface); }
+.wz-card > :first-child { margin-top: 0; } .wz-card > :last-child { margin-bottom: 0; }
+.wz-button { min-height: 44px; padding: 8px 16px; border-radius: var(--wz-radius-tile, 13px); background: var(--wz-accent); color: var(--wz-on-accent); font-weight: 600; }
+.wz-button.secondary { background: var(--wz-surface); color: var(--wz-text); border: 1px solid var(--wz-border); }
+.wz-button:disabled { opacity: .45; cursor: default; }
+.wz-actions { display: flex; flex-wrap: wrap; gap: var(--wz-space-2, 8px); padding: var(--wz-space-3, 12px) 0; }
+
+.wz-button { display:inline-flex; align-items:center; justify-content:center; border:0; font:inherit; font-weight:600; text-decoration:none; cursor:pointer; box-sizing:border-box; }
+.wz-button.quiet { background:var(--wz-surface); color:var(--wz-text); }

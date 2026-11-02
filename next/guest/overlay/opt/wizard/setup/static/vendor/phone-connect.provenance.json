@@ -1,0 +1,15 @@
+{
+  "source": "humanitylabs-org/wizard-ux",
+  "paths": {
+    "phone-connect.js": "web/core/phone-connect.js",
+    "phone-connect.css": "web/core/phone-connect.css",
+    "controls.css": "web/kit/controls.css"
+  },
+  "commit": "7e6b3819bcf847d7c5fc246788671f5fcf2094d9",
+  "sha256": {
+    "phone-connect.js": "26c87a3776d6e2fd5d487384f1f8d53bdd4d98ec1de4b7446d5651034b51d24a",
+    "phone-connect.css": "62277997e2161309c1209100e5688dedbcf2feb6edce46d012ecdfae7c4923a4",
+    "controls.css": "f2ce63afd0992e8cd4eded3759c1e4455eca730dfff347bf88275480f91a1f7b"
+  },
+  "note": "Vendored by next/guest/tools/sync-phone-connect.sh. Do not edit; change wizard-ux and re-sync."
+}

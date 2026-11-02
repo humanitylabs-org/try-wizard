@@ -1,0 +1,10 @@
+[Unit]
+Description=Wizard OS control channel from the Mac
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat VSOCK-LISTEN:9100,fork,reuseaddr EXEC:/opt/wizard/bin/wizard-ctl
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

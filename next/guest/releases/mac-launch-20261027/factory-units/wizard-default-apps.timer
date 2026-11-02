@@ -1,0 +1,11 @@
+[Unit]
+Description=Resume post-setup App Manager default installs
+ConditionPathExists=/var/lib/wizard/default-apps-release.json
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+Unit=wizard-default-apps.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,25 @@
+[
+  {
+    "httpStatus" : 200,
+    "mainFrameHost" : "127.0.0.1",
+    "path" : "\/release"
+  },
+  {
+    "navigationFinished" : true,
+    "pageTitle" : ""
+  },
+  {
+    "httpStatus" : 200,
+    "mainFrameHost" : "127.0.0.1",
+    "path" : "\/asset"
+  },
+  {
+    "downloadHTTPStatus" : 200,
+    "expectedLength" : 31744
+  },
+  {
+    "bytes" : 31744,
+    "downloadFinished" : true,
+    "sha256" : "4126eadad73994576803d75416ab12ba1cabba60efa2f6e5f246d693768a4232"
+  }
+]

@@ -1,0 +1,397 @@
+# Architecture
+
+Try Omarchy packages three pieces into one macOS app:
+
+1. A small Swift/AppKit launcher for the macOS side.
+2. A patched QEMU runtime that creates and runs the virtual machine.
+3. An ARM64 Arch Linux image containing pinned upstream Omarchy source.
+
+```text
+Try Omarchy.app
+└── Swift/AppKit launcher
+    └── QEMU + Apple Hypervisor Framework
+        └── project-built ARM64 Linux image
+            └── Omarchy desktop
+```
+
+## What happens when the app opens
+
+The Swift launcher presents a start menu on every app open. It reports optional
+macOS Accessibility, Microphone, and Camera permission state, handles confirmed factory
+resets, startup, shutdown, and host audio devices. It prepares a writable copy
+of the Linux disk and starts QEMU. QEMU's Cocoa input layer uses the shared
+Accessibility grant to capture system-wide Command chords and deliver Command
+as guest Super. Swift does not replace QEMU or run the Omarchy desktop itself.
+
+QEMU presents the hardware that Linux expects: CPUs, memory, storage, networking,
+graphics, audio, keyboard, and pointer devices. Because both the Mac and the
+guest are ARM64, Apple Hypervisor Framework runs the guest CPU instructions on
+the Apple Silicon processor. QEMU provides the virtual devices around that CPU.
+
+The balloon device enables free-page reporting. Linux keeps the selected RAM
+capacity but reports unused ranges, which the patched HVF runtime unmaps from
+the hypervisor, replaces with fresh anonymous host backing, and maps again
+before acknowledging the report. This releases macOS physical memory without
+waiting for host pressure. See [memory reclamation](memory-reclamation.md) for
+the constraints and the disposable-VM validation command.
+
+Linux then boots from the selected VM disk and its paired kernel and initramfs,
+and Omarchy runs inside Linux. For a new, reset, or ephemeral VM, that pair and
+the disk originate in the current app's bundled factory. An existing persistent
+VM instead keeps the boot pair created with its disk, even after the app bundle
+is updated. Graphics travel from Linux through virtio-gpu and VirGL to the
+native Cocoa window. The display selects native macOS OpenGL (`gl=on`), with
+VirGL replaying commands in an Apple OpenGL 4.1 core context. Its local
+multisample patch preserves real samples and mutable texture allocation,
+allowing default browser ES 3 contexts without browser-specific overrides.
+Native Apple drivers select integer vertex attributes automatically, and alpha
+and BGRA texture paths avoid duplicate channel conversions. Older verified
+factories with ANGLE host metadata retain the same guest ABI and can use the
+updated native display without replacing their disks.
+Storage, networking, audio, and input use their matching
+QEMU virtual devices and host backends.
+
+On macOS 26 or newer, before the real VM starts, the launcher asks the bundled
+QEMU to create a tiny disposable HVF machine with ARM virtualization extensions
+and Apple's platform GICv3. When that probe succeeds on M3 and newer Apple
+Silicon, the real guest starts at EL2 and Linux exposes `/dev/kvm`; on older
+chips and on macOS 15 the launcher keeps the existing platform-GIC/EL1
+configuration. The launcher rejects hosts older than macOS 15 before probing
+or starting QEMU. The updated VirGL renderer is source-built for macOS 15.0,
+including the dual-source shader fix used by accelerated Alacritty.
+The pinned QEMU 11.1.1 runtime contains the upstream HVF vGIC and
+nested-virtualization implementation.
+
+Trackpad magnification uses a dedicated indirect virtio touchpad alongside the
+ordinary pointer tablet. The Cocoa bridge reconstructs two contacts from each
+pinch and releases them on cancellation or focus loss; the guest disables
+tapping for this gesture-only device. See [pinch zoom](pinch-zoom.md) for the
+input contract, existing-guest setup, and integration validation.
+
+Mac keyboard geometry (ANSI / ISO / JIS) is detected once per launch and
+given to Cocoa. New and reset factory users also load an overlay that sets
+`kb_model=applealu_*`. App upgrade applies the Cocoa swap only; existing
+homes keep their current Hyprland input. See
+[Mac keyboard](mac-keyboard.md).
+
+New guest setup defaults to an explicit **Same as macOS** option.
+A launch hint seeds the zone before owner provisioning; a separate root-only
+virtio port publishes live zone changes. The same option in Omarchy's timezone
+menu resumes mirroring immediately. Choosing any specific zone keeps it fixed,
+even when it matches the Mac. Existing untracked guests retain their zone.
+Internet clock synchronization remains independent.
+See [Mac time zone and guest clock](host-timezone.md).
+
+The macOS helper opens an authenticated connection to QEMU's private,
+single-client machine protocol socket before host sleep and retains that control
+session through wake. Before macOS sleeps it synchronously pauses the guest
+vCPUs, and after wake it resumes them only when that sleep handler observed the
+pause transition. The bundled Cocoa runtime removes its in-process Pause and
+Resume menu actions because they cannot participate in QMP connection
+ownership. Abnormal QEMU states such as an I/O error are never overridden. This
+preserves in-memory guest state across lid close while leaving safety stops
+untouched.
+
+One small host-integration channel sits beside those devices. A virtio-serial
+port (`dev.tryomarchy.clipboard`) carries newline-delimited JSON between a
+Swift bridge on the Mac, which watches the `NSPasteboard` change count, and a
+Python agent in the Omarchy session, which uses wl-clipboard's data-control
+protocol. Text and PNG payloads flow both ways; each side remembers the
+fingerprint of what it last wrote so the immediate echo is dropped. The marker
+is cleared as soon as the other side moves on to new content, and expires after
+a couple of seconds regardless, so a genuine repeat of the same content still flows.
+
+A separate virtio-serial port (`dev.tryomarchy.camera`) carries fixed-size
+1280×720 NV12 frames from an AVFoundation bridge in the signed Mac helper. The
+guest feeds those frames into an exclusive-capabilities `v4l2loopback` device,
+`/dev/video42`, labeled **Mac Camera**. The guest subscribes to the loopback
+driver's client-usage events and requests capture only while a Linux application
+is reading the camera. Camera permission, capture failure, or device removal is
+non-fatal to the VM; the launcher can restart the optional bridge without
+restarting Omarchy.
+
+A further virtio-serial port (`dev.tryomarchy.battery`) mirrors the Mac's
+battery into the guest. A Swift bridge watches IOKit power sources and sends
+complete JSON snapshots — percentage, charge state, AC presence, time
+estimates, charge limit, physical capacities, voltage, current, and cycle count —
+on every change and every 30 seconds. A root guest agent writes
+each snapshot as one line into a small DKMS `power_supply` module, which
+presents `BAT0` and `ADP0` under `/sys/class/power_supply`, so UPower and the
+Omarchy bar treat the VM as the laptop it runs on. The guest can only request
+a refresh; nothing it sends can change Mac power state. A UPower drop-in keeps
+the guest from acting on a critical battery — warnings appear, the Mac decides.
+On a Mac with no internal battery the guest sees only mains power and the bar
+shows nothing. See [host battery](host-battery.md) for the protocol, the sysfs
+contract, and how to retrofit an existing guest without a factory reset.
+
+A root-only authentication port
+(`dev.tryomarchy.authentication`) lets the guest's `sudo` PAM policy request a
+fixed-purpose macOS Touch ID prompt. Enrollment creates a non-exportable P-256
+signing key in the Mac's Secure Enclave for a root-private random guest ID and
+pins its public key inside that guest. The host stores the Secure Enclave's
+device-bound encrypted key representation outside the Keychain, so local ad-hoc
+test builds do not need a provisioned Keychain access group. Each authentication uses a new 256-bit
+challenge. The host signs a
+canonical payload that binds the request ID, challenge, PAM user, requesting
+user, `sudo` service, interactive TTY, guest ID, signing-key ID, and a 15-second validity
+window. The guest verifies that signature with OpenSSL before PAM can return
+success. It never accepts an unsigned approval boolean.
+
+The integration's binaries and root-only device rule are present in the factory
+image, but the sudo PAM policy remains unchanged until the user opts in through
+**Setup → Security → Touch ID for sudo**. The root control enrolls first and
+atomically adds the PAM rule only after successful guest-password and Touch ID
+authentication. Disable removes that exact rule before deleting guest state and
+requesting deletion of the corresponding host key representation. Re-pair runs
+the disable and enable transitions while preserving password fallback.
+
+The QEMU window must be frontmost, the QEMU process identity must still match,
+and the host owns both enrollment and sudo prompt text. When enabled, the PAM
+module is `sufficient`: a denial, missing enrollment, unavailable bridge,
+invalid signature, non-interactive request, or timeout falls through to
+Omarchy's normal password authentication. This integration does not authenticate
+login or screen-unlock flows, cannot bind approval to the exact sudo command
+because PAM does not expose it, and is not a general guest-to-host approval
+service.
+
+When a folder is chosen on the start menu, QEMU exports it over virtio-9p with
+`security_model=none`, so every host file operation runs as the Mac user and
+the Mac keeps real modes and ownership. A small QEMU patch adds
+`guest_owner_uid`/`guest_owner_gid` fsdev options that report the Mac user's
+files as the first Omarchy account (uid/gid 1000), which makes the guest
+kernel's permission checks agree with what the host will actually allow. The
+guest mounts the tag at `/mnt/mac` before the display manager starts, and a
+user unit links `~/<folder name>` to it at login; the name travels on the
+kernel command line as `omarchy.shared_folder_name=<base64url>`.
+
+The personal share uses `cache=readahead`, which omits 9p writeback caching.
+When sharing is enabled, the launcher masks the older guest's
+`omarchy-native-mac-share.service` for that boot. The existing settings boot
+credential unit runs the current mount helper from the app's dedicated read-only
+payload before installing settings and before login, then unmounts that payload. This applies the same policy
+to older persistent guests without replacing their on-disk helper or paired
+kernel. See [shared-folder safety](shared-folder-safety.md).
+
+Optional port mappings are stored as a versioned launcher preference, validated
+again at every Swift-to-shell boundary, and translated into QEMU user-network
+`hostfwd` rules. The host side is always bound explicitly to `127.0.0.1`; the
+launcher never creates wildcard or LAN-facing listeners. TCP and UDP occupy
+separate host-port namespaces, matching QEMU's socket behavior.
+
+**Add SSH** inserts an ordinary `tcp:2222:22` mapping into that same preference;
+there is no second SSH forwarding store or QEMU argument path. After the shell
+parser accepts the complete mapping list, any TCP rule targeting guest port 22
+also adds the fixed `tryomarchy.ssh_access=1` boot token. UDP port 22 and other
+guest ports do not. A guest systemd generator consumes only that exact token and
+adds the vendor `sshd.service` to the current boot's runtime wants directory,
+without modifying persistent systemd or SSH configuration.
+
+SSH host keys belong to the writable guest disk. Persistent compatible VMs keep
+them; Factory Reset and each ephemeral disk generate new keys. Reusing the same
+Mac endpoint after either operation can require removing that endpoint from the
+Mac's `known_hosts`. Loopback prevents LAN access but other local Mac processes
+and users can still attempt authentication.
+
+## The ARM64 image
+
+The guest image is built by this project; it is not an official prebuilt image
+from Basecamp. The `guest/` builder starts with pinned Arch Linux ARM packages,
+installs a pinned upstream Omarchy source tree, applies any explicitly declared
+and checksummed backports to the staged copy, and adds the small configuration
+and compatibility layer needed for ARM64 and QEMU. The verified upstream Git
+checkout itself stays untouched.
+
+The result is upstream Omarchy running in a project-built ARM64 Linux image. The
+image has no preconfigured user, so Omarchy's upstream owner-provisioning flow
+creates the account on first boot.
+
+## What this project changes
+
+- The Swift code is a separate macOS launcher and helper.
+- A few QEMU C and Objective-C files are patched before QEMU is compiled. These
+  patches cover the Cocoa app identity, display behavior, graphics integration,
+  host audio-device routing, and shared-folder ownership mapping. Nested
+  virtualization uses QEMU's upstream Apple HVF implementation unchanged.
+- The pinned Omarchy runtime trees are copied from upstream. Reviewed temporary
+  backports are applied strictly against declared file hashes and recorded in
+  artifact provenance. Guest overlays add the QEMU and ARM64 integration around
+  them, including narrowly audited command replacements for host-backed audio
+  selection, VM-aware cursor restoration after the screensaver exits, and
+  user-first ordering in the background picker.
+- A project wallpaper is seeded in each new user's dedicated Tokyo Night
+  background directory. Omarchy's first-run theme flow searches that directory
+  before the packaged theme and selects the image as the default; the audited
+  picker override presents the same directory first without changing the
+  packaged upstream theme tree.
+- The guest normally consumes upstream Arch Linux ARM packages. Hyprland is the
+  documented exception: an upstream package is reproducibly rebuilt with a
+  guarded rounded-border coverage patch for the VM graphics path, then held in
+  the guest's immutable local repository. Aquamarine, Hyprtoolkit, and
+  `hyprland-guiutils` use signed upstream ARM packages from the reviewed
+  transaction lock, held alongside Hyprland on guest `IgnorePkg` so updates
+  cannot split the validated graphics stack. The factory uses official HTTPS
+  ARM mirrors and checks the complete transaction against its package lock
+  before installing.
+- The final Arch Linux ARM pacman files live under `/usr/share/try-omarchy/`.
+  An Omarchy-supported `pre-refresh-pacman` hook restores them after a channel
+  refresh writes its x86_64 templates to `/etc`; the upstream templates remain
+  unchanged.
+- New guests seed their locale once from the Mac's primary preferred language.
+  The launcher maps English (and unsupported languages) to `en_US.UTF-8`,
+  Traditional Chinese to `zh_TW.UTF-8`, and Simplified Chinese to `zh_CN.UTF-8`.
+  All three are generated in the factory. The selected disk's saved boot kit
+  must advertise `tryomarchy.locale_support=2` before the launcher passes a
+  `tryomarchy.locale` hint. A guest oneshot consumes the factory-only
+  `/var/lib/try-omarchy/locale-pending` marker after writing `LANG` to
+  `/etc/locale.conf`, before owner provisioning or login starts. Other locale
+  categories, comments, and file permissions are preserved. Subsequent boots
+  leave the guest's language untouched, even if the Mac's language changes.
+  Older disks with `tryomarchy.locale_support=1` retain their saved language:
+  the launcher masks their legacy every-boot locale writer for that boot.
+  Older disks without a locale capability receive no hint. Launcher language
+  preferences from earlier app versions are no longer read.
+  Keyboard input stays independent: fcitx5 is seeded with US and Chewing
+  (Bopomofo), the fontconfig rule prefers Traditional Chinese Han variants for
+  `zh-TW` text, and Chromium receives the Wayland IME flag needed for fcitx5.
+
+When no VM exists, launch decompresses the compressed factory directly into its
+unpublished writable disk, verifies its expanded size and digest, and publishes it
+atomically. No expanded factory-image cache is retained. Development launches
+through `make run` use the same single-workspace policy as normal app launches;
+confirmed reset deletes the workspace, and the next launch selects the current
+factory. Ephemeral mode also selects the current factory for testing.
+
+Resources can set an optional maximum virtual disk capacity. On the next
+normal launch, an existing disk is sparsely extended under the workspace lock,
+after validating its metadata and boot kit. The native helper binds the change
+to the inspected inode and original size and never shrinks the disk. APFS
+allocates blocks as guest writes arrive; the configured capacity does not
+reserve host space. New launcher settings default to 64 GiB, raised to the
+existing capacity when larger. The editor always displays a capacity; older
+settings without one display the existing or factory capacity.
+New VMs use the selected capacity when their writable disk is prepared.
+
+Nothing is overwritten while the app runs. The app bundle and packaged factory
+disk remain unchanged. Normal user launches use one private writable disk under
+`~/Library/Application Support/Try Omarchy/VM/v1`. The disk metadata retains
+the identity of the factory that created it, and `boot/<identity>/` retains a
+validated copy of that VM's kernel, initramfs, and base command line. Normal
+launch selects those saved boot files instead of combining an older root
+filesystem with a newer bundled kernel. Consequently, a new app release can
+launch the existing VM without decompressing, cloning, expanding, or charging
+free space for its new factory disk.
+
+The current bundled factory applies only when no persistent VM exists, after an
+explicitly confirmed reset, or in ephemeral mode. Reset only deletes the VM;
+launch atomically stages the current factory's boot kit with a new writable
+disk when none exists. A compatible
+legacy identity-keyed disk can be migrated into the single workspace without
+discarding its contents. If several recognized legacy disks exist, normal
+launch stops at the start menu; confirmed reset safely removes them. The next
+launch publishes one fresh workspace. Unrecognized host files are always left
+untouched.
+
+Older schema-2 VMs predate saved boot kits. Their first preserving launch uses
+an authoritative two-pass consent handshake. The storage launcher selects and
+locks the old disk, notices the missing kit, and exits before QEMU starts. The
+Mac app explains the preserving transition and offers **Cancel** or
+**Continue**; only Continue retries with a one-launch recovery authorization.
+Inherited environment values are stripped so they cannot bypass this dialog.
+The authorized retry uses the current factory initramfs in a narrowly scoped
+recovery mode: the old root disk is attached read-only, its installed
+`/boot/Image` and
+`/boot/initramfs-linux.img` are exported over a private virtio-9p share, and the
+recovery environment powers off without switching into the old userspace. The
+host accepts the pair only after validating its type, size, hashes, ownership,
+and boot ABI, then stores it atomically for subsequent launches. Cancel does
+not start recovery, reset the VM, or alter its disk contents. Unsupported
+storage or boot ABIs still require a confirmed reset.
+
+The workspace does not have to live in Application Support. The start menu can
+put it in any folder the user picks, including one on an external drive, and the
+launcher receives that choice as `OMARCHY_QEMU_GPU_STATE_ROOT`. The chosen
+folder is used as-is: it is never restructured with a folder created inside
+it, so it must already be empty (or already be a workspace Omarchy has used)
+— a populated folder or a drive's top level is refused with an explanation
+instead. The volume must be APFS: the storage library expands the working
+disk sparsely and uses `cp -c` for uncompressed development sources. It
+serializes launches with a `lockf` advisory lock. On exFAT the same expansion allocates the full working size immediately,
+and on a network share the lock is unreliable. Both layers check independently, the app
+when the folder is chosen and the shell library again at launch, because the
+volume can change in between. A location change never moves the existing VM;
+unrecognized host files stay untouched, as everywhere else here.
+
+## Build layout
+
+- `guest/` reproducibly assembles the unprovisioned ARM64 image in a privileged
+  ARM64 Docker container. Inputs are commit-, version-, and checksum-pinned.
+- `macos/` builds the Swift launcher and a patched QEMU runtime. The runtime is
+  isolated, relocated, and signed before it enters the app bundle.
+- `dist/` is the only public output directory. It is generated and ignored by
+  Git.
+
+## Trust model
+
+The app validates the bundled factory's exact file set, JSON schemas, hashes,
+sizes, pinned upstream identity, runtime contract, kernel command line,
+architecture, and factory profile. For an existing VM it independently
+validates the saved boot kit's ABI, metadata, ownership, sizes, and hashes
+before QEMU starts. Guest provenance separates verbatim runtime trees from
+backported trees and records each reviewed patch with its input and output
+hashes. The app also verifies the app signature and required QEMU features.
+Updates to a pinned dependency should update its digest, contract tests,
+notices, and review evidence together.
+
+App releases and guest updates are deliberately separate channels. Omarchy's
+built-in updater may advance ordinary packages supported by this ARM guest,
+but the direct-boot kernel and matching headers, the packaged
+`try-omarchy-runtime`, and reviewed compatibility backports remain pinned in
+Try Omarchy's prioritized local repository. Reusing a disk therefore does not
+silently import a newer app's factory contents, and running the in-guest updater
+must not be described as reproducing every factory-image change. The bundled integration manager provides an explicit migration channel for
+reviewed guest integrations, with user-approved installation and per-VM status
+reporting. It does not replace the pinned kernel or reproduce every factory
+change. Factory reset remains the way to opt into the complete new factory.
+
+Compatible stock-file fixes use a separate consent-gated boot runner in the
+app's settings payload. The launcher reviews the update and binds approval to
+the selected disk and exact fix bundle. Existing disks without a matching result
+offer Update before their first boot with the new bundle; Skip Launcher pauses
+for that first review. The temporary guest service journals,
+applies, and verifies the [reviewed manual-command migrations](integration-updates.md#manual-upgrade-commands-covered-by-update)
+before graphical login; it restores originals on failure
+and recovers interrupted file transactions even when the next launch skips
+updates. Results return through the settings port and remain advisory. No
+packages, kernel, or boot artifacts are upgraded by this runner. Battery modules
+build privately against existing headers; listed service/module activity is
+restored on failure. A missing lock-screen password policy can be seeded, while
+existing PAM and enrollment are preserved. See
+[integration updates](integration-updates.md#updates-at-launch).
+
+Optional, user-initiated installers run after the factory image has been built
+and are a separate trust boundary. They may resolve a mutable current release
+from a vendor or community package source, or download an exact vendor artifact
+pinned by version and digest. The resulting payload is written only to the
+user's persistent guest disk; it is not redistributed in the app or covered by
+factory provenance. Each such exception must be declared in `guest/spec.json`,
+documented in `THIRD_PARTY_NOTICES.md`, and contract-tested to ensure that its
+installer uses the declared sources and authenticates downloaded vendor
+artifacts against an explicit signing identity. Invoking an optional installer
+is the user's
+decision to cross that post-build boundary.
+
+### Guest display synchronization
+
+QEMU publishes the Cocoa window's current backing-pixel dimensions through
+Virtio GPU EDID. The guest's `omarchy-native-display-sync` helper applies those
+live timings at startup and on DRM hotplug events. The Hyprland monitor fragment
+also invokes the helper with `--once` after `config.reloaded`: a configuration
+reload can restore a cached preferred mode without emitting a hotplug event,
+leaving the rendered desktop and absolute pointer coordinates out of sync.
+
+Both paths reread Omarchy's numeric `omarchy_monitor_scale` setting from
+`~/.config/hypr/monitors.lua` (under `$XDG_CONFIG_HOME` when set). An automatic or
+absent setting uses the live EDID's pixel density. If a resized display cannot
+represent the requested zoom exactly, the helper selects the nearest supported
+scale with integral logical dimensions. Explicit per-output monitor rules still
+take precedence over the helper's catch-all rule.

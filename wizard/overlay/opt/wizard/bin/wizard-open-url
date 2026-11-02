@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Open an https URL in the Mac's default browser via the Wizard Desktop bridge.
+
+The Mac app accepts one bounded `open-url <https-url>` line on the settings
+virtio port and replies `opened` or `unavailable`."""
+
+import os
+import select
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urlparse
+
+PORT = Path("/dev/virtio-ports/dev.tryomarchy.settings")
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: wizard-open-url https://...", file=sys.stderr)
+        return 64
+    url = sys.argv[1].strip()
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or len(url) > 2000 or any(c in url for c in "\r\n \t"):
+        print("wizard-open-url: only plain https URLs are allowed", file=sys.stderr)
+        return 65
+    try:
+        fd = os.open(PORT, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as error:
+        print(f"wizard-open-url: Mac bridge unavailable: {error}", file=sys.stderr)
+        return 69
+    pending = f"open-url {url}\n".encode()
+    response = bytearray()
+    deadline = time.monotonic() + 4
+    try:
+        while time.monotonic() < deadline:
+            r, w, _ = select.select([] if pending else [fd], [fd] if pending else [], [], 0.25)
+            try:
+                if w:
+                    pending = pending[os.write(fd, pending):]
+                if r:
+                    data = os.read(fd, 64)
+                    if not data:
+                        break
+                    response.extend(data)
+                    if b"\n" in response:
+                        break
+            except BlockingIOError:
+                continue
+    finally:
+        os.close(fd)
+    if response.startswith(b"opened"):
+        return 0
+    print("wizard-open-url: the Mac app did not open the link", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

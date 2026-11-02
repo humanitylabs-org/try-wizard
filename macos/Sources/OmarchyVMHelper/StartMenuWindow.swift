@@ -1,0 +1,1886 @@
+import AppKit
+
+enum OmarchyStartMenuTheme {
+    // The launcher uses the same terminal-first palette as the Omarchy site.
+    static let background = color(0x1A1B26)
+    static let darkBackground = color(0x24283B)
+    static let lighterBackground = color(0x414868)
+    static let foreground = color(0xC0CAF5)
+    static let accent = color(0x7AA2F7)
+    static let muted = accent.withAlphaComponent(0.78)
+    static let cyan = color(0x7DCFFF)
+    static let hover = color(0xB4F9F8)
+    static let success = color(0x9ECE6A)
+    static let danger = color(0xF7768E)
+    static let border = lighterBackground.withAlphaComponent(0.88)
+    static let separator = lighterBackground.withAlphaComponent(0.7)
+
+    private static func color(_ value: UInt32) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+}
+
+enum ResetConfirmationPolicy {
+    static let requiredText = "Wizard"
+
+    static func allowsReset(_ text: String) -> Bool {
+        text == requiredText
+    }
+}
+
+@MainActor
+final class ResetConfirmationPrompt {
+    let alert: NSAlert
+    let confirmationField: NSTextField
+    let resetButton: NSButton
+
+    private var textChangeObserver: NSObjectProtocol?
+
+    init(detail: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Reset Omarchy to factory settings?"
+        alert.informativeText = detail
+        alert.addButton(withTitle: "Cancel")
+        let resetButton = alert.addButton(withTitle: "Reset")
+        resetButton.hasDestructiveAction = true
+        resetButton.isEnabled = false
+
+        let instruction = NSTextField(
+            labelWithString: "Type \(ResetConfirmationPolicy.requiredText) to confirm"
+        )
+        instruction.font = .systemFont(ofSize: 12, weight: .medium)
+        instruction.translatesAutoresizingMaskIntoConstraints = false
+
+        let confirmationField = NSTextField(string: "")
+        confirmationField.placeholderString = ResetConfirmationPolicy.requiredText
+        confirmationField.identifier = NSUserInterfaceItemIdentifier("reset-confirmation-field")
+        confirmationField.setAccessibilityLabel(
+            "Type \(ResetConfirmationPolicy.requiredText) to confirm reset"
+        )
+        confirmationField.translatesAutoresizingMaskIntoConstraints = false
+
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 52))
+        accessory.addSubview(instruction)
+        accessory.addSubview(confirmationField)
+        NSLayoutConstraint.activate([
+            instruction.leadingAnchor.constraint(equalTo: accessory.leadingAnchor),
+            instruction.trailingAnchor.constraint(lessThanOrEqualTo: accessory.trailingAnchor),
+            instruction.topAnchor.constraint(equalTo: accessory.topAnchor),
+            confirmationField.leadingAnchor.constraint(equalTo: accessory.leadingAnchor),
+            confirmationField.trailingAnchor.constraint(equalTo: accessory.trailingAnchor),
+            confirmationField.topAnchor.constraint(equalTo: instruction.bottomAnchor, constant: 7),
+            confirmationField.bottomAnchor.constraint(equalTo: accessory.bottomAnchor),
+        ])
+        alert.accessoryView = accessory
+
+        self.alert = alert
+        self.confirmationField = confirmationField
+        self.resetButton = resetButton
+        textChangeObserver = NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification,
+            object: confirmationField,
+            queue: .main
+        ) { [weak confirmationField, weak resetButton] _ in
+            resetButton?.isEnabled = ResetConfirmationPolicy.allowsReset(
+                confirmationField?.stringValue ?? ""
+            )
+        }
+    }
+
+    deinit {
+        if let textChangeObserver {
+            NotificationCenter.default.removeObserver(textChangeObserver)
+        }
+    }
+
+    func present(for window: NSWindow, completion: @escaping (Bool) -> Void) {
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else {
+                completion(false)
+                return
+            }
+            let confirmed = response == .alertSecondButtonReturn
+                && ResetConfirmationPolicy.allowsReset(confirmationField.stringValue)
+            completion(confirmed)
+        }
+        DispatchQueue.main.async { [weak window, weak confirmationField] in
+            guard let window, let confirmationField else { return }
+            window.makeFirstResponder(confirmationField)
+        }
+    }
+
+    func cancel(in window: NSWindow) {
+        guard window.attachedSheet === alert.window else { return }
+        window.endSheet(alert.window, returnCode: .alertFirstButtonReturn)
+    }
+}
+
+@MainActor
+enum StartMenuWindowChrome {
+    static func apply(to window: NSWindow) {
+        window.title = "Wizard"
+        // The start menu draws its own heading inside a full-size content view.
+        // Keep the native title as the window identity, but do not composite a
+        // second copy over that custom heading in the transparent title bar.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = OmarchyStartMenuTheme.background
+        window.isOpaque = true
+    }
+}
+
+private final class PointingHandButton: NSButton {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+@MainActor
+final class StartMenuWindow: NSObject, NSWindowDelegate {
+    private(set) var window: NSWindow
+    private let content = NSView()
+    private let accessibilityStatus: () -> Bool
+    private let microphoneStatus: () -> MicrophoneAuthorizationState
+    private let cameraStatus: () -> CameraAuthorizationState
+    private let requestAccessibility: () -> Void
+    private let requestMicrophone: (@escaping (Bool) -> Void) -> Void
+    private let requestCamera: (@escaping (Bool) -> Void) -> Void
+    private let storageSpaceEstimate: () -> String?
+    private let resetStorage: () -> Void
+    private let sharedFolderStatus: () -> SharedFolderMenuState
+    private let chooseSharedFolder: (String) -> String?
+    private let setSharedFolderEnabled: (Bool) -> Void
+    private let usbDeviceStatus: () -> USBDeviceMenuState
+    private let connectedUSBDevices: () -> [USBDeviceIdentity]
+    private let saveUSBDevice: (USBDevicePreference) -> Void
+    private let portForwardingStatus: () -> [PortForwardMapping]
+    private let savePortForwarding: ([PortForwardMapping]) -> String?
+    private let resources: () -> VMResources
+    private let minimumDiskGiB: () -> Int
+    private let resourceLimits: VMResourceLimits
+    private let saveResources: (VMResources) -> Void
+    private let networkPreferences: () -> VMNetworkPreferences
+    private let saveNetworkPreferences: (VMNetworkPreferences) -> String?
+    private let networkIdentity: VMNetworkIdentityAccess
+    private var networkEditor: NetworkEditor?
+    private let immersiveMode: () -> Bool
+    private let setImmersiveMode: (Bool) -> Void
+    private let startAutomatically: () -> Bool
+    private let setStartAutomatically: (Bool) -> String?
+    private let presentStartupSaveError: (NSAlert, NSWindow) -> Void
+    private let confirmAutomaticStartup: (NSAlert) -> NSApplication.ModalResponse
+    private let bootFixCacheURL: () -> URL?
+    private let bootFixIdentity: () -> String?
+    private let retryBootFixes: () -> Void
+    private let launch: () -> Void
+    private let appVersionLabel: String
+    private let appReleaseActionTitle: () -> String
+    private let checkForAppUpdates: () -> Void
+    private weak var appReleaseButton: NSButton?
+    private let canResetStorage: Bool
+    private let storageLocation: () -> String?
+    private let storageLocationURL: () -> URL?
+    private let storageLocationStatus: () -> StorageLocationMenuState
+    private let validateStorageLocation: (String) -> String?
+    private let chooseStorageLocation: (String) -> String?
+    private let useDefaultStorageLocation: () -> Void
+
+    private var microphoneRequestInFlight = false
+    private var cameraRequestInFlight = false
+    private var resetInProgress = false
+    private var resetPhase = VMResetPhase.checking
+    private weak var resetActionButton: OmarchyActionButton?
+    private var launchInProgress = false
+    private var launchPhase = VMLaunchPhase.checking
+    private weak var launchActionButton: OmarchyActionButton?
+    private var virtualMachineRunning = false
+    private var closeRunningSettings: (() -> Void)?
+    private var shutdownInProgress = false
+    private var requestSettingsAction: ((VMRunLifecycle.SettingsAction) -> Void)?
+    private var automaticStartupConfirmationInProgress = false
+    private var controlsBusy: Bool {
+        launchInProgress || shutdownInProgress || automaticStartupConfirmationInProgress
+    }
+    var onAppReleasePromptOpportunity: (() -> Void)?
+    var canPresentAppReleasePrompt: Bool {
+        window.isKeyWindow && !controlsBusy && !resetInProgress
+            && !microphoneRequestInFlight && !cameraRequestInFlight
+            && window.attachedSheet == nil && networkEditor == nil
+            && portForwardingEditor == nil && resourceEditor == nil && usbDeviceEditor == nil
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        onAppReleasePromptOpportunity?()
+    }
+    private var prelaunchControlsLocked: Bool { controlsBusy || virtualMachineRunning }
+    private var pendingResetSpaceEstimate: String?
+    private var resetConfirmationPrompt: ResetConfirmationPrompt?
+    private weak var startMenuScrollView: NSScrollView?
+    private var preferredContentHeight: CGFloat = 832
+    private(set) var portForwardingEditor: PortForwardingEditor?
+    private(set) var resourceEditor: VMResourceEditor?
+    private(set) var usbDeviceEditor: USBDeviceEditor?
+    private weak var immersiveCaption: NSTextField?
+    private var accessibilityRow: StartMenuPermissionRow?
+    private var microphoneRow: StartMenuPermissionRow?
+    private var cameraRow: StartMenuPermissionRow?
+    private var permissionDisabledButtons: [(NSButton, Bool)] = []
+
+    init(
+        accessibilityStatus: @escaping () -> Bool,
+        microphoneStatus: @escaping () -> MicrophoneAuthorizationState,
+        cameraStatus: @escaping () -> CameraAuthorizationState = { .authorized },
+        requestAccessibility: @escaping () -> Void,
+        requestMicrophone: @escaping (@escaping (Bool) -> Void) -> Void,
+        requestCamera: @escaping (@escaping (Bool) -> Void) -> Void = { completion in
+            completion(true)
+        },
+        canResetStorage: Bool,
+        storageLocation: @escaping () -> String?,
+        storageLocationURL: @escaping () -> URL?,
+        storageSpaceEstimate: @escaping () -> String?,
+        storageLocationStatus: @escaping () -> StorageLocationMenuState,
+        validateStorageLocation: @escaping (String) -> String?,
+        chooseStorageLocation: @escaping (String) -> String?,
+        useDefaultStorageLocation: @escaping () -> Void,
+        resetStorage: @escaping () -> Void,
+        sharedFolderStatus: @escaping () -> SharedFolderMenuState,
+        chooseSharedFolder: @escaping (String) -> String?,
+        setSharedFolderEnabled: @escaping (Bool) -> Void,
+        usbDeviceStatus: @escaping () -> USBDeviceMenuState = { .disabled },
+        connectedUSBDevices: @escaping () -> [USBDeviceIdentity] = { [] },
+        saveUSBDevice: @escaping (USBDevicePreference) -> Void = { _ in },
+        portForwardingStatus: @escaping () -> [PortForwardMapping] = { [] },
+        savePortForwarding: @escaping ([PortForwardMapping]) -> String? = { _ in nil },
+        resources: @escaping () -> VMResources = { VMResourceLimits.current.defaults },
+        resourceLimits: VMResourceLimits = .current,
+        minimumDiskGiB: @escaping () -> Int = { 1 },
+        saveResources: @escaping (VMResources) -> Void = { _ in },
+        networkPreferences: @escaping () -> VMNetworkPreferences = { VMNetworkPreferences() },
+        saveNetworkPreferences: @escaping (VMNetworkPreferences) -> String? = { _ in nil },
+        networkIdentity: VMNetworkIdentityAccess = .unavailable,
+        immersiveMode: @escaping () -> Bool = { true },
+        setImmersiveMode: @escaping (Bool) -> Void = { _ in },
+        startAutomatically: @escaping () -> Bool = { false },
+        setStartAutomatically: @escaping (Bool) -> String? = { _ in nil },
+        presentStartupSaveError: @escaping (NSAlert, NSWindow) -> Void = { $0.beginSheetModal(for: $1) },
+        confirmAutomaticStartup: @escaping (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() },
+        appVersionLabel: String = InstalledAppRelease.current.label,
+        appReleaseActionTitle: @escaping () -> String = { "Check for Updates…" },
+        checkForAppUpdates: @escaping () -> Void = {},
+        bootFixCacheURL: @escaping () -> URL? = { nil },
+        bootFixIdentity: @escaping () -> String? = { GuestBootFixCache.bundledIdentity },
+        retryBootFixes: @escaping () -> Void = {},
+        launch: @escaping () -> Void
+    ) {
+        self.accessibilityStatus = accessibilityStatus
+        self.microphoneStatus = microphoneStatus
+        self.cameraStatus = cameraStatus
+        self.requestAccessibility = requestAccessibility
+        self.requestMicrophone = requestMicrophone
+        self.requestCamera = requestCamera
+        self.canResetStorage = canResetStorage
+        self.storageLocation = storageLocation
+        self.storageLocationURL = storageLocationURL
+        self.storageSpaceEstimate = storageSpaceEstimate
+        self.storageLocationStatus = storageLocationStatus
+        self.validateStorageLocation = validateStorageLocation
+        self.chooseStorageLocation = chooseStorageLocation
+        self.useDefaultStorageLocation = useDefaultStorageLocation
+        self.resetStorage = resetStorage
+        self.sharedFolderStatus = sharedFolderStatus
+        self.chooseSharedFolder = chooseSharedFolder
+        self.setSharedFolderEnabled = setSharedFolderEnabled
+        self.usbDeviceStatus = usbDeviceStatus
+        self.connectedUSBDevices = connectedUSBDevices
+        self.saveUSBDevice = saveUSBDevice
+        self.portForwardingStatus = portForwardingStatus
+        self.savePortForwarding = savePortForwarding
+        self.resources = resources
+        self.minimumDiskGiB = minimumDiskGiB
+        self.resourceLimits = resourceLimits
+        self.saveResources = saveResources
+        self.networkPreferences = networkPreferences
+        self.saveNetworkPreferences = saveNetworkPreferences
+        self.networkIdentity = networkIdentity
+        self.immersiveMode = immersiveMode
+        self.setImmersiveMode = setImmersiveMode
+        self.startAutomatically = startAutomatically
+        self.setStartAutomatically = setStartAutomatically
+        self.presentStartupSaveError = presentStartupSaveError
+        self.confirmAutomaticStartup = confirmAutomaticStartup
+        self.bootFixCacheURL = bootFixCacheURL
+        self.bootFixIdentity = bootFixIdentity
+        self.retryBootFixes = retryBootFixes
+        self.launch = launch
+        self.appVersionLabel = appVersionLabel
+        self.appReleaseActionTitle = appReleaseActionTitle
+        self.checkForAppUpdates = checkForAppUpdates
+
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 832),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        super.init()
+
+        StartMenuWindowChrome.apply(to: window)
+        window.delegate = self
+        content.wantsLayer = true
+        content.layer?.backgroundColor = OmarchyStartMenuTheme.background.cgColor
+        window.contentView = content
+    }
+
+    func virtualMachineDidStart(
+        requestSettingsAction: @escaping (VMRunLifecycle.SettingsAction) -> Void = { _ in },
+        closeSettings: @escaping () -> Void
+    ) {
+        launchInProgress = false
+        virtualMachineRunning = true
+        closeRunningSettings = closeSettings
+        self.requestSettingsAction = requestSettingsAction
+        window.title = "Wizard Settings"
+        // The VM has its own Cocoa process and may occupy a fullscreen Space.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.level = .floating
+    }
+
+    func shutdownDidBegin() {
+        shutdownInProgress = true
+        render()
+    }
+
+    func shutdownDidFail(_ message: String) {
+        shutdownInProgress = false
+        render()
+        let alert = NSAlert()
+        alert.messageText = "Omarchy couldn’t shut down"
+        alert.informativeText = message
+        alert.beginSheetModal(for: window)
+    }
+
+    @objc private func restartOmarchy() { requestShutdown(.restart) }
+    @objc private func shutDownToManage() { requestShutdown(.manage) }
+
+    private func requestShutdown(_ action: VMRunLifecycle.SettingsAction) {
+        guard virtualMachineRunning, !controlsBusy,
+              !microphoneRequestInFlight, !cameraRequestInFlight,
+              window.attachedSheet == nil, portForwardingEditor == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = action == .restart ? "Restart Wizard?" : "Shut down Omarchy to manage this VM?"
+        alert.informativeText = action == .restart
+            ? "Save your work first. Omarchy will shut down and start again with your saved settings."
+            : "Save your work first. The settings window will stay open so you can change the VM location or reset it."
+        alert.addButton(withTitle: action == .restart ? "Restart" : "Shut Down")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.requestSettingsAction?(action)
+        }
+    }
+
+    @objc private func closeSettings() {
+        guard virtualMachineRunning else { return }
+        dismiss()
+        closeRunningSettings?()
+    }
+
+    func show() {
+        prepareForPresentation(
+            visibleFrame: (window.screen ?? NSScreen.main)?.visibleFrame
+        )
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Reuse the current view hierarchy so open editors keep their drafts.
+    func bringToFront() {
+        window.deminiaturize(nil)
+        window.makeKeyAndOrderFront(nil)
+        window.attachedSheet?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
+
+    func refreshAppReleaseStatus() {
+        appReleaseButton?.title = appReleaseActionTitle()
+    }
+
+    func refreshBootFixStatus() { render() }
+
+    func confirmBootFixes() -> GuestBootFixChoice {
+        show()
+        guard let catalog = GuestBootFixCatalog.bundled else {
+            let alert = NSAlert()
+            alert.messageText = "VM update details are unavailable"
+            alert.informativeText = "The update catalog is missing or damaged. Reinstall Wizard before updating this VM."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return .cancel
+        }
+        return GuestBootFixLaunchGate.decide(review: {
+            switch GuestBootFixPrompt.review(catalog: catalog).runModal() {
+            case .alertFirstButtonReturn: return .update
+            case .alertSecondButtonReturn: return .skip
+            default: return .cancel
+            }
+        }, confirmSkip: {
+            GuestBootFixPrompt.skip().runModal() == .alertSecondButtonReturn
+        })
+    }
+
+    @objc private func showAppUpdates() { checkForAppUpdates() }
+
+    func prepareForPresentation(visibleFrame: NSRect?) {
+        let scrollOffset = startMenuScrollView?.contentView.bounds.origin.y ?? 0
+        render()
+        if let visibleFrame {
+            let availableContent = window.contentRect(
+                forFrameRect: visibleFrame.insetBy(dx: 0, dy: 16)
+            )
+            window.setContentSize(NSSize(
+                width: 600,
+                height: min(preferredContentHeight, max(1, availableContent.height))
+            ))
+            content.layoutSubtreeIfNeeded()
+            if let scrollView = startMenuScrollView, let document = scrollView.documentView {
+                let maximumOffset = max(0, document.frame.height - scrollView.contentView.bounds.height)
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(scrollOffset, maximumOffset)))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+    }
+
+    func refreshPermissionStatus() {
+        guard accessibilityRow != nil, !controlsBusy, !resetInProgress else { return }
+        updatePermissionRows()
+    }
+
+    func applicationDidBecomeActive() {
+        // Returning from Settings or a system prompt must not rebuild the
+        // launcher, probe VM storage, or disturb an open sheet or its draft.
+        refreshPermissionStatus()
+    }
+
+    private func updatePermissionRows() {
+        let granted = accessibilityStatus()
+        accessibilityRow?.update(
+            StartMenuPermissionPresentation(
+                detail: "Needed for the native keyboard experience with Super shortcuts.",
+                isGranted: granted,
+                actionTitle: granted ? nil : "Open Settings",
+                action: .request
+            ),
+            action: #selector(beginAccessibilityRequest)
+        )
+        let microphone = StartMenuPresentation.microphone(
+            state: microphoneStatus(), requestInFlight: microphoneRequestInFlight
+        )
+        microphoneRow?.update(microphone, action: microphone.action == .openSettings
+            ? #selector(openMicrophoneSettings) : #selector(beginMicrophoneRequest))
+        let camera = StartMenuPresentation.camera(
+            state: cameraStatus(), requestInFlight: cameraRequestInFlight
+        )
+        cameraRow?.update(camera, action: camera.action == .openSettings
+            ? #selector(openCameraSettings) : #selector(beginCameraRequest))
+        updatePermissionRequestControls()
+    }
+
+    /// Preserve each control's own eligibility while a system prompt is open.
+    /// Rendering also uses this gate, so a refresh cannot strand disabled controls.
+    private func updatePermissionRequestControls() {
+        let waiting = microphoneRequestInFlight || cameraRequestInFlight
+        if waiting, permissionDisabledButtons.isEmpty {
+            func disableButtons(in view: NSView) {
+                if let button = view as? NSButton {
+                    permissionDisabledButtons.append((button, button.isEnabled))
+                    button.isEnabled = false
+                }
+                view.subviews.forEach { disableButtons(in: $0) }
+            }
+            disableButtons(in: content)
+        } else if !waiting {
+            for (button, wasEnabled) in permissionDisabledButtons {
+                button.isEnabled = wasEnabled
+            }
+            permissionDisabledButtons.removeAll()
+            onAppReleasePromptOpportunity?()
+        }
+    }
+
+    func promptForReset() {
+        guard canResetStorage else { return }
+        window.makeKeyAndOrderFront(nil)
+        confirmReset()
+    }
+
+    func dismiss() {
+        resetConfirmationPrompt?.cancel(in: window)
+        resetConfirmationPrompt = nil
+        portForwardingEditor?.dismiss()
+        portForwardingEditor = nil
+        resourceEditor?.dismiss()
+        resourceEditor = nil
+        window.orderOut(nil)
+    }
+
+    func launchDidProgress(to phase: VMLaunchPhase) {
+        guard launchInProgress, launchPhase != phase else { return }
+        launchPhase = phase
+        launchActionButton?.updateTitle(phase.buttonTitle)
+        launchActionButton?.invalidateIntrinsicContentSize()
+        NSAccessibility.post(
+            element: window,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: phase.buttonTitle,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
+    }
+
+    func resetDidProgress(to phase: VMResetPhase) {
+        guard resetInProgress, resetPhase != phase else { return }
+        resetPhase = phase
+        resetActionButton?.updateTitle(phase.buttonTitle)
+        resetActionButton?.invalidateIntrinsicContentSize()
+        NSAccessibility.post(
+            element: window,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: phase.buttonTitle,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
+    }
+
+    func resetDidFinish(errorMessage: String?) {
+        guard resetInProgress else { return }
+        resetInProgress = false
+        render()
+
+        let alert = NSAlert()
+        if let errorMessage {
+            alert.alertStyle = .critical
+            alert.messageText = "Omarchy couldn’t be reset"
+            alert.informativeText = errorMessage
+        } else {
+            alert.alertStyle = .informational
+            alert.messageText = "Wizard has been reset"
+            if let estimate = pendingResetSpaceEstimate {
+                alert.informativeText = "The VM has been deleted. Up to \(estimate) of disk space was reclaimed. A fresh VM will be prepared on the next launch."
+            } else {
+                alert.informativeText = "The VM has been deleted. A fresh VM will be prepared on the next launch."
+            }
+        }
+        pendingResetSpaceEstimate = nil
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    /// Clears the launching state when the controller stopped before the
+    /// launcher was ever started. The controller presents its own explanation.
+    func launchDidAbort() {
+        guard launchInProgress else { return }
+        launchInProgress = false
+        show()
+    }
+
+    /// Clears the resetting state when the controller refused to start the
+    /// reset at all. Deliberately silent, and deliberately not
+    /// `resetDidFinish(errorMessage: nil)` — nothing was erased, so claiming
+    /// "Wizard has been reset" would be a lie about a destructive action.
+    func resetDidAbort() {
+        guard resetInProgress else { return }
+        resetInProgress = false
+        render()
+    }
+
+    func launchRequiresReset() {
+        guard launchInProgress else { return }
+        launchInProgress = false
+        show()
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Reset Omarchy to continue"
+        alert.informativeText = StartMenuPresentation.incompatibleWorkspaceDetail
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    /// Requests one-shot consent for legacy boot-file pairing. This remains a
+    /// synchronous application-modal decision so the launcher cannot start in
+    /// the gap between presenting the explanation and receiving the answer.
+    func confirmBootRecovery() -> Bool {
+        guard launchInProgress else { return false }
+        show()
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = StartMenuPresentation.bootRecoveryConfirmationTitle
+        alert.informativeText = StartMenuPresentation.bootRecoveryConfirmationDetail
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Continue")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    func launchDidFail(errorMessage: String) {
+        guard launchInProgress else { return }
+        launchInProgress = false
+        show()
+
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Wizard couldn’t start"
+        alert.informativeText = errorMessage
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if virtualMachineRunning {
+            closeSettings()
+        } else {
+            NSApp.terminate(nil)
+        }
+        return false
+    }
+
+    private func render() {
+        defer { onAppReleasePromptOpportunity?() }
+        for (button, wasEnabled) in permissionDisabledButtons {
+            button.isEnabled = wasEnabled
+        }
+        permissionDisabledButtons.removeAll()
+        let preservedScrollOffset = startMenuScrollView?.contentView.bounds.minY ?? 0
+        startMenuScrollView = nil
+        content.subviews.forEach { $0.removeFromSuperview() }
+
+        let icon = NSImageView()
+        icon.image = NSApp.applicationIconImage
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 62),
+            icon.heightAnchor.constraint(equalToConstant: 62),
+        ])
+
+        let title = NSTextField(labelWithString: virtualMachineRunning ? "Wizard Settings" : "Wizard")
+        title.font = .monospacedSystemFont(ofSize: 27, weight: .bold)
+        title.textColor = OmarchyStartMenuTheme.foreground
+        title.identifier = NSUserInterfaceItemIdentifier("app-title")
+
+        let subtitle = NSTextField(labelWithString: "Omarchy, on macOS")
+        subtitle.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        subtitle.textColor = OmarchyStartMenuTheme.accent
+
+        let titleStack = NSStackView(views: [title, subtitle])
+        appReleaseButton = nil
+        if virtualMachineRunning {
+            let version = NSTextField(labelWithString: appVersionLabel)
+            version.font = .systemFont(ofSize: 11)
+            version.textColor = OmarchyStartMenuTheme.muted
+            version.lineBreakMode = .byTruncatingMiddle
+            version.toolTip = appVersionLabel
+            version.identifier = NSUserInterfaceItemIdentifier("app-version")
+            version.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let updates = NSButton(title: appReleaseActionTitle(), target: self, action: #selector(showAppUpdates))
+            updates.isBordered = false
+            updates.font = .systemFont(ofSize: 11)
+            updates.contentTintColor = OmarchyStartMenuTheme.accent
+            updates.identifier = NSUserInterfaceItemIdentifier("app-release-check")
+            appReleaseButton = updates
+            let versionRow = NSStackView(views: [version, updates])
+            versionRow.spacing = 10
+            titleStack.addArrangedSubview(versionRow)
+        }
+        titleStack.orientation = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 3
+
+        let headingStack = NSStackView(views: [icon, titleStack])
+        headingStack.orientation = .horizontal
+        headingStack.alignment = .centerY
+        headingStack.spacing = 14
+
+        let accessibilityRow = StartMenuPermissionRow(
+            symbolName: "accessibility", title: "Accessibility", target: self
+        )
+        let microphoneRow = StartMenuPermissionRow(
+            symbolName: "mic", title: "Microphone access", target: self
+        )
+        let cameraRow = StartMenuPermissionRow(
+            symbolName: "camera", title: "Camera access", target: self
+        )
+        self.accessibilityRow = accessibilityRow
+        self.microphoneRow = microphoneRow
+        self.cameraRow = cameraRow
+        updatePermissionRows()
+
+        let sharedFolder = sharedFolderStatus()
+        let sharedFolderPresentation = StartMenuPresentation.sharedFolder(state: sharedFolder)
+        var sharedFolderActions: [(String, Selector)] = [("Choose…", #selector(beginSharedFolderSelection))]
+        if let toggleTitle = sharedFolderPresentation.toggleActionTitle {
+            sharedFolderActions.append(
+                sharedFolder.isEnabled
+                    ? (toggleTitle, #selector(disableSharedFolder))
+                    : (toggleTitle, #selector(enableSharedFolder))
+            )
+        }
+        let sharedFolderRow = permissionRow(
+            symbolName: "folder",
+            title: "Shared folder",
+            detail: sharedFolderPresentation.detail,
+            compactDetailLines: sharedFolderPresentation.compactDetailLines,
+            granted: sharedFolderPresentation.isGranted,
+            statusLabels: ("●  On", "○  Off"),
+            actions: sharedFolderActions,
+            minimumHeight: 100
+        )
+
+        let usbDevice = usbDeviceStatus()
+        let usbPresentation = StartMenuPresentation.usbDevice(state: usbDevice)
+        var usbActions: [(String, Selector)] = [("Choose\u{2026}", #selector(beginUSBDeviceSelection))]
+        if let toggleTitle = usbPresentation.toggleActionTitle {
+            usbActions.append(
+                usbDevice.isEnabled
+                    ? (toggleTitle, #selector(disableUSBDevice))
+                    : (toggleTitle, #selector(enableUSBDevice))
+            )
+        }
+        let usbRow = permissionRow(
+            symbolName: "cable.connector",
+            title: "USB device (experimental)",
+            detail: usbPresentation.detail,
+            compactDetailLines: usbPresentation.compactDetailLines,
+            granted: usbPresentation.isGranted,
+            statusLabels: ("\u{25cf}  On", "\u{25cb}  Off"),
+            actions: usbActions,
+            actionsEnabled: usbPresentation.actionsEnabled,
+            minimumHeight: 100,
+            rowIdentifier: "usb"
+        )
+
+        let network = networkPreferences()
+        let bridgeAvailable = VMBridgeInterfaces.available().contains { $0.name == network.interface }
+        let networkWarning = network.mode == .bridged
+            ? (!bridgeAvailable ? "Adapter unavailable — Omarchy will start offline" : NetworkService.service.status != .enabled ? "Setup required" : nil)
+            : nil
+        let networkingRow = permissionRow(
+            symbolName: "network", title: "Networking",
+            detail: networkWarning ?? (network.mode == .nat ? "Uses your Mac’s connection" :
+                "Bridged via \(network.interface)"),
+            granted: network.mode == .bridged,
+            statusLabels: ("Bridged", "Shared (NAT)"),
+            statusTint: networkWarning == nil ? OmarchyStartMenuTheme.foreground : .systemOrange,
+            actions: [("Configure…", #selector(beginNetworkConfiguration))],
+            minimumHeight: 75,
+            rowIdentifier: "networking"
+        )
+        let portMappings = portForwardingStatus()
+        let portForwardingPresentation = StartMenuPresentation.portForwarding(
+            mappings: portMappings
+        )
+        let portForwardingRow = permissionRow(
+            symbolName: "network",
+            title: "Port forwarding",
+            detail: network.mode == .nat ? portForwardingPresentation.detail : "Inactive in bridged mode. Your saved rules are kept.",
+            compactDetailLines: network.mode == .nat ? portForwardingPresentation.compactDetailLines : nil,
+            granted: network.mode == .nat && portForwardingPresentation.isGranted,
+            statusLabels: (
+                portForwardingPresentation.grantedStatusLabel,
+                "○  Off"
+            ),
+            actions: [("Configure…", #selector(beginPortForwardingConfiguration))],
+            actionsEnabled: network.mode == .nat,
+            minimumHeight: 90
+        )
+        let immersiveRow = immersiveSettingRow(isEnabled: immersiveMode())
+        let selectedResources = resources()
+        let resourceRow = permissionRow(
+            symbolName: "cpu",
+            title: "Resources",
+            detail: StartMenuPresentation.resources(selectedResources),
+            granted: selectedResources != resourceLimits.defaults,
+            statusLabels: ("●  Custom", "○  Default"),
+            actions: [("Configure…", #selector(beginResourceConfiguration))],
+            minimumHeight: 72
+        )
+
+        let storageStatus = storageLocationStatus()
+        var storageRow: NSView?
+        if let storagePath = storageLocation() {
+            let storageDetail: String
+            let storageDetailLines: [String]?
+            if let problem = storageStatus.problem {
+                storageDetail = problem
+                storageDetailLines = nil
+            } else if !storageStatus.isDefault {
+                let volumeInfo = [storageStatus.volumeName, storageStatus.isExternal ? "External drive" : nil]
+                    .compactMap { $0 }
+                    .joined(separator: " · ")
+                // Say so when the environment picked this workspace, otherwise
+                // the row reads as the user's own choice while the buttons that
+                // would change it quietly do nothing.
+                let secondLine = storageStatus.isEnvironmentOverride
+                    ? "Set by \(StorageLocationPolicy.environmentKey)"
+                    : storageStatus.warning ?? (volumeInfo.isEmpty ? nil : volumeInfo)
+                if let secondLine {
+                    storageDetail = "\(storagePath) · \(secondLine)"
+                    storageDetailLines = [storagePath, secondLine]
+                } else {
+                    storageDetail = storagePath
+                    storageDetailLines = nil
+                }
+            } else {
+                storageDetail = storagePath
+                storageDetailLines = nil
+            }
+
+            var storageActions: [(String, Selector)] = [("Change\u{2026}", #selector(beginStorageLocationSelection))]
+            if !storageStatus.isDefault {
+                storageActions.append(("Use Default", #selector(useDefaultStorageLocationAction)))
+            }
+
+            storageRow = permissionRow(
+                symbolName: "externaldrive",
+                title: "VM Location",
+                detail: storageDetail,
+                compactDetailLines: storageDetailLines,
+                detailAction: storageStatus.problem == nil && storageLocationURL() != nil
+                    ? #selector(openStorageLocation)
+                    : nil,
+                granted: !storageStatus.isDefault && storageStatus.problem == nil,
+                statusLabels: ("\u{25cf}  Custom", "\u{25cb}  Default"),
+                actions: storageActions,
+                actionsEnabled: canResetStorage && !virtualMachineRunning && !storageStatus.isEnvironmentOverride,
+                minimumHeight: storageDetailLines != nil || storageActions.count > 1 ? 90 : 68
+            )
+        }
+
+        let permissionRowViews = [accessibilityRow, microphoneRow, cameraRow]
+        var integrationRowViews = [sharedFolderRow]
+        if let storageRow {
+            integrationRowViews.append(storageRow)
+        }
+        integrationRowViews.append(contentsOf: [resourceRow, networkingRow, portForwardingRow, usbRow, immersiveRow, automaticStartSettingRow()])
+
+        var permissionRowsAndSeparators: [NSView] = []
+        for (index, row) in permissionRowViews.enumerated() {
+            if index > 0 {
+                permissionRowsAndSeparators.append(separator())
+            }
+            permissionRowsAndSeparators.append(row)
+        }
+
+        let permissionRows = NSStackView(views: permissionRowsAndSeparators)
+        permissionRows.orientation = .vertical
+        permissionRows.alignment = .leading
+        permissionRows.spacing = 0
+        permissionRows.translatesAutoresizingMaskIntoConstraints = false
+        for row in permissionRowViews {
+            row.widthAnchor.constraint(equalTo: permissionRows.widthAnchor).isActive = true
+        }
+        for divider in permissionRowsAndSeparators where divider.identifier?.rawValue == "themed-separator" {
+            divider.widthAnchor.constraint(equalTo: permissionRows.widthAnchor).isActive = true
+        }
+
+        let permissionCard = themedCard(
+            containing: permissionRows,
+            identifier: "permission-card"
+        )
+
+        var integrationRowsAndSeparators: [NSView] = []
+        for (index, row) in integrationRowViews.enumerated() {
+            if index > 0 {
+                integrationRowsAndSeparators.append(separator())
+            }
+            integrationRowsAndSeparators.append(row)
+        }
+        let integrationRows = NSStackView(views: integrationRowsAndSeparators)
+        integrationRows.orientation = .vertical
+        integrationRows.alignment = .leading
+        integrationRows.spacing = 0
+        integrationRows.translatesAutoresizingMaskIntoConstraints = false
+        for row in integrationRowViews {
+            row.widthAnchor.constraint(equalTo: integrationRows.widthAnchor).isActive = true
+        }
+        for divider in integrationRowsAndSeparators where divider.identifier?.rawValue == "themed-separator" {
+            divider.widthAnchor.constraint(equalTo: integrationRows.widthAnchor).isActive = true
+        }
+        let integrationCard = themedCard(
+            containing: integrationRows,
+            identifier: "integration-card"
+        )
+
+        let permissionHeading = sectionHeading("PERMISSIONS")
+        let integrationHeading = sectionHeading("INTEGRATIONS")
+
+        let reset = OmarchyActionButton(
+            title: resetInProgress ? resetPhase.buttonTitle : "Reset Omarchy",
+            style: .danger,
+            target: self,
+            action: #selector(resetOmarchy)
+        )
+        resetActionButton = reset
+        reset.identifier = NSUserInterfaceItemIdentifier("reset-button")
+        reset.isEnabled = canResetStorage
+            && !prelaunchControlsLocked
+            && !resetInProgress
+        reset.toolTip = canResetStorage
+            ? "Erase this VM and return it to factory settings"
+            : "Reset is unavailable for a disposable VM"
+        reset.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        reset.widthAnchor.constraint(greaterThanOrEqualToConstant: 154).isActive = true
+
+        let manage = OmarchyActionButton(title: "Shut Down", style: .secondary, target: self, action: #selector(shutDownToManage))
+        manage.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        manage.setContentCompressionResistancePriority(.required, for: .horizontal)
+        manage.identifier = NSUserInterfaceItemIdentifier("manage-vm-button")
+        manage.isEnabled = !controlsBusy
+        let resetAction = virtualMachineRunning && canResetStorage ? manage : reset
+
+        let fixesPending = GuestBootFixCache.needsUpdate(cacheURL: bootFixCacheURL(), expectedIdentity: bootFixIdentity())
+        let launchButtonTitle = virtualMachineRunning ? "Done" : (launchInProgress ? launchPhase.buttonTitle : (fixesPending ? "Update and Launch" : "Open Wizard"))
+        let launchButton = OmarchyActionButton(
+            title: launchButtonTitle,
+            style: .primary,
+            target: self,
+            action: virtualMachineRunning ? #selector(closeSettings) : (fixesPending ? #selector(reviewVMFixes) : #selector(launchOmarchy))
+        )
+        launchActionButton = launchButton
+        launchButton.keyEquivalent = launchInProgress ? "" : "\r"
+        launchButton.isEnabled = virtualMachineRunning || (!launchInProgress
+            && !resetInProgress)
+        launchButton.identifier = NSUserInterfaceItemIdentifier("launch-button")
+        launchButton.setAccessibilityLabel(launchButtonTitle)
+        if launchInProgress {
+            let spinner = NSProgressIndicator()
+            spinner.style = .spinning
+            spinner.controlSize = .small
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            spinner.startAnimation(nil)
+            launchButton.addSubview(spinner)
+            NSLayoutConstraint.activate([
+                spinner.centerYAnchor.constraint(equalTo: launchButton.centerYAnchor),
+                spinner.trailingAnchor.constraint(equalTo: launchButton.trailingAnchor, constant: -16),
+            ])
+        }
+        NSLayoutConstraint.activate([
+            launchButton.heightAnchor.constraint(equalToConstant: 48),
+        ])
+
+        let resetHeading = sectionHeading("RESET")
+        let resetSymbol = NSImageView()
+        resetSymbol.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: nil)
+        resetSymbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
+        resetSymbol.contentTintColor = OmarchyStartMenuTheme.accent
+        resetSymbol.identifier = NSUserInterfaceItemIdentifier("reset-symbol")
+        resetSymbol.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            resetSymbol.widthAnchor.constraint(equalToConstant: 26),
+            resetSymbol.heightAnchor.constraint(equalToConstant: 26),
+        ])
+        let resetTitle = NSTextField(labelWithString: "Factory reset")
+        resetTitle.font = .monospacedSystemFont(ofSize: 13, weight: .bold)
+        resetTitle.textColor = OmarchyStartMenuTheme.foreground
+        let resetDetail = NSTextField(wrappingLabelWithString: virtualMachineRunning
+            ? "Shut down Omarchy to change the VM location or reset it to factory settings."
+            : "Erase this VM and return it to factory settings.")
+        resetDetail.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        resetDetail.textColor = OmarchyStartMenuTheme.muted
+        resetDetail.maximumNumberOfLines = 3
+        let resetLabels = NSStackView(views: [resetTitle, resetDetail])
+        resetLabels.orientation = .vertical
+        resetLabels.alignment = .leading
+        resetLabels.spacing = 3
+        resetLabels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        resetLabels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        resetDetail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        resetDetail.trailingAnchor.constraint(lessThanOrEqualTo: resetLabels.trailingAnchor).isActive = true
+        let resetRow = NSStackView(views: [resetSymbol, resetLabels, resetAction])
+        resetRow.orientation = .horizontal
+        resetRow.alignment = .centerY
+        resetRow.spacing = 12
+        resetRow.translatesAutoresizingMaskIntoConstraints = false
+        resetRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
+        let resetCard = themedCard(containing: resetRow, identifier: "reset-card")
+
+        let restart = OmarchyActionButton(title: "Restart Omarchy", style: .secondary, target: self, action: #selector(restartOmarchy))
+        restart.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        restart.setContentCompressionResistancePriority(.required, for: .horizontal)
+        restart.identifier = NSUserInterfaceItemIdentifier("restart-vm-button")
+        restart.isEnabled = !controlsBusy
+        let restartCaption = NSTextField(wrappingLabelWithString: shutdownInProgress
+            ? "Waiting for Omarchy to shut down. Finish saving your work inside Omarchy."
+            : "CPU, memory, shared folder, networking, port forwarding, and immersive mode changes apply when Wizard next starts. Restart to apply them now.")
+        restartCaption.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        restartCaption.textColor = OmarchyStartMenuTheme.muted
+        restartCaption.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        restartCaption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let runningActions = NSStackView(views: [restartCaption, restart])
+        runningActions.orientation = .horizontal
+        runningActions.alignment = .centerY
+        runningActions.spacing = 16
+        runningActions.identifier = NSUserInterfaceItemIdentifier("running-settings-actions")
+        let settingsSections: [NSView] = [permissionHeading, permissionCard, integrationHeading, integrationCard]
+        let stack = NSStackView(views: virtualMachineRunning
+            ? [headingStack, runningActions] + settingsSections + [resetHeading, resetCard]
+            : [headingStack] + settingsSections + [resetHeading, resetCard])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 18
+        stack.setCustomSpacing(20, after: headingStack)
+        stack.setCustomSpacing(6, after: permissionHeading)
+        stack.setCustomSpacing(16, after: permissionCard)
+        stack.setCustomSpacing(6, after: integrationHeading)
+        stack.setCustomSpacing(6, after: resetHeading)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let actions = NSStackView(views: [launchButton])
+        actions.orientation = .vertical
+        actions.alignment = .leading
+        actions.spacing = 12
+        actions.identifier = NSUserInterfaceItemIdentifier("start-menu-actions")
+        actions.translatesAutoresizingMaskIntoConstraints = false
+
+        let document = StartMenuDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = document
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.identifier = NSUserInterfaceItemIdentifier("start-menu-scroll")
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(scrollView)
+        content.addSubview(actions)
+        startMenuScrollView = scrollView
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: actions.topAnchor, constant: -12),
+            actions.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 42),
+            actions.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -42),
+            actions.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            document.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.heightAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 42),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -42),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 26),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
+            headingStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            permissionCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            integrationCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            resetCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            launchButton.widthAnchor.constraint(equalTo: actions.widthAnchor),
+        ])
+
+        if virtualMachineRunning {
+            runningActions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        content.layoutSubtreeIfNeeded()
+        document.layoutSubtreeIfNeeded()
+        preferredContentHeight = ceil(stack.fittingSize.height + actions.fittingSize.height + 82)
+        let maximumOffset = max(
+            0,
+            document.frame.height - scrollView.contentView.bounds.height
+        )
+        scrollView.contentView.scroll(
+            to: NSPoint(
+                x: 0,
+                y: min(max(0, preservedScrollOffset), maximumOffset)
+            )
+        )
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        if resetInProgress {
+            reset.scrollToVisible(reset.bounds)
+        }
+        updatePermissionRequestControls()
+    }
+
+    private func sectionHeading(_ text: String) -> NSTextField {
+        let heading = NSTextField(labelWithString: text)
+        heading.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        heading.textColor = OmarchyStartMenuTheme.muted
+        heading.identifier = NSUserInterfaceItemIdentifier(
+            "section-heading-\(text.lowercased())"
+        )
+        return heading
+    }
+
+    private func themedCard(containing body: NSView, identifier: String) -> NSView {
+        let card = NSView()
+        card.identifier = NSUserInterfaceItemIdentifier(identifier)
+        card.wantsLayer = true
+        card.layer?.backgroundColor = OmarchyStartMenuTheme.darkBackground.cgColor
+        card.layer?.cornerRadius = 6
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = OmarchyStartMenuTheme.border.cgColor
+        card.addSubview(body)
+        NSLayoutConstraint.activate([
+            body.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
+            body.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
+            body.topAnchor.constraint(equalTo: card.topAnchor, constant: 5),
+            body.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -5),
+        ])
+        return card
+    }
+
+    private func permissionRow(
+        symbolName: String,
+        title: String,
+        detail: String,
+        granted: Bool,
+        actionTitle: String?,
+        action: Selector
+    ) -> NSView {
+        permissionRow(
+            symbolName: symbolName,
+            title: title,
+            detail: detail,
+            granted: granted,
+            statusLabels: ("●  Yes", "○  No"),
+            actions: actionTitle.map { [($0, action)] } ?? []
+        )
+    }
+
+    private func permissionRow(
+        symbolName: String,
+        title: String,
+        detail: String,
+        compactDetailLines: [String]? = nil,
+        detailAction: Selector? = nil,
+        granted: Bool,
+        statusLabels: (granted: String, denied: String),
+        statusTint: NSColor? = nil,
+        actions: [(String, Selector)],
+        actionsEnabled: Bool = true,
+        minimumHeight: CGFloat = 68,
+        rowIdentifier: String? = nil
+    ) -> NSView {
+        let identifier = rowIdentifier ?? symbolName
+        let symbol = NSImageView()
+        symbol.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
+        symbol.contentTintColor = OmarchyStartMenuTheme.accent
+        symbol.identifier = NSUserInterfaceItemIdentifier("permission-symbol-\(identifier)")
+        symbol.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            symbol.widthAnchor.constraint(equalToConstant: 26),
+            symbol.heightAnchor.constraint(equalToConstant: 26),
+        ])
+
+        let name = NSTextField(labelWithString: title)
+        name.font = .monospacedSystemFont(ofSize: 13, weight: .bold)
+        name.textColor = OmarchyStartMenuTheme.foreground
+        name.identifier = NSUserInterfaceItemIdentifier("permission-title-\(identifier)")
+
+        var explanations: [NSView] = []
+        if let compactDetailLines {
+            for (index, line) in compactDetailLines.enumerated() {
+                let detailIdentifier = "permission-detail-\(identifier)-\(index)"
+                if index == 0, let detailAction {
+                    explanations.append(
+                        clickableDetailField(line, action: detailAction, identifier: detailIdentifier)
+                    )
+                } else {
+                    let explanation = NSTextField(labelWithString: line)
+                    explanation.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+                    explanation.textColor = OmarchyStartMenuTheme.muted
+                    explanation.maximumNumberOfLines = 1
+                    explanation.lineBreakMode = .byTruncatingMiddle
+                    explanation.toolTip = line
+                    explanation.identifier = NSUserInterfaceItemIdentifier(detailIdentifier)
+                    explanations.append(explanation)
+                }
+            }
+        } else if let detailAction {
+            explanations = [
+                clickableDetailField(
+                    detail,
+                    action: detailAction,
+                    identifier: "permission-detail-\(identifier)"
+                ),
+            ]
+        } else {
+            let explanation = NSTextField(wrappingLabelWithString: detail)
+            explanation.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+            explanation.textColor = OmarchyStartMenuTheme.muted
+            explanation.maximumNumberOfLines = 2
+            explanation.identifier = NSUserInterfaceItemIdentifier(
+                "permission-detail-\(identifier)"
+            )
+            explanations = [explanation]
+        }
+
+        let labels = NSStackView(views: [name] + explanations)
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 3
+        for explanation in explanations {
+            explanation.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            explanation.trailingAnchor.constraint(
+                lessThanOrEqualTo: labels.trailingAnchor
+            ).isActive = true
+        }
+
+        let statusText = granted ? statusLabels.granted : statusLabels.denied
+        let statusFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        let status = NSTextField(labelWithString: statusText)
+        status.font = statusFont
+        if let statusTint {
+            status.textColor = statusTint
+        } else if granted {
+            let attributedStatus = NSMutableAttributedString(
+                string: statusText,
+                attributes: [
+                    .font: statusFont,
+                    .foregroundColor: OmarchyStartMenuTheme.foreground,
+                ]
+            )
+            attributedStatus.addAttribute(
+                .foregroundColor,
+                value: OmarchyStartMenuTheme.success,
+                range: NSRange(location: 0, length: 1)
+            )
+            status.attributedStringValue = attributedStatus
+        } else {
+            status.textColor = OmarchyStartMenuTheme.muted
+        }
+        status.alignment = .right
+        status.identifier = NSUserInterfaceItemIdentifier("permission-status-\(identifier)")
+        status.setContentHuggingPriority(.required, for: .horizontal)
+        status.translatesAutoresizingMaskIntoConstraints = false
+
+        var trailingViews: [NSView] = [status]
+        for (index, actionDescription) in actions.enumerated() {
+            let (actionTitle, action) = actionDescription
+            let button = OmarchyActionButton(
+                title: actionTitle,
+                style: .secondary,
+                target: self,
+                action: action
+            )
+            button.isEnabled = actionsEnabled
+                && !controlsBusy
+                && !resetInProgress
+            let identifier = actions.count == 1
+                ? "permission-action-\(identifier)"
+                : "permission-action-\(identifier)-\(index)"
+            button.identifier = NSUserInterfaceItemIdentifier(identifier)
+            button.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            trailingViews.append(button)
+        }
+
+        let trailing = NSView()
+        trailing.translatesAutoresizingMaskIntoConstraints = false
+        for trailingView in trailingViews {
+            trailing.addSubview(trailingView)
+        }
+        var trailingConstraints = [
+            status.topAnchor.constraint(equalTo: trailing.topAnchor),
+            status.leadingAnchor.constraint(greaterThanOrEqualTo: trailing.leadingAnchor),
+            status.trailingAnchor.constraint(equalTo: trailing.trailingAnchor),
+        ]
+        var previousTrailingView: NSView = status
+        for (index, actionView) in trailingViews.dropFirst().enumerated() {
+            trailingConstraints.append(contentsOf: [
+                actionView.leadingAnchor.constraint(equalTo: trailing.leadingAnchor),
+                actionView.trailingAnchor.constraint(equalTo: trailing.trailingAnchor),
+                actionView.topAnchor.constraint(
+                    equalTo: previousTrailingView.bottomAnchor,
+                    constant: index == 0 ? 7 : 2
+                ),
+            ])
+            previousTrailingView = actionView
+        }
+        trailingConstraints.append(
+            previousTrailingView.bottomAnchor.constraint(equalTo: trailing.bottomAnchor)
+        )
+        NSLayoutConstraint.activate(trailingConstraints)
+
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        let row = NSView()
+        row.identifier = NSUserInterfaceItemIdentifier("permission-row-\(identifier)")
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(symbol)
+        row.addSubview(labels)
+        row.addSubview(trailing)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumHeight),
+            symbol.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            symbol.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            labels.leadingAnchor.constraint(equalTo: symbol.trailingAnchor, constant: 12),
+            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -12),
+            trailing.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            trailing.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            trailing.widthAnchor.constraint(equalToConstant: 124),
+        ])
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return row
+    }
+
+    private func clickableDetailField(
+        _ text: String,
+        action: Selector,
+        identifier: String
+    ) -> NSView {
+        let button = PointingHandButton(title: text, target: self, action: action)
+        button.isBordered = false
+        button.alignment = .left
+        button.setAccessibilityLabel("Open in Finder")
+        button.setAccessibilityValue(text)
+        button.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                .foregroundColor: OmarchyStartMenuTheme.muted,
+            ]
+        )
+        button.toolTip = text
+        button.identifier = NSUserInterfaceItemIdentifier(identifier)
+        button.cell?.lineBreakMode = .byTruncatingMiddle
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 16).isActive = true
+        return button
+    }
+
+    private func separator() -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier("themed-separator")
+        view.wantsLayer = true
+        view.layer?.backgroundColor = OmarchyStartMenuTheme.separator.cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return view
+    }
+
+    private func immersiveSettingRow(isEnabled: Bool) -> NSView {
+        let setting = toggleSettingRow(
+            titleText: "Immersive",
+            detailText: StartMenuPresentation.immersiveDetail(isEnabled: isEnabled),
+            symbolName: "arrow.up.left.and.arrow.down.right",
+            identifier: "immersive",
+            accessibilityLabel: "Immersive mode",
+            isEnabled: isEnabled,
+            action: #selector(changeImmersiveMode(_:))
+        )
+        immersiveCaption = setting.caption
+        return setting.row
+    }
+
+    private func automaticStartSettingRow() -> NSView {
+        let detail = virtualMachineRunning
+            ? "Open Wizard with your saved settings. Open settings anytime from Omarchy’s Setup menu."
+            : "Open Wizard with your saved settings. Hold Option while opening the app to show the launcher."
+        return toggleSettingRow(
+            titleText: "Skip launcher",
+            detailText: detail,
+            symbolName: "play.circle",
+            identifier: "automatic-start",
+            accessibilityLabel: "Skip launcher",
+            isEnabled: startAutomatically(),
+            action: #selector(changeStartAutomatically(_:))
+        ).row
+    }
+
+    private func toggleSettingRow(
+        titleText: String,
+        detailText: String,
+        symbolName: String,
+        identifier: String,
+        accessibilityLabel: String,
+        isEnabled: Bool,
+        action: Selector
+    ) -> (row: NSView, caption: NSTextField) {
+        let symbol = NSImageView()
+        symbol.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )
+        symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
+        symbol.contentTintColor = OmarchyStartMenuTheme.accent
+        symbol.identifier = NSUserInterfaceItemIdentifier("\(identifier)-symbol")
+        symbol.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            symbol.widthAnchor.constraint(equalToConstant: 26),
+            symbol.heightAnchor.constraint(equalToConstant: 26),
+        ])
+
+        let title = NSTextField(labelWithString: titleText)
+        title.font = .monospacedSystemFont(ofSize: 13, weight: .bold)
+        title.textColor = OmarchyStartMenuTheme.foreground
+        title.identifier = NSUserInterfaceItemIdentifier("\(identifier)-title")
+
+        let detail = NSTextField(wrappingLabelWithString: detailText)
+        detail.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        detail.textColor = OmarchyStartMenuTheme.muted
+        detail.maximumNumberOfLines = 2
+        detail.identifier = NSUserInterfaceItemIdentifier("\(identifier)-caption")
+
+        let labels = NSStackView(views: [title, detail])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 3
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        let toggle = OmarchyToggleButton(
+            isOn: isEnabled,
+            target: self,
+            action: action
+        )
+        toggle.isEnabled = !controlsBusy && !resetInProgress
+        toggle.identifier = NSUserInterfaceItemIdentifier("\(identifier)-toggle")
+        toggle.setAccessibilityLabel(accessibilityLabel)
+        toggle.setAccessibilityTitleUIElement(title)
+        toggle.setAccessibilityHelp(detailText)
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+
+        let row = NSView()
+        row.identifier = NSUserInterfaceItemIdentifier("\(identifier)-row")
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(symbol)
+        row.addSubview(labels)
+        row.addSubview(toggle)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            symbol.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            symbol.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            labels.leadingAnchor.constraint(equalTo: symbol.trailingAnchor, constant: 12),
+            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
+            toggle.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return (row, detail)
+    }
+
+    @objc private func beginAccessibilityRequest() {
+        requestAccessibility()
+        updatePermissionRows()
+    }
+
+    @objc private func beginMicrophoneRequest() {
+        guard microphoneStatus() == .notDetermined, !microphoneRequestInFlight else { return }
+        microphoneRequestInFlight = true
+        updatePermissionRows()
+        requestMicrophone { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.microphoneRequestInFlight = false
+                self.updatePermissionRows()
+            }
+        }
+    }
+
+    @objc private func openMicrophoneSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func beginCameraRequest() {
+        guard cameraStatus() == .notDetermined, !cameraRequestInFlight else { return }
+        cameraRequestInFlight = true
+        updatePermissionRows()
+        requestCamera { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.cameraRequestInFlight = false
+                self.updatePermissionRows()
+            }
+        }
+    }
+
+    @objc private func openCameraSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openStorageLocation() {
+        guard let storageLocationURL = storageLocationURL() else { return }
+        do {
+            if !FileManager.default.fileExists(atPath: storageLocationURL.path) {
+                // Only the default folder is ever created from here. A chosen
+                // folder that has gone missing means its drive is not mounted,
+                // and "the parent exists" is not proof otherwise: a leftover
+                // /Volumes/<name> directory on the boot volume satisfies that
+                // test, so creating the folder would silently rebuild the
+                // workspace on the internal disk and the next launch would
+                // initialize a brand-new VM there.
+                guard storageLocationStatus().isDefault else {
+                    throw NSError(
+                        domain: "TryOmarchy.StorageLocation",
+                        code: 2,
+                        userInfo: [
+                            NSLocalizedDescriptionKey:
+                                "The drive that holds this folder is not connected. Reconnect it, or switch back to the default folder.",
+                        ]
+                    )
+                }
+                try FileManager.default.createDirectory(
+                    at: storageLocationURL,
+                    withIntermediateDirectories: false,
+                    attributes: [.posixPermissions: 0o700]
+                )
+            }
+            guard NSWorkspace.shared.open(storageLocationURL) else {
+                throw NSError(
+                    domain: "TryOmarchy.StorageLocation",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Finder could not open the data directory."]
+                )
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t open the data directory"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+        }
+    }
+
+    @objc private func resetOmarchy() {
+        confirmReset()
+    }
+
+    @objc private func beginStorageLocationSelection() {
+        guard canResetStorage, !prelaunchControlsLocked, !resetInProgress else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose where to keep the Omarchy VM"
+        panel.message = "Omarchy puts its VM files straight into the folder you choose \u{2014} it does not create a folder inside it. Pick an empty folder, or one Omarchy already uses. The drive must be APFS."
+        panel.prompt = "Use Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        if let current = storageLocationStatus().containerPath {
+            panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true)
+        } else {
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Reject before confirming: nobody should agree to a move that is about
+        // to be refused because the drive is the wrong format or too full.
+        if let problem = validateStorageLocation(url.path) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "That folder can\u{2019}t hold the Omarchy VM"
+            alert.informativeText = problem
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+            return
+        }
+
+        let destination = StorageLocationPolicy.stateRoot(forContainer: url.path)
+        let confirmation = NSAlert()
+        confirmation.alertStyle = .warning
+        confirmation.messageText = "Keep the Omarchy VM here?"
+        confirmation.informativeText = """
+            Omarchy will use \(destination) from the next launch.
+
+            Your current VM is not moved. It stays where it is, and you can \
+            reach it again by switching this setting back.
+            """
+        confirmation.addButton(withTitle: "Cancel")
+        confirmation.addButton(withTitle: "Use This Folder")
+        guard confirmation.runModal() == .alertSecondButtonReturn else { return }
+
+        if let problem = chooseStorageLocation(url.path) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "That folder can\u{2019}t hold the Omarchy VM"
+            alert.informativeText = problem
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+        }
+        render()
+    }
+
+    @objc private func useDefaultStorageLocationAction() {
+        guard canResetStorage, !prelaunchControlsLocked, !resetInProgress else { return }
+        useDefaultStorageLocation()
+        render()
+    }
+
+    @objc private func beginSharedFolderSelection() {
+        guard !controlsBusy,
+              !resetInProgress,
+              !microphoneRequestInFlight,
+              !cameraRequestInFlight else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose a folder to share with Omarchy"
+        panel.message = "Omarchy will be able to read and change everything inside this folder, linked as ~/<folder name>."
+        panel.prompt = "Share"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        if let current = sharedFolderStatus().path {
+            panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true)
+        } else {
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let problem = chooseSharedFolder(url.path) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "That folder can’t be shared"
+            alert.informativeText = problem
+            alert.addButton(withTitle: "OK")
+            alert.beginSheetModal(for: window)
+        }
+        render()
+    }
+
+    @objc private func enableSharedFolder() {
+        guard !controlsBusy, !resetInProgress else { return }
+        setSharedFolderEnabled(true)
+        render()
+    }
+
+    @objc private func disableSharedFolder() {
+        guard !controlsBusy, !resetInProgress else { return }
+        setSharedFolderEnabled(false)
+        render()
+    }
+
+    @objc private func beginUSBDeviceSelection() {
+        guard !controlsBusy, !resetInProgress,
+              !microphoneRequestInFlight, !cameraRequestInFlight,
+              usbDeviceEditor == nil, window.attachedSheet == nil else { return }
+        let state = usbDeviceStatus()
+        let editor = USBDeviceEditor(
+            preference: USBDevicePreference(device: state.device, isEnabled: state.isEnabled),
+            connected: connectedUSBDevices(),
+            save: { [weak self] preference in self?.saveUSBDevice(preference) },
+            didClose: { [weak self] in
+                self?.usbDeviceEditor = nil
+                self?.render()
+            }
+        )
+        usbDeviceEditor = editor
+        editor.beginSheet(for: window)
+    }
+
+    @objc private func enableUSBDevice() {
+        setUSBDeviceEnabled(true)
+    }
+
+    @objc private func disableUSBDevice() {
+        setUSBDeviceEnabled(false)
+    }
+
+    private func setUSBDeviceEnabled(_ isEnabled: Bool) {
+        let state = usbDeviceStatus()
+        guard let device = state.device else { return }
+        saveUSBDevice(USBDevicePreference(device: device, isEnabled: isEnabled))
+        render()
+    }
+
+    @objc private func beginNetworkConfiguration() {
+        guard !controlsBusy, !resetInProgress, networkEditor == nil else { return }
+        let editor = NetworkEditor(preferences: networkPreferences(), interfaces: VMBridgeInterfaces.available(),
+            identity: networkIdentity, save: saveNetworkPreferences, didClose: { [weak self] in
+                self?.networkEditor = nil
+                self?.render()
+            })
+        networkEditor = editor
+        editor.beginSheet(for: window)
+    }
+
+    @objc private func beginPortForwardingConfiguration() {
+        guard !controlsBusy, !resetInProgress, portForwardingEditor == nil else { return }
+        let editor = PortForwardingEditor(
+            mappings: portForwardingStatus(),
+            save: { [weak self] mappings in
+                guard let self else {
+                    return "Port forwarding could not be saved because the start menu is unavailable."
+                }
+                return self.savePortForwarding(mappings)
+            },
+            didClose: { [weak self] in
+                guard let self else { return }
+                self.portForwardingEditor = nil
+                self.render()
+            }
+        )
+        portForwardingEditor = editor
+        editor.beginSheet(for: window)
+    }
+
+    @objc private func beginResourceConfiguration() {
+        guard !controlsBusy, !resetInProgress,
+              !microphoneRequestInFlight, !cameraRequestInFlight,
+              resourceEditor == nil, window.attachedSheet == nil else { return }
+        let editor = VMResourceEditor(
+            resources: resources(),
+            limits: resourceLimits,
+            minimumDiskGiB: minimumDiskGiB(),
+            save: { [weak self] resources in self?.saveResources(resources) },
+            didClose: { [weak self] in
+                self?.resourceEditor = nil
+                self?.render()
+            }
+        )
+        resourceEditor = editor
+        editor.beginSheet(for: window)
+    }
+
+    @objc private func changeImmersiveMode(_ sender: NSButton) {
+        guard !controlsBusy, !resetInProgress else { return }
+        let isEnabled = sender.state == .on
+        setImmersiveMode(isEnabled)
+        let detailText = StartMenuPresentation.immersiveDetail(isEnabled: isEnabled)
+        immersiveCaption?.stringValue = detailText
+        (sender as? OmarchyToggleButton)?.refreshAppearance()
+        sender.setAccessibilityHelp(detailText)
+        NSAccessibility.post(
+            element: NSApplication.shared,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: detailText,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
+    }
+
+    private func confirmReset() {
+        guard canResetStorage,
+              !prelaunchControlsLocked,
+              !resetInProgress,
+              !microphoneRequestInFlight,
+              !cameraRequestInFlight,
+              resetConfirmationPrompt == nil else { return }
+        let estimate = storageSpaceEstimate()
+        var detail = "This permanently erases everything in this Omarchy virtual machine, including apps, files, accounts, and settings. This cannot be undone or recovered."
+        // With a chosen data folder there can be more than one workspace on the
+        // Mac, so say which one is about to be erased.
+        let location = storageLocationStatus()
+        if !location.isDefault, location.problem != nil {
+            // The chosen folder cannot be reached, so which VM a reset would
+            // erase is exactly what is in doubt. Hand straight to the
+            // controller, which owns the preference and can explain and offer
+            // to switch, rather than asking the user to confirm erasing a
+            // workspace we would only be guessing the identity of.
+            resetPhase = .checking
+            resetInProgress = true
+            render()
+            resetStorage()
+            return
+        }
+        if !location.isDefault, let displayPath = location.displayPath {
+            let volume = location.volumeName.map { "\($0), " } ?? ""
+            detail += " The VM being erased is the one stored at \(volume)\(displayPath)."
+        }
+        if let estimate {
+            detail += " Resetting may free up to \(estimate) of disk space."
+        }
+        let prompt = ResetConfirmationPrompt(detail: detail)
+        resetConfirmationPrompt = prompt
+        prompt.present(for: window) { [weak self, weak prompt] confirmed in
+            guard let self,
+                  let prompt,
+                  resetConfirmationPrompt === prompt else { return }
+            resetConfirmationPrompt = nil
+            guard confirmed else { return }
+            pendingResetSpaceEstimate = estimate
+            resetPhase = .checking
+            resetInProgress = true
+            render()
+            resetStorage()
+        }
+    }
+
+    @objc private func changeStartAutomatically(_ sender: NSButton) {
+        guard !controlsBusy, !resetInProgress else { return }
+        if sender.state == .on {
+            // Keep the preference and toggle off until the user confirms.
+            sender.state = .off
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Skip the launcher"
+            alert.informativeText = """
+                If this setting is on, Omarchy will start automatically with your current settings whenever you open Try Omarchy.
+
+                To see the launcher again, hold Option while opening the app, or inside Omarchy, open the Omarchy menu and choose Setup → Try Omarchy Settings.
+                """
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            automaticStartupConfirmationInProgress = true
+            let confirmed = confirmAutomaticStartup(alert) == .alertFirstButtonReturn
+            automaticStartupConfirmationInProgress = false
+            guard confirmed, !controlsBusy, !resetInProgress else { return }
+            saveAutomaticStartup(true, sender: sender)
+        } else {
+            saveAutomaticStartup(false, sender: sender)
+        }
+        (sender as? OmarchyToggleButton)?.refreshAppearance()
+    }
+
+    private func saveAutomaticStartup(_ enabled: Bool, sender: NSButton) {
+        if let error = setStartAutomatically(enabled) {
+            sender.state = startAutomatically() ? .on : .off
+            let alert = NSAlert()
+            alert.messageText = "Skip launcher couldn’t be saved"
+            alert.informativeText = error
+            presentStartupSaveError(alert, window)
+        } else {
+            sender.state = enabled ? .on : .off
+        }
+    }
+
+    @objc func launchOmarchy() {
+        beginLaunch(action: launch)
+    }
+
+    @objc private func reviewVMFixes() {
+        beginLaunch(action: retryBootFixes)
+    }
+
+    private func beginLaunch(action: () -> Void) {
+        guard !prelaunchControlsLocked,
+              !resetInProgress,
+              !microphoneRequestInFlight,
+              !cameraRequestInFlight else { return }
+        launchPhase = .checking
+        launchInProgress = true
+        render()
+        action()
+    }
+}
+
+private final class StartMenuDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
