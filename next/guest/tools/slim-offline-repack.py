@@ -9,13 +9,13 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import lzma
 import os
 from pathlib import Path
 import shutil
 import signal
 import stat
 import subprocess
-import tarfile
 import urllib.parse
 
 GIB = 1024 ** 3
@@ -41,35 +41,149 @@ def run(argv, timeout=900, **kw):
     return subprocess.run(list(map(str, argv)), check=True, timeout=timeout, **kw)
 
 
+FILES = {'manifest.json', 'boot/vmlinux', 'boot/initrd', 'rootfs.img'}
+
+
+def gnu_tar_args(archive):
+    # Do not inherit TAR_OPTIONS (or a locale-dependent verbose-list grammar).
+    return ['tar', '--force-local', '--quoting-style=escape', '-f', str(archive)]
+
+
+def tar_env():
+    return {**os.environ, 'TAR_OPTIONS': '', 'LC_ALL': 'C', 'TZ': 'UTC'}
+
+
+def checked_xz(archive):
+    """Consume through the XZ checksum/footer; tar may stop before that footer.
+
+    Bound the expanded physical archive, and require complete tar end markers.
+    No decompressed spool or additional disk-sized allocation is needed.
+    """
+    count, tail = 0, b''
+    with lzma.open(archive) as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 ** 2), b''):
+            count += len(chunk)
+            require(count <= MAX_ROOTFS + 3 * GIB, 'Expanded archive exceeds bound')
+            tail = (tail + chunk)[-1024:]
+    require(count % 512 == 0 and tail == bytes(1024), 'Missing tar end markers')
+    return count
+
+
+def archive_members(archive, extras=('bom.json',)):
+    """Use GNU tar's sparse-aware logical sizes, never Python's PAX size order.
+
+    In the public archive GNU.sparse.realsize precedes POSIX size. Python 3.13
+    applies the latter last, truncating logical size and corrupting next offset.
+    GNU tar interprets both correctly. No archive-controlled path is written
+    until the entire bounded, typed, unique allowlisted catalogue is accepted.
+    --ignore-zeros also validates/rejects members hidden after an end marker.
+    """
+    checked_xz(archive)
+    rows, seen = {}, set()
+    argv = [*gnu_tar_args(archive), '--list', '--verbose', '--numeric-owner',
+            '--full-time', '--utc', '--ignore-zeros']
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=tar_env()) as proc:
+        try:
+            for _ in range(17):
+                line = proc.stdout.readline(4097)
+                if not line:
+                    break
+                require(len(line) <= 4096 and line.endswith(b'\n'), 'Oversized tar listing')
+                fields = line.decode('ascii', errors='strict').rstrip('\n').split(maxsplit=5)
+                require(len(fields) == 6, 'Unknown GNU tar listing grammar')
+                mode, owner, size, date, clock, raw = fields
+                require(len(mode) == 10 and mode[0] in '-d', 'Nonregular archive member')
+                if mode[0] == 'd':
+                    require(raw in ('.', './', 'boot', 'boot/', './boot', './boot/'),
+                            'Unexpected archive directory spelling')
+                name = raw.removeprefix('./').rstrip('/') if mode[0] == 'd' else raw.removeprefix('./')
+                if mode[0] == 'd' and name == '':
+                    name = '.'
+                require(name not in seen, 'Duplicate archive member')
+                seen.add(name)
+                if mode[0] == 'd':
+                    require(name in ('', '.', 'boot') and int(size) == 0, 'Unexpected archive directory')
+                    continue
+                require(name in FILES | set(extras), 'Unexpected archive member: ' + name)
+                ceiling = MAX_ROOTFS if name == 'rootfs.img' else (GIB if name.startswith('boot/') else 1024 ** 2)
+                require(0 < int(size) <= ceiling, 'Invalid member size')
+                rows[name] = dict(raw=raw, bytes=int(size))
+            else:
+                raise ValueError('Too many archive members')
+            # Small fixed archive vocabulary makes bounded stderr sufficient.
+            error = proc.stderr.read(4097)
+            require(proc.wait(timeout=120) == 0 and not error, 'GNU tar catalogue failed')
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=30)
+    require(set(rows) - set(extras) == FILES, 'Incomplete archive')
+    return rows
+
+
 def extract(archive, destination):
-    destination.mkdir()
-    seen = set()
-    with tarfile.open(archive, mode='r|xz') as tar:
-        for member in tar:
-            name = member.name.removeprefix('./')
-            if member.isdir() and name.rstrip('/') in ('', '.', 'boot'):
-                continue
-            require(member.isfile() and name in ('manifest.json', 'bom.json', 'boot/vmlinux', 'boot/initrd', 'rootfs.img'),
-                    'Unexpected archive member: ' + name)
-            require(name not in seen, 'Duplicate archive member')
-            seen.add(name)
-            ceiling = MAX_ROOTFS if name == 'rootfs.img' else (GIB if name.startswith('boot/') else 1024 ** 2)
-            require(0 < member.size <= ceiling, 'Invalid member size')
-            target = destination / name
-            target.parent.mkdir(exist_ok=True, parents=True)
-            source = tar.extractfile(member)
-            require(source is not None, 'Missing member stream')
-            count = 0
-            with target.open('xb') as out:
-                for chunk in iter(lambda: source.read(8 * 1024 ** 2), b''):
+    rows = archive_members(archive)
+    destination.mkdir(mode=0o700)
+    run([*gnu_tar_args(archive), '--extract', '--sparse', '--no-same-owner',
+         '--no-same-permissions', '--keep-old-files', '--no-overwrite-dir',
+         '--no-recursion', '-C', destination, '--', *[r['raw'] for r in rows.values()]],
+        timeout=3600, env=tar_env())
+    for name, row in rows.items():
+        path = destination / name
+        require(path.is_file() and not path.is_symlink() and path.stat().st_size == row['bytes'],
+                'Extracted size/type mismatch: ' + name)
+    return rows
+
+
+def archive_readback(archive, root, extras=(), rows=None):
+    """Independent stdout expansion, byte counts and hashes; no extraction reuse.
+
+    GNU tar -O expands sparse holes. This verifies the actual archive bytes
+    against the files/manifest, rather than hashing the extraction again.
+    """
+    rows = archive_members(archive, extras) if rows is None else rows
+    seen = {}
+    for name, row in rows.items():
+        count, digest = 0, hashlib.sha256()
+        with subprocess.Popen([*gnu_tar_args(archive), '--extract', '--to-stdout',
+                               '--no-recursion', '--', row['raw']],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=tar_env()) as proc:
+            try:
+                for chunk in iter(lambda: proc.stdout.read(8 * 1024 ** 2), b''):
                     count += len(chunk)
-                    if chunk.count(0) == len(chunk):
-                        out.seek(len(chunk), 1)
-                    else:
-                        out.write(chunk)
-                out.truncate(count)
-            require(count == member.size, 'Short archive member')
-    require(seen - {'bom.json'} == {'manifest.json', 'boot/vmlinux', 'boot/initrd', 'rootfs.img'}, 'Incomplete archive')
+                    require(count <= row['bytes'], 'Oversized readback: ' + name)
+                    digest.update(chunk)
+                error = proc.stderr.read(4097)
+                require(proc.wait(timeout=120) == 0 and not error, 'GNU tar readback failed')
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=30)
+        require(count == row['bytes'] == (root / name).stat().st_size, 'Short readback: ' + name)
+        require(digest.hexdigest() == sha(root / name), 'Archive readback mismatch: ' + name)
+        seen[name] = dict(bytes=count, sha256=digest.hexdigest())
+        print(json.dumps(dict(archiveReadbackMember=name, **seen[name])), flush=True)
+    return seen
+
+
+def verify_feed_archive(archive, feed):
+    """Revalidate unchanged cached bytes, including every frozen feed part."""
+    require(archive.is_file() and not archive.is_symlink() and archive.stat().st_size == feed['bytes'],
+            'Invalid cached archive size/type')
+    whole = hashlib.sha256()
+    with archive.open('rb') as src:
+        for part in feed['parts']:
+            left, digest = part['bytes'], hashlib.sha256()
+            require(type(left) is int and left > 0, 'Invalid feed part size')
+            while left:
+                chunk = src.read(min(left, 8 * 1024 ** 2))
+                require(chunk, 'Short cached archive')
+                left -= len(chunk)
+                digest.update(chunk)
+                whole.update(chunk)
+            require(digest.hexdigest() == part['sha256'], 'Cached part hash mismatch')
+        require(not src.read(1), 'Unexpected cached archive tail')
+    require(whole.hexdigest() == feed['sha256'], 'Cached full archive hash mismatch')
 
 
 def census(root, output):
@@ -146,6 +260,10 @@ def verify_manifest(root):
     require(set(manifest['files']) == {'rootfs.img', 'boot/vmlinux', 'boot/initrd'}, 'Unknown file closure')
     for name, digest in manifest['files'].items():
         require(sha(root / name) == digest, 'Manifest hash mismatch: ' + name)
+        if 'sizes' in manifest:
+            require(type(manifest['sizes'].get(name)) is int
+                    and (root / name).stat().st_size == manifest['sizes'][name],
+                    'Manifest size mismatch: ' + name)
     return manifest
 
 
@@ -156,6 +274,7 @@ def main():
     p.add_argument('--feed-url', required=True)
     p.add_argument('--source-sha', required=True)
     p.add_argument('--work', type=Path, required=True)
+    p.add_argument('--reuse-archive', type=Path, help='Read-only, fully revalidated cached source')
     a = p.parse_args()
     def interrupted(signum, frame):
         raise InterruptedError('Worker terminated: ' + str(signum))
@@ -175,22 +294,32 @@ def main():
         (work / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
     save()
     try:
-        archive = work / 'original.tar.xz'
-        with archive.open('xb') as out:
-            for index, part in enumerate(feed['parts']):
-                url = urllib.parse.urljoin(a.feed_url, part['url'])
-                parsed = urllib.parse.urlsplit(url)
-                require(parsed.scheme == 'https' and parsed.netloc == 'downloads.aiwizards.com', 'Unapproved part origin')
-                temporary = work / ('part-' + str(index))
-                run(['curl', '-fLsS', '-A', 'Mozilla/5.0', '--retry', '3', '--max-time', '600', url, '-o', temporary], timeout=650)
-                require(temporary.stat().st_size == part['bytes'] and sha(temporary) == part['sha256'], 'Invalid part')
-                with temporary.open('rb') as src:
-                    shutil.copyfileobj(src, out, 8 * 1024 ** 2)
-                temporary.unlink()
-        require(archive.stat().st_size == feed['bytes'] and sha(archive) == feed['sha256'], 'Invalid full archive')
+        archive = a.reuse_archive if a.reuse_archive else work / 'original.tar.xz'
+        if a.reuse_archive:
+            require(archive.is_absolute() and archive.resolve().is_relative_to(Path('/srv/work')),
+                    'Cached archive must be worker-local')
+        else:
+            with archive.open('xb') as out:
+                for index, part in enumerate(feed['parts']):
+                    url = urllib.parse.urljoin(a.feed_url, part['url'])
+                    parsed = urllib.parse.urlsplit(url)
+                    require(parsed.scheme == 'https' and parsed.netloc == 'downloads.aiwizards.com', 'Unapproved part origin')
+                    temporary = work / ('part-' + str(index))
+                    run(['curl', '-fLsS', '-A', 'Mozilla/5.0', '--retry', '3', '--max-time', '600', url, '-o', temporary], timeout=650)
+                    require(temporary.stat().st_size == part['bytes'] and sha(temporary) == part['sha256'], 'Invalid part')
+                    with temporary.open('rb') as src:
+                        shutil.copyfileobj(src, out, 8 * 1024 ** 2)
+                    temporary.unlink()
+        verify_feed_archive(archive, feed)
+        receipt.update(phase='source-archive-validation', sourceArchiveSha256=feed['sha256'],
+                       sourceArchiveBytes=feed['bytes'], reusedArchive=bool(a.reuse_archive))
+        save()
         baseline = work / 'baseline'
-        extract(archive, baseline)
+        members = extract(archive, baseline)
         manifest = verify_manifest(baseline)
+        baseline_readback = archive_readback(archive, baseline, ('bom.json',), members)
+        receipt.update(baselineArchiveMembers=members, baselineReadback=baseline_readback)
+        save()
         original = baseline / 'rootfs.img'
         original_sha = sha(original)
         receipt.update(phase='inventory', originalArchiveBytes=archive.stat().st_size,
@@ -228,7 +357,8 @@ def main():
         target = work / 'candidate.tar.xz'
         with target.open('xb') as out:
             tar = subprocess.Popen(['tar', '-C', str(candidate), '--sparse', '--hole-detection=raw', '-cf', '-',
-                                    'manifest.json', 'boot', 'rootfs.img', *extras], stdout=subprocess.PIPE)
+                                    'manifest.json', 'boot', 'rootfs.img', *extras],
+                                   stdout=subprocess.PIPE, env=tar_env())
             try:
                 run(['xz', '-T2', '-6', '-c'], stdin=tar.stdout, stdout=out, timeout=5400)
                 require(tar.wait(timeout=120) == 0, 'tar failed')
@@ -239,25 +369,15 @@ def main():
                     tar.terminate()
                     tar.wait(timeout=120)
         require(target.stat().st_size > 0, 'Empty candidate archive')
-        # Independent streamed archive readback hashes, without another 50GB allocation.
-        seen = {}
-        with tarfile.open(target, mode='r|xz') as tar:
-            for member in tar:
-                if member.isdir() and member.name.rstrip('/') == 'boot':
-                    continue
-                require(member.isfile() and member.name in ['manifest.json', *manifest['files'], *extras], 'Bad output member')
-                require(member.name not in seen, 'Duplicate output member')
-                stream = tar.extractfile(member)
-                seen[member.name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-        require(set(seen) == {'manifest.json', *manifest['files'], *extras}, 'Incomplete output')
-        require(all(seen[name] == digest for name, digest in manifest['files'].items()), 'Output readback mismatch')
-        require(all(seen[name] == sha(candidate / name) for name in extras), 'Original BOM readback mismatch')
-        require(seen['manifest.json'] == sha(candidate / 'manifest.json'), 'Output manifest changed')
+        readback = archive_readback(target, candidate, extras)
+        verify_feed_archive(archive, feed)
+        require(sha(a.feed_file) == a.feed_sha256, 'Frozen feed changed after validation')
         receipt.update(phase='candidate-only-complete', candidateArchiveBytes=target.stat().st_size,
                        candidateArchiveSha256=sha(target), candidateLogicalBytes=disk.stat().st_size,
                        candidateAllocatedBytes=disk.stat().st_blocks * 512, conservativeInstallBytes=manifest['installBytes'],
                        filesystemInventory=before, filesystemClosureUnchanged=True, originalUnchanged=True,
-                       archiveReadbackVerified=True, freeAfterBytes=shutil.disk_usage(work).free)
+                       archiveReadbackVerified=True, archiveReadback=readback,
+                       freeAfterBytes=shutil.disk_usage(work).free)
         save()
     except Exception as exc:
         receipt.update(phase='failed', error=repr(exc))

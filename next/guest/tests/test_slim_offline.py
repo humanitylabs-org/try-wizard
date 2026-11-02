@@ -3,6 +3,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import lzma
+import subprocess
+from unittest import mock
 from pathlib import Path
 import tarfile
 import tempfile
@@ -46,6 +49,141 @@ class OfflineSlimTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     module.extract(root / 'source.xz', root / 'out')
                 self.assertFalse((root / 'outside').exists())
+
+    def sparse_archive(self, path, boot_first=False):
+        # Exact public PAX ordering: logical realsize, then physical POSIX size.
+        # Boot after the sparse member reproduced the missing-boot failure.
+        logical = 16 * 1024 ** 2
+        blocks = b'A' * 4096 + b'Z' * 4096
+        sparse_map = f'3\n0\n4096\n{logical - 4096}\n4096\n{logical}\n0\n'.encode()
+        body = sparse_map.ljust(512, b'\0') + blocks
+        data = {'rootfs.img': b'A' * 4096 + bytes(logical - 8192) + b'Z' * 4096,
+                'boot/vmlinux': b'kernel', 'boot/initrd': b'initrd'}
+        manifest = dict(rootfs='rootfs.img', kernel='boot/vmlinux', initrd='boot/initrd',
+                        files={n: hashlib.sha256(b).hexdigest() for n, b in data.items()},
+                        sizes={n: len(b) for n, b in data.items()})
+        data['manifest.json'] = json.dumps(manifest).encode()
+        names = ['manifest.json', 'boot/vmlinux', 'boot/initrd', 'rootfs.img'] if boot_first else [
+            'manifest.json', 'rootfs.img', 'boot/vmlinux', 'boot/initrd']
+        with tarfile.open(path, 'w:xz', format=tarfile.PAX_FORMAT) as tar:
+            for name in names:
+                entry = tarfile.TarInfo(name)
+                value = data[name]
+                if name == 'rootfs.img':
+                    entry.name = 'GNUSparseFile.0/rootfs.img'
+                    entry.pax_headers = {'GNU.sparse.major': '1', 'GNU.sparse.minor': '0',
+                                         'GNU.sparse.name': name, 'GNU.sparse.realsize': str(logical),
+                                         'size': str(len(body))}
+                    value = body
+                entry.size = len(value)
+                tar.addfile(entry, io.BytesIO(value))
+        return data
+
+    def test_public_pax_size_order_sparse_and_reordered_boot(self):
+        for boot_first in (False, True):
+            with self.subTest(boot_first=boot_first), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                archive = root / 'sparse.xz'
+                expected = self.sparse_archive(archive, boot_first)
+                # Negative control pinpoints the old parser's wrong logical size.
+                with tarfile.open(archive, 'r|xz') as tar:
+                    sparse = next(m for m in tar if m.name == 'rootfs.img')
+                    self.assertEqual(sparse.size, 8704)
+                    self.assertNotEqual(sparse.size, len(expected['rootfs.img']))
+                rows = module.extract(archive, root / 'out')
+                self.assertEqual(set(rows), set(expected))
+                for name, value in expected.items():
+                    self.assertEqual((root / 'out' / name).read_bytes(), value)
+                module.verify_manifest(root / 'out')
+                readback = module.archive_readback(archive, root / 'out')
+                self.assertEqual(readback['rootfs.img']['bytes'], len(expected['rootfs.img']))
+                self.assertLess((root / 'out/rootfs.img').stat().st_blocks * 512, 1024 ** 2)
+
+    def test_gnu_generated_old_and_pax_sparse_readback(self):
+        for fmt in ('gnu', 'pax'):
+            with self.subTest(fmt=fmt), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                source = root / 'source'
+                (source / 'boot').mkdir(parents=True)
+                for name in ('manifest.json', 'boot/vmlinux', 'boot/initrd'):
+                    (source / name).write_bytes(b'bytes')
+                with (source / 'rootfs.img').open('wb') as f:
+                    f.write(b'start')
+                    f.seek(8 * 1024 ** 2)
+                    f.write(b'end')
+                archive = root / 'gnu.xz'
+                subprocess.run(['tar', '-C', str(source), '--format=' + fmt, '--sparse',
+                                '-cJf', str(archive), 'manifest.json', 'rootfs.img', 'boot'], check=True)
+                module.extract(archive, root / 'out')
+                module.archive_readback(archive, root / 'out')
+                self.assertEqual(module.sha(source / 'rootfs.img'), module.sha(root / 'out/rootfs.img'))
+
+    def test_corrupt_truncated_end_marker_and_hidden_members_fail(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            archive = root / 'source.xz'
+            self.sparse_archive(archive)
+            good = archive.read_bytes()
+            unpacked = lzma.decompress(good)
+            bad_cases = [good[:-12], good[:len(good) // 2],
+                         good[:-20] + bytes([good[-20] ^ 1]) + good[-19:],
+                         lzma.compress(unpacked[:-1024].rstrip(b'\0'))]
+            other = root / 'other.xz'
+            self.archive(other, [('unknown', b'bad')])
+            bad_cases.append(lzma.compress(unpacked + lzma.decompress(other.read_bytes())))
+            for index, value in enumerate(bad_cases):
+                with self.subTest(index=index):
+                    archive.write_bytes(value)
+                    with self.assertRaises((ValueError, EOFError, lzma.LZMAError)):
+                        module.extract(archive, root / ('out' + str(index)))
+                    self.assertFalse((root / ('out' + str(index))).exists())
+
+    def test_unknown_duplicate_normalized_link_and_size_bounds_fail_before_write(self):
+        for rows in ([('unknown', b'x')], [('/rootfs.img', b'x')], [('boot/../rootfs.img', b'x')],
+                     [('boot/vmlinux', None)], [('rootfs.img', b'x'), ('./rootfs.img', b'y')],
+                     [('rootfs.img', b'')], [('manifest.json', b'x' * (1024 ** 2 + 1))]):
+            with self.subTest(names=[n for n, _ in rows]), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                self.archive(root / 'source.xz', rows)
+                with self.assertRaises(ValueError):
+                    module.extract(root / 'source.xz', root / 'out')
+                self.assertFalse((root / 'out').exists())
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.sparse_archive(root / 'source.xz')
+            with mock.patch.object(module, 'MAX_ROOTFS', 1024):
+                with self.assertRaisesRegex(ValueError, 'Invalid member size'):
+                    module.extract(root / 'source.xz', root / 'out')
+
+    def test_cached_feed_revalidates_parts_whole_size_and_symlink(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            p = root / 'cached'
+            p.write_bytes(b'firstsecond')
+            feed = dict(bytes=11, sha256=module.sha(p), parts=[
+                dict(bytes=len(v), sha256=hashlib.sha256(v).hexdigest()) for v in (b'first', b'second')])
+            module.verify_feed_archive(p, feed)
+            for bad in ({**feed, 'bytes': 12}, {**feed, 'sha256': '0' * 64},
+                        {**feed, 'parts': [dict(bytes=11, sha256='0' * 64)]}):
+                with self.assertRaises(ValueError):
+                    module.verify_feed_archive(p, bad)
+            (root / 'link').symlink_to(p)
+            with self.assertRaises(ValueError):
+                module.verify_feed_archive(root / 'link', feed)
+
+    def test_independent_readback_and_manifest_size_mismatch_fail(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.sparse_archive(root / 'source.xz')
+            module.extract(root / 'source.xz', root / 'out')
+            path = root / 'out/manifest.json'
+            manifest = json.loads(path.read_text())
+            manifest['sizes']['rootfs.img'] -= 1
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'Manifest size mismatch'):
+                module.verify_manifest(root / 'out')
+            with self.assertRaisesRegex(ValueError, 'Archive readback mismatch|Short readback'):
+                module.archive_readback(root / 'source.xz', root / 'out')
 
     def test_inventory_changes_on_bytes_permissions_and_symlink_target(self):
         with tempfile.TemporaryDirectory() as d:
