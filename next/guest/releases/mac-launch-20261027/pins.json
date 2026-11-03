@@ -12,8 +12,8 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "43c7d9b4677b3f54a17e5ca3ffb68ec549acbf6b",
-      "ref": "fix/mac-managed-interpreter-discovery"
+      "commit": "b7db3bcc0465a63395f3df97e797e918b707e52a",
+      "ref": "fix/local-voice-native-20261103"
     },
     "ux": {
       "repo": "humanitylabs-org/wizard-ux",
@@ -244,7 +244,7 @@
     }
   },
   "finalPins": {
-    "native": "43c7d9b4677b3f54a17e5ca3ffb68ec549acbf6b",
+    "native": "b7db3bcc0465a63395f3df97e797e918b707e52a",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
     "wam": "366caf86e16560bcad0f33ddf41b451bc899f23e",

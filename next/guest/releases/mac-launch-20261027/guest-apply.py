@@ -75,7 +75,7 @@ def main():
     plan=json.loads((ROOT/'preparation/security-image-plan.json').read_text());assert plan['complete'] is True
     assert json.loads((ROOT/'security-preflight.json').read_text())['allGuestImagesEnumerated'] is True
     import factory_migrations as migration
-    run(['systemctl','disable','--now','wizard-voice.service'])  # retire retained Parakeet; selected transcriber is Speaches
+    run(['systemctl','disable','--now','wizard-voice.service'])  # retained writer stays inert until final selected-contract transaction
     migration.empty_legacy_state(Path('/home/wizard/runtipi/app-data/wizardapps/wizard-shell/data'))
     migration.clean_overlays(Path('/home/wizard/runtipi'),WORK)
     inherited=store.enable(WORK)

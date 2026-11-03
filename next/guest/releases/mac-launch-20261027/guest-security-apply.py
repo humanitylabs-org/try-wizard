@@ -2,7 +2,7 @@
 """Only pristine disposable factory: persist selected images, then verify final writers.
 Does not touch owner/live VMs. Source recipes remain pinned and unmodified.
 """
-import argparse, json, os, subprocess
+import argparse, importlib.util, json, os, shutil, subprocess
 from pathlib import Path
 import guest_docker_store as store
 ROOT=Path('/mnt/launch');PREP=ROOT/'preparation';RT=Path('/home/wizard/runtipi')
@@ -42,6 +42,36 @@ def merge(path,updates):
     assert all(read['services'][s]['image']==v for s,v in updates.items())
     return {'path':str(path),'images':updates}
 
+def native_module(name):
+    path=ROOT/'final/native/next/guest/overlay/opt/wizard/voice'/name
+    assert path.is_file() and not path.is_symlink(),'selected native voice component missing'
+    spec=importlib.util.spec_from_file_location('factory_voice_'+name.replace('.','_'),path)
+    assert spec is not None and spec.loader is not None
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+
+def selected_voice(plan):
+    return native_module('reconcile.py').contract_from_plan(plan,json.loads((PREP/'security-compose-bindings.json').read_text()))
+
+
+def finalize_voice(plan):
+    # This is deliberately AFTER all final image-binding writers. It uses the
+    # normal component installer, not a QA disk modification or a guest rebuild.
+    native=ROOT/'final/native/next/guest';payload=ROOT/'assembly-work/voice-component'
+    installer=native_module('install.py');installer.check_path(payload)
+    payload.mkdir(parents=True,exist_ok=True)
+    for rel in installer.FILES:
+        source=native/'overlay'/rel;target=payload/'overlay'/rel
+        installer.check_path(target)
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
+    raw=(json.dumps(selected_voice(plan),indent=2,sort_keys=True)+'\n').encode()
+    assert raw==(native/'releases/mac-launch-20261027/voice-selected-engine.json').read_bytes(),'normal update/factory voice selection differs'
+    (payload/'selected-engine.json').write_bytes(raw)
+    receipt=installer.install(payload)
+    (ROOT/'assembly-work/voice-component.json').write_text(json.dumps(receipt,indent=2)+'\n')
+    return receipt
+
+
 def prepare(plan,managed=None):
     bindings=json.loads((PREP/'security-compose-bindings.json').read_text())['bindings'];byapp={}
     for b in bindings:
@@ -51,7 +81,20 @@ def prepare(plan,managed=None):
     # The combined shell is retired through the lifecycle API, never rebound to a UX-only image.
     assert (ROOT/'assembly-work/factory-overlays.json').is_file(), 'factory migration gate missing'
     assert 'wizard-shell' not in byapp, 'legacy shell unexpectedly selected'
-    writes=[merge(RT/'user-config/wizardapps'/app/'docker-compose.yml',updates) for app,updates in byapp.items()]
+    writes=[]
+    for app,updates in byapp.items():
+        path=RT/'user-config/wizardapps'/app/'docker-compose.yml'
+        if app=='transcriber' and path.exists():
+            module=native_module('reconcile.py')
+            if path.read_bytes().startswith(module.LEGACY_MARKER.encode()):
+                module.migrate_override(path,selected_voice(plan))
+            else:
+                import yaml
+                original=yaml.safe_load(path.read_text()) or {}
+                engine=original.get('services',{}).get('transcriber-engine',{})
+                assert not any(k in engine for k in ('entrypoint','command','user','volumes')),'foreign voice runtime refused before restart'
+        writes.append(merge(path,updates))
+        if app=='transcriber':native_module('reconcile.py').migrate_override(path,selected_voice(plan))
     # Read service names from actual retained compose labels, matched by immutable image ID.
     containers=store.containers() or store.inherited(ROOT/'assembly-work');infra={}
     for target in plan['targets']:
@@ -98,7 +141,8 @@ def finish(plan):
     retained=run(['docker','image','ls','-q','--no-trunc']).split()
     assert set(retained)<=set(expected.values()),'unplanned inherited/cached image retained'
     assert set(expected.values())<=set(retained),'selected OCI image missing after cleanup'
-    receipt={'writes':writes,'running':[{'name':c['Name'],'image':c['Image']} for c in current],'retainedImageIds':sorted(set(retained)),'expectedImageIds':expected,'oldLocalImagesRemoved':True,'cleanupScope':'active containerd store only','classicStore':store.disk()}
+    voice_receipt=finalize_voice(plan)
+    receipt={'voiceComponent':voice_receipt,'writes':writes,'running':[{'name':c['Name'],'image':c['Image']} for c in current],'retainedImageIds':sorted(set(retained)),'expectedImageIds':expected,'oldLocalImagesRemoved':True,'cleanupScope':'active containerd store only','classicStore':store.disk()}
     (ROOT/'assembly-work/security-application.json').write_text(json.dumps(receipt,indent=2)+'\n')
 
 def main():
