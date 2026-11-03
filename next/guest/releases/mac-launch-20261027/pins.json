@@ -12,7 +12,7 @@
   "sourceInputs": {
     "native": {
       "repo": "humanitylabs-org/try-wizard",
-      "commit": "b7db3bcc0465a63395f3df97e797e918b707e52a",
+      "commit": "f94e15d74759607efd4afddbc6a25f9512481817",
       "ref": "fix/local-voice-native-20261103"
     },
     "ux": {
@@ -244,7 +244,7 @@
     }
   },
   "finalPins": {
-    "native": "b7db3bcc0465a63395f3df97e797e918b707e52a",
+    "native": "f94e15d74759607efd4afddbc6a25f9512481817",
     "ux": "e1bc34fa571fddbb2badf0c6dbb97597a3d0d2ba",
     "service": "15d501a36a07ab24ca8409ee0be30b91446c9202",
     "wam": "366caf86e16560bcad0f33ddf41b451bc899f23e",
