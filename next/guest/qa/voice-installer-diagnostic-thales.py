@@ -89,7 +89,7 @@ def main():
     for name in ('home','tmp','share'):(out/name).mkdir(mode=0o700)
     result={'success':False,'diagnosticCompleted':False,'fullAcceptance':False,'voiceTranscriptionAccepted':False,
             'sourceRevisions':stage['sourceRevisions'],'stageSha256':a.stage_sha256,'admission':lease,'preflight':initial,
-            'coreRecompiled':False,'imageLoadsRepeated':False,'newImageTransportRequired':True,'guestRebuilt':False,'ownerStateAccess':False,'diagnosticOnly':True,'reviewRequired':True,'qaSourceRevision':stage['qaSourceRevision'],'packageReceiptSha256':proof['imageReceiptSha256'],'recoveryCompletionSha256':a.recovery_completion_sha256,'recoveryJobId':completion['jobId'],'recoveryResultSha256':sha(proof_path),'recoveryNativeLogSha256':completion['nativeLogSha256']}
+            'coreRecompiled':False,'imageLoadsRepeated':False,'newImageTransportRequired':True,'guestRebuilt':False,'ownerStateAccess':False,'diagnosticOnly':True,'reviewRequired':True,'qaSourceRevision':stage['qaSourceRevision'],'packageReceiptSha256':proof['imageReceiptSha256'],'recoveryCompletionSha256':a.recovery_completion_sha256,'recoveryJobId':completion['jobId'],'recoveryResultSha256':completion['recoveryResultSha256'],'recoveryNativeLogSha256':completion['nativeLogSha256']}
     disk=None
     def cancel(signum,frame):
         if m.CHILD and m.CHILD.poll() is None:m.CHILD.terminate()
