@@ -49,9 +49,33 @@ class Acceptance(unittest.TestCase):
         for token in ('installer_receipt(',"'--apply'","'--rollback'",'for _ in range(3)',"'/api/voice/retry'",'lantern','window','normalRetryResponses','rollbackRetryInert',"'directStart'","'afterDaemonReload'",'selectedImagesAndSecurityPreserved'):
             self.assertIn(token,text)
         host=(QA/'voice-image-acceptance-thales.py').read_text()
-        for token in ('source_binding(stage,a.source_completion_sha256)','m.admission()',"m.console_end(console,target,audit,'first',attempt)",'m.closed(disk)',"metadata(BASELINE)['inode']==27850082","metadata(BASELINE)['mode']==0o400",'productionStopVerified','ownedDiskDescriptorsClosed','baselineMetadataPreserved'):
+        for token in ('source_binding(stage,a.source_completion_sha256)','m.admission()',"m.console_end(console,target,audit,'first',attempt)",'m.closed(disk)',"metadata(BASELINE)['inode']==27850082","metadata(BASELINE)['mode']==0o400",'productionStopCompleted','ownedDiskDescriptorsClosed','baselineMetadataPreserved'):
             self.assertIn(token,host)
         self.assertLess(host.index('source_completion=source_binding'),host.index("subprocess.run(['/bin/cp','-c'"))
+        # Evaluate the actual host predicates, not a marker or a copied formula.
+        # Each bad stop witness must fail even when every other witness is good.
+        messages=('Forced cleanup/timeout is not clean acceptance',
+                  'Missing clean production stop/descriptor proof')
+        guards=[node.args[0] for node in ast.walk(ast.parse(host))
+                if isinstance(node,ast.Call) and isinstance(node.func,ast.Name)
+                and node.func.id=='need' and len(node.args)==2
+                and isinstance(node.args[1],ast.Constant) and node.args[1].value in messages]
+        self.assertEqual(len(guards),2)
+        expressions=[compile(ast.Expression(node),'actual-host-stop-guard','eval') for node in guards]
+        clean={'stopped':True,'lastStopDescriptorsClosed':True,'productionStopCompleted':True,'stopFailed':False}
+        def accepted(core=None,timed_out=False,forced=False,log='ordinary clean stop'):
+            scope={'core':clean if core is None else core,'command':{'timedOut':timed_out},
+                   'm':SimpleNamespace(REPORT={'forcedOwnedDriverExit':forced}),'log':log}
+            return all(eval(expr,{'__builtins__':{}},scope) for expr in expressions)
+        self.assertTrue(accepted())
+        for key in ('stopped','lastStopDescriptorsClosed','productionStopCompleted'):
+            with self.subTest(missing_or_false=key):
+                self.assertFalse(accepted(core={**clean,key:False}))
+                self.assertFalse(accepted(core={k:v for k,v in clean.items() if k!=key}))
+        self.assertFalse(accepted(core={**clean,'stopFailed':True}))
+        self.assertFalse(accepted(timed_out=True))
+        self.assertFalse(accepted(forced=True))
+        self.assertFalse(accepted(log='forcing stop'))
     def fixture(self):
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);base=Path(tmp.name)
         root=base/'runtime';root.mkdir();admission=base/'runtime-admission';admission.mkdir()
