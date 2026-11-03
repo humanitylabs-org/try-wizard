@@ -10,9 +10,9 @@
       The factory also points Hermes' terminal at this VM (stock `terminal.backend: ssh` to wizard@wizard-vm), so the
       agent builds and runs software with the tools installed here, not only what its image carries.
   wizard-apps fetch-voice
-      First launch: install the Transcriber app with local Parakeet voice (/opt/wizard/voice, on the Hermes image that
-      is already on the box; the model downloads on first start). Idempotent; retries until done. Writes
-      /var/lib/wizard/voice.json (state, downloaded/total bytes) for the onboarding/status pages.
+      Reconcile the immutable security-selected Transcriber through WAM. Never
+      select an engine from Hermes or substitute a provider/model. Bounded,
+      cross-process idempotent; writes safe preparation/error status for Retry.
 """
 import json
 import os

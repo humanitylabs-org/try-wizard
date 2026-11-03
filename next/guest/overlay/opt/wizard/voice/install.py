@@ -125,6 +125,7 @@ def _install(payload, root, run):
         (root/FENCE).unlink(missing_ok=True)
         run(['systemctl', 'daemon-reload'], check=True)
         run(['systemctl', 'enable', 'wizard-voice'], check=True)
+        run(['systemctl', 'try-restart', 'wizard-setup'], check=True)
         receipt = {'schema': 1, 'installed': {rel: hashlib.sha256((root/rel).read_bytes()).hexdigest() for rel in FILES},
                    'contractSha256': hashlib.sha256(current.read_bytes()).hexdigest(),
                    'bindingSha256': hashlib.sha256((root/BINDING).read_bytes()).hexdigest(),
@@ -166,6 +167,7 @@ def _rollback(root, run):
         stream.write(FENCE_BYTES); stream.flush(); os.fsync(stream.fileno())
     fence.chmod(0o644)
     run(['systemctl', 'daemon-reload'], check=True)
+    run(['systemctl', 'try-restart', 'wizard-setup'], check=True)
     if (backup/'receipt.json').exists():
         os.replace(backup/'receipt.json', backup/'rolled-back.json')
     # No start/enable on rollback: restored legacy coordinator stays inert.
