@@ -41,7 +41,7 @@ def resolve(receipt, native, output, plan_path=None):
         plan['images']=sorted(selected['image'] if v==old['image'] else v for v in plan['images'])
         plan.update(complete=False,status='voice-derived-awaiting-final-security-closure')
         (output/'security-image-plan.json').write_text(json.dumps(plan,indent=2)+'\n')
-    inventory={str(p.relative_to(output)):hashlib.sha256(p.read_bytes()).hexdigest() for p in output.rglob('*') if p.is_file()}
+    inventory={str(p.relative_to(output)):oci.sha(p) for p in output.rglob('*') if p.is_file()}
     (output/'resolved-files.json').write_text(json.dumps(inventory,indent=2,sort_keys=True)+'\n')
     return d
 
