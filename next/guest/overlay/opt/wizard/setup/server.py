@@ -368,6 +368,15 @@ def voice_status() -> dict[str, Any]:
     detail = str(value.get("stage") or value.get("detail") or "").lower()[:1024]
     stage = {"preparing": "Preparing local voice", "ready": "Local voice ready",
              "retrying": "Local voice will retry", "error": "Local voice needs attention"}[state]
+    if state == "error":
+        # Fixed actionable summaries; never relay raw producer/runtime messages.
+        for token, label in (("compatible", "Install a compatible local voice update, then retry"),
+                             ("parakeet model", "Install the required local Parakeet model, then retry"),
+                             ("security selection", "Install the selected secure voice update, then retry"),
+                             ("bindings", "Review local voice settings in App Manager, then retry")):
+            if token in detail:
+                stage = label
+                break
     if state == "preparing":
         for token, label in (("wheel", "Installing voice dependencies"), ("download", "Downloading voice model"),
                              ("loading", "Loading voice model"), ("install", "Installing local voice"),

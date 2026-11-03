@@ -11,6 +11,7 @@ for name,src in [('wam',r/'wam'),('overlay',r/'source/next/guest/overlay'),('age
  shutil.copytree(src,dst/name,ignore=shutil.ignore_patterns('.git','__pycache__','.pytest_cache','node_modules'))
 for name in ['upgrade-mvp-stack.py','stack-preservation.py','test-stack-preservation.py']:
  d=dst/'source/next/guest'/name;d.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(r/'source/next/guest'/name,d)
+shutil.copy2(r/'source/next/guest/releases/mac-launch-20261027/voice-selected-engine.json',dst/'selected-engine.json')
 shutil.copy2(r/'wizard-shell.tar',dst/'wizard-shell.tar')
 if bom.get('managed_runtime'):
  for name in ['wizard-hermes-managed.tar','managed-runtime.json']:shutil.copy2(r/name,dst/name)
