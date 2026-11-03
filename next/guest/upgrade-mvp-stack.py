@@ -79,6 +79,15 @@ def install_public_package(source, destination):
         dst = destination/src.relative_to(source)
         os.chmod(dst, 0o755 if src.is_dir() or src.stat().st_mode & 0o111 else 0o644)
 
+# Voice is a bounded component transaction. Validate and retire the old writer
+# before any ordinary overlay copy can expose a mixed coordinator/selection.
+voice_path=a.payload/'overlay/opt/wizard/voice/install.py'
+if not voice_path.is_file() or not (a.payload/'selected-engine.json').is_file():
+ raise SystemExit('Authenticated selected voice component missing; old coordinator was not changed')
+voice_spec=importlib.util.spec_from_file_location('voice_component_install',voice_path)
+assert voice_spec is not None and voice_spec.loader is not None
+voice_module=importlib.util.module_from_spec(voice_spec);voice_spec.loader.exec_module(voice_module)
+voice_report=voice_module.install(a.payload)
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 install_public_package(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
@@ -177,5 +186,7 @@ if other_changed or not env_report['stable_credentials_preserved'] or not auth_r
 if cold_gate:
  report['cold_bootstrap']=cold_gate.commit()
  report['cold_config']=ssh_report
+if not a.cold_bootstrap:
+ subprocess.run(['systemctl','--no-block','start','wizard-voice'],check=True)
 (b/'applied.json').write_text(json.dumps(report,sort_keys=True)+'\n')
 print('Mac stack patch applied; SOUL/env and permanent account credentials preserved; stock invoke-grant rotation/runtime metadata audited by field hashes. Disk, app data and chat databases were not replaced.')

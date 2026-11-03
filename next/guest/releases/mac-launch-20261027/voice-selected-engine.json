@@ -1,0 +1,13 @@
+{
+  "api": "speaches-0.9",
+  "bindings": {
+    "transcriber": "ghcr.io/humanitylabs-org/wizard-mac-security-helper-python@sha256:242ebd26a8061041aa4477a0eed9b9edde1335277a18e00fba7c15409507644c",
+    "transcriber-engine": "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber@sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6"
+  },
+  "image": "ghcr.io/humanitylabs-org/wizard-mac-security-transcriber@sha256:fe0bde3040230c526086ac5c729ad81d7ca96fc3c49d846ec27ed3a2065825f6",
+  "model": "istupakov/parakeet-tdt-0.6b-v2-onnx",
+  "provider": "local",
+  "quantization": "int8",
+  "revision": "0bbb45a3365852604aef28b538a8f066f4ccaa85",
+  "schema": 1
+}
