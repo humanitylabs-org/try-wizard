@@ -87,20 +87,19 @@ if not voice_path.is_file() or not (a.payload/'selected-engine.json').is_file():
 voice_spec=importlib.util.spec_from_file_location('voice_component_install',voice_path)
 assert voice_spec is not None and voice_spec.loader is not None
 voice_module=importlib.util.module_from_spec(voice_spec);voice_spec.loader.exec_module(voice_module)
-voice_report=voice_module.install(a.payload)
+voice_report=(voice_module.image_updater(a.payload).apply(a.payload,voice_module)
+              if (a.payload/'voice-package.json').exists() else voice_module.install(a.payload))
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 install_public_package(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',
             # Bring My Hermes into Wizard (front door /api/agent-import) and the agent-key move out of app-data.
             'bin/wizard-import-hermes','bin/wizard-agent-ssh-migrate','bin/wizard-apps','bin/wizard-runtime-configure','setup/server.py',
-            # server.py loads the backup front door from its own folder; without it the front door doesn't start.
-            'setup/backup_frontdoor.py',
-            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png','setup/static/vendor',
+            'setup/static/index.html','setup/static/wizard-icon-32.png','setup/static/wizard-mark-white.png',
             'bin/wizard-setup-start','voice/engine.py','voice/start.sh','bin/wizard-media','bin/wizard-ux-bridge','bin/wizard-env','bin/wizard-firstboot',
             # Phone access: the private-access helper (wizard-agent-service ops/private-access) and its installer.
             'private-access','bin/wizard-phone-access'):
  src=a.payload/'overlay/opt/wizard'/rel; dst=Path('/opt/wizard')/rel
- if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server','setup/backup_frontdoor')): continue
+ if not src.exists() and rel.startswith(('bin/wizard-import','bin/wizard-agent-ssh','bin/wizard-apps','setup/server')): continue
  if src.is_dir(): install_public_package(src,dst)
  else:
   reject_symlink_components(src); reject_symlink_components(dst)

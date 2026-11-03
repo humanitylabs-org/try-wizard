@@ -17,7 +17,7 @@ import subprocess
 
 FILES = (
     'opt/wizard/bin/wizard-apps', 'opt/wizard/setup/server.py',
-    'opt/wizard/voice/reconcile.py', 'opt/wizard/voice/install.py',
+    'opt/wizard/voice/reconcile.py', 'opt/wizard/voice/install.py', 'opt/wizard/voice/update.py',
     'etc/systemd/system/wizard-voice.service',
 )
 BINDING = 'home/wizard/runtipi/user-config/wizardapps/transcriber/docker-compose.yml'
@@ -112,6 +112,10 @@ def _install(payload, root, run):
     run(['systemctl', 'stop', 'wizard-voice'], check=True)
     run(['systemctl', 'disable', 'wizard-voice'], check=True)
     try:
+        # Fence manual Retry as well as boot activation throughout mixed bytes.
+        fence = root/FENCE; fence.parent.mkdir(parents=True, exist_ok=True)
+        module.atomic(fence, FENCE_BYTES)
+        run(['systemctl', 'daemon-reload'], check=True)
         for rel in FILES:
             path = root/rel; path.parent.mkdir(parents=True, exist_ok=True)
             source = payload/'overlay'/rel
@@ -156,19 +160,33 @@ def _rollback(root, run):
     if set(originals) != {*FILES, CONTRACT, BINDING}: raise RuntimeError('Invalid voice rollback inventory')
     run(['systemctl', 'stop', 'wizard-voice'], check=True)
     run(['systemctl', 'disable', 'wizard-voice'], check=True)
+    # A failed oneshot retains its failed ActiveState even when a later start is
+    # condition-skipped. Clear only this unit's historical failure, not its fence.
+    run(['systemctl', 'reset-failed', 'wizard-voice'], check=True)
+    fence = root/FENCE; check_path(fence); fence.parent.mkdir(parents=True, exist_ok=True)
+    # Commit the fence BEFORE restoring any old executable. A crash or Retry
+    # during rollback must not observe unfenced obsolete writer bytes.
+    temporary = fence.with_name('.' + fence.name + '.' + str(os.getpid()))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(FENCE_BYTES); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, fence)
+    finally:
+        temporary.unlink(missing_ok=True)
+    run(['systemctl', 'daemon-reload'], check=True)
     for rel, meta in originals.items():
         target = root/rel; check_path(target)
         if meta['exists']:
             source = backup/'original'/rel; check_path(source)
-            shutil.copy2(source, target); target.chmod(meta['mode'])
-            if root == Path('/'): os.chown(target, meta['uid'], meta['gid'])
+            temporary = target.with_name('.' + target.name + '.restore.' + str(os.getpid()))
+            try:
+                shutil.copy2(source, temporary); temporary.chmod(meta['mode'])
+                if root == Path('/'): os.chown(temporary, meta['uid'], meta['gid'])
+                with temporary.open('rb') as stream: os.fsync(stream.fileno())
+                os.replace(temporary, target)
+            finally: temporary.unlink(missing_ok=True)
         else: target.unlink(missing_ok=True)
-    fence = root/FENCE; check_path(fence); fence.parent.mkdir(parents=True, exist_ok=True)
-    # Disable alone does NOT block manual Retry starts. An explicit condition
-    # keeps restored legacy code inert, including after boot and Retry.
-    with fence.open('wb') as stream:
-        stream.write(FENCE_BYTES); stream.flush(); os.fsync(stream.fileno())
-    fence.chmod(0o644)
     run(['systemctl', 'daemon-reload'], check=True)
     run(['systemctl', 'try-restart', 'wizard-setup'], check=True)
     if (backup/'receipt.json').exists():
@@ -177,13 +195,28 @@ def _rollback(root, run):
     return {'rolledBack': True, 'coordinatorDisabled': True, 'imageStoreMutated': False}
 
 
+def image_updater(payload):
+    path = payload/'overlay/opt/wizard/voice/update.py'; check_path(path)
+    spec = importlib.util.spec_from_file_location('selected_voice_image_update', path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('payload', type=Path, nargs='?')
     parser.add_argument('--apply', action='store_true'); parser.add_argument('--rollback', action='store_true')
     args = parser.parse_args()
     if os.geteuid() != 0: raise SystemExit('Voice component update requires root')
-    if args.rollback: result = rollback()
-    elif args.apply and args.payload: result = install(args.payload.resolve())
+    if args.rollback:
+        if (Path('/')/'var/lib/wizard/patches/selected-voice-image-v1/journal.json').exists():
+            if not args.payload: raise SystemExit('Authenticated payload is required for image rollback')
+            result = image_updater(args.payload).recover(args.payload, __import__('sys').modules[__name__])
+        else: result = rollback()
+    elif args.apply and args.payload:
+        if (args.payload/'voice-package.json').exists():
+            result = image_updater(args.payload).apply(args.payload, __import__('sys').modules[__name__])
+        else: result = install(args.payload.resolve())
     else: raise SystemExit('Use PAYLOAD --apply or --rollback; authenticated package required')
     print(json.dumps(result, sort_keys=True))
 
