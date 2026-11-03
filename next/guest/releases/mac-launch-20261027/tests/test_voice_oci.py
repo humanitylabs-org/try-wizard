@@ -40,6 +40,11 @@ class OCI(unittest.TestCase):
     def test_parent_redirection_refused(self):
         self.fixture(extra=True)
         with self.assertRaises(AssertionError):v.derive(self.base,self.out,b'new',self.pin,'ghcr.io/example/fake')
+    def test_optimized_python_refused(self):
+        import subprocess
+        for name in ['voice_oci.py','package-voice-image.py']:
+            done=subprocess.run([sys.executable,'-O',str(HERE/name)],capture_output=True,text=True,timeout=5)
+            self.assertNotEqual(done.returncode,0);self.assertIn('assertions disabled',done.stderr)
     def test_corrupt_base_refused(self):
         self.fixture()
         with self.base.open('r+b') as f:f.seek(2048);f.write(b'corrupt')

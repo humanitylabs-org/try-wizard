@@ -3,6 +3,7 @@ All old compressed blobs remain byte-identical; no image/model build or fetch.
 """
 import hashlib,io,json,posixpath,tarfile
 from pathlib import Path
+if not __debug__:raise SystemExit('refusing to run with assertions disabled')
 import local_oci as oci
 
 
