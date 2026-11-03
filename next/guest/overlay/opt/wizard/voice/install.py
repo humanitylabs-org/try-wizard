@@ -63,8 +63,11 @@ def _install(payload, root, run):
         source = payload/'overlay'/rel
         check_path(source); check_path(root/rel)
         if not source.is_file(): raise RuntimeError('Incomplete voice package: ' + rel)
-    selected = payload/'selected-engine.json'
-    module.selection(selected)  # protected selection; root-owned parent chain
+    selected = payload/'selected-engine.json'; check_path(selected)
+    # Payload transport is authenticated by the enclosing runtime BOM/factory
+    # source closure; virtiofs source ownership is not guest-root ownership.
+    # The installed /opt contract, unlike this input, must be root protected.
+    module.validate_selection(json.loads(selected.read_text()))
     check_path(root/BINDING); check_path(root/CONTRACT); check_path(root/BACKUP)
     check_path(root/FENCE)
     if (root/'var/lib/wizard/voice-rollback-approved').exists():

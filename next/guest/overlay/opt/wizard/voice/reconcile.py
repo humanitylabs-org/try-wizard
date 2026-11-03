@@ -30,7 +30,10 @@ def selection(path=SELECTION):
         s = member.lstat()
         if stat.S_ISLNK(s.st_mode) or s.st_uid != 0 or s.st_mode & 0o022:
             raise Refusal('Local voice selection is not protected. Reinstall the voice update.')
-    value = json.loads(path.read_text())
+    return validate_selection(json.loads(path.read_text()))
+
+
+def validate_selection(value):
     if (value.get('schema') != 1 or value.get('api') != 'speaches-0.9'
             or value.get('model') != MODEL or value.get('provider') != 'local'
             or value.get('revision') != '0bbb45a3365852604aef28b538a8f066f4ccaa85'
