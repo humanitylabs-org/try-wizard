@@ -65,7 +65,9 @@ def finalize_voice(plan):
         installer.check_path(target)
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
     raw=(json.dumps(selected_voice(plan),indent=2,sort_keys=True)+'\n').encode()
-    assert raw==(native/'releases/mac-launch-20261027/voice-selected-engine.json').read_bytes(),'normal update/factory voice selection differs'
+    expected=PREP/'voice-selected-engine.json'
+    if not expected.exists(): expected=native/'releases/mac-launch-20261027/voice-selected-engine.json'
+    assert raw==expected.read_bytes(),'normal update/factory voice selection differs'
     (payload/'selected-engine.json').write_bytes(raw)
     receipt=installer.install(payload)
     (ROOT/'assembly-work/voice-component.json').write_text(json.dumps(receipt,indent=2)+'\n')

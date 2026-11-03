@@ -83,6 +83,13 @@ def main():
     root=a.stage_root.resolve();assert sys.platform=='darwin' and root.is_relative_to(Path(os.environ['THALES_MEDIA']))
     plan=json.loads((HERE/'security-image-plan.json').read_text());target=next(t for t in plan['targets'] if t['key']==a.target)
     assert target['resolution']=='derive-image'
+    if target.get('voiceOverlay'):
+        assert a.target=='transcriber'
+        spec=importlib.util.spec_from_file_location('secured_voice_overlay',HERE/'package-voice-image.py');assert spec and spec.loader
+        voice=importlib.util.module_from_spec(spec);spec.loader.exec_module(voice)
+        assert target['base']==voice.BASE
+        voice.build(root/'security-packaging'/a.target)
+        return
     dependency=None;local_row=None
     if target.get('baseComponent'):
         local_row,dependency=oci.local_base(root,target,json.loads((HERE/'pins.json').read_text()))

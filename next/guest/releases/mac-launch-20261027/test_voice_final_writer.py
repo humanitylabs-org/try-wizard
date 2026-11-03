@@ -63,6 +63,18 @@ class FactoryVoice(unittest.TestCase):
                 factory.finalize_voice(different)
             install.assert_not_called();self.assertFalse((guest/i.CONTRACT).exists())
 
+    def test_resolved_package_final_selection(self):
+        with tempfile.TemporaryDirectory() as td:
+            launch,guest=self.fixture(Path(td));selected=json.loads(json.dumps(SELECTED))
+            selected['image']='ghcr.io/example/fake@sha256:'+'d'*64;selected['bindings']['transcriber-engine']=selected['image']
+            plan=json.loads(json.dumps(PLAN));plan['resolutions']['engine']['image']=selected['image']
+            (launch/'preparation/voice-selected-engine.json').write_text(json.dumps(selected,indent=2,sort_keys=True)+'\n')
+            (guest/i.BINDING).write_text(yaml.safe_dump(r.binding_document(selected)))
+            actual=i.install
+            with patch.object(factory,'ROOT',launch),patch.object(factory,'PREP',launch/'preparation'),patch.object(factory,'native_module',side_effect=lambda name:i if name=='install.py' else r),patch.object(i,'load_reconciler',return_value=r),patch.object(i,'install',side_effect=lambda p:actual(p,guest,MagicMock())):
+                factory.finalize_voice(plan)
+            self.assertEqual(json.loads((guest/i.CONTRACT).read_text()),selected)
+
     def test_native_inputs_are_minimal_voice_overlay(self):
         pins=json.loads((HERE/'pins.json').read_text())
         self.assertEqual(pins['sourceInputs']['native']['commit'],pins['finalPins']['native'])
