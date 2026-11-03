@@ -10,9 +10,38 @@ STATE = 'var/lib/wizard/patches/selected-voice-image-v1'
 def sha(path):
     with path.open('rb') as f: return hashlib.file_digest(f,'sha256').hexdigest()
 
-def lifecycle(run, action):
-    code = "from wam import cli;c=cli.Config();r=c.runtipi();u='transcriber:'+cli.STORE;r.req('POST','/app-lifecycle/'+u+'/"+action+"',{},timeout=300);r.wait_status(u,{'"+('running' if action=='start' else 'stopped')+"'},timeout=600)"
-    run(['sudo','-u','wizard','env','HOME=/home/wizard','python3','-c',code],check=True,timeout=650)
+WAM = 'home/wizard/wizard-app-manager'
+WAM_PYTHON = ['sudo','-u','wizard','env','HOME=/home/wizard','/usr/bin/python3','-B','-E','-s','-c']
+
+
+def wam_route(installer, root, run):
+    # WAM install.sh installs its CLI and API with WorkingDirectory=$HERE.
+    # Reuse that canonical checkout route, not caller cwd/PYTHONPATH/site fallback.
+    source = root/WAM
+    uid = 1000 if root == Path('/') else os.geteuid()
+    for path in (source, source/'wam', source/'wam/__init__.py', source/'wam/cli.py'):
+        installer.check_path(path)
+        if not path.exists(): raise RuntimeError('Missing canonical WAM source')
+        for member in (path, *path.parents):
+            if member == root: break
+            meta = member.stat()
+            if meta.st_uid not in (0, uid) or meta.st_mode & 0o022:
+                raise RuntimeError('Untrusted canonical WAM source')
+    if not source.is_dir() or not (source/'wam/__init__.py').is_file() or not (source/'wam/cli.py').is_file():
+        raise RuntimeError('Invalid canonical WAM source')
+    # Import only: no Config(), auth read or lifecycle. Exact same interpreter,
+    # user, HOME and cwd as both activation and recovery. Before any lock/write.
+    code = ("import os;from pathlib import Path;from wam import cli;"
+            "assert os.geteuid()=="+str(uid)+" and os.environ['HOME']=='/home/wizard';"
+            "assert Path(cli.__file__)==Path.cwd()/'wam/cli.py'")
+    run([*WAM_PYTHON,code],cwd=str(source),check=True,timeout=30,capture_output=True)
+    return source
+
+
+def lifecycle(run, action, route):
+    if action not in ('start','stop'): raise RuntimeError('Invalid voice lifecycle action')
+    code = "from pathlib import Path;from wam import cli;assert Path(cli.__file__)==Path.cwd()/'wam/cli.py';c=cli.Config();r=c.runtipi();u='transcriber:'+cli.STORE;r.req('POST','/app-lifecycle/'+u+'/"+action+"',{},timeout=300);r.wait_status(u,{'"+('running' if action=='start' else 'stopped')+"'},timeout=600)"
+    run([*WAM_PYTHON,code],cwd=str(route),check=True,timeout=650)
 
 def validate(payload, installer):
     descriptor = payload/'voice-package.json'; installer.check_path(descriptor)
@@ -38,6 +67,7 @@ def apply(payload, installer, root=Path('/'), run=subprocess.run):
     if fence.exists() and fence.read_bytes()!=installer.FENCE_BYTES: raise RuntimeError('Unknown rollback fence')
     binding=root/installer.BINDING;contract=root/installer.CONTRACT
     installer.check_path(binding);installer.check_path(contract)
+    route=wam_route(installer,root,run)
     # Same cross-process lock as coordinator and component installer. Do not
     # release it between selected-image activation and code transaction commit.
     import fcntl
@@ -75,7 +105,7 @@ def apply(payload, installer, root=Path('/'), run=subprocess.run):
             run(['systemctl','stop','wizard-voice'],check=True)
             fence=root/installer.FENCE;fence.parent.mkdir(parents=True,exist_ok=True);m.atomic(fence,installer.FENCE_BYTES)
             run(['systemctl','daemon-reload'],check=True)
-            lifecycle(run,'stop')
+            lifecycle(run,'stop',route)
             # Immutable new package only; never reload old/base archives.
             run(['docker','load','-i',str(payload/d['archive'])],check=True,timeout=600)
             row=json.loads(run(['docker','image','inspect',d['selection']['image']],check=True,capture_output=True,text=True).stdout)[0]
@@ -87,16 +117,20 @@ def apply(payload, installer, root=Path('/'), run=subprocess.run):
             # Strict component contract checks stay unchanged. This image-owning
             # transaction, not Retry, is the only selected-image transition.
             result=installer._install(payload,root,run)
-            lifecycle(run,'start')
+            lifecycle(run,'start',route)
             m.atomic(base/'complete.json',json.dumps(d,sort_keys=True).encode(),0o600)
             return {'selectedImageUpdated':True,'component':result,'selection':d['selection']}
-        except BaseException:
-            rollback(installer,root,run,locked=True,module=m)
+        except BaseException as primary:
+            try: rollback(installer,root,run,locked=True,module=m,route=route)
+            except BaseException as recovery_error:
+                primary.add_note('Selected voice rollback failed; inspect chained recovery error')
+                raise primary from recovery_error
             raise
     finally: os.close(fd)
 
 def recover(payload, installer, root=Path('/'), run=subprocess.run):
     d,m=validate(payload,installer)
+    route=wam_route(installer,root,run)
     import fcntl
     lock=root/'var/lib/wizard/voice-reconcile.lock';installer.check_path(lock)
     fd=os.open(lock,os.O_RDWR|os.O_NOFOLLOW)
@@ -104,18 +138,19 @@ def recover(payload, installer, root=Path('/'), run=subprocess.run):
         fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         journal=json.loads((root/STATE/'journal.json').read_text())
         if journal['selection']!=d['selection']: raise RuntimeError('Rollback package differs from journal')
-        return rollback(installer,root,run,locked=True,module=m)
+        return rollback(installer,root,run,locked=True,module=m,route=route)
     finally: os.close(fd)
 
 
-def rollback(installer, root=Path('/'), run=subprocess.run, locked=False, module=None):
+def rollback(installer, root=Path('/'), run=subprocess.run, locked=False, module=None, route=None):
     if not locked:
         raise RuntimeError('Use the authenticated package entrypoint for locked voice image rollback')
+    if route != root/WAM: raise RuntimeError('Canonical WAM route required for rollback')
     m=module;base=root/STATE;installer.check_path(base)
     journal=json.loads((base/'journal.json').read_text())
     run(['systemctl','stop','wizard-voice'],check=True)
     fence=root/installer.FENCE;fence.parent.mkdir(parents=True,exist_ok=True);m.atomic(fence,installer.FENCE_BYTES)
-    run(['systemctl','daemon-reload'],check=True);lifecycle(run,'stop')
+    run(['systemctl','daemon-reload'],check=True);lifecycle(run,'stop',route)
     if (root/installer.BACKUP/'originals.json').exists(): installer._rollback(root,run)
     for rel,meta in journal['saved'].items():
         assert rel in (installer.BINDING,installer.CONTRACT)
@@ -124,6 +159,6 @@ def rollback(installer, root=Path('/'), run=subprocess.run, locked=False, module
             m.atomic(p,(base/'original'/rel).read_bytes(),meta['mode'])
             if root==Path('/'):os.chown(p,meta['uid'],meta['gid'])
         else:p.unlink(missing_ok=True)
-    lifecycle(run,'start')
+    lifecycle(run,'start',route)
     m.atomic(base/'rolled-back.json',json.dumps(journal,sort_keys=True).encode(),0o600)
     return {'selectedImageRolledBack':True,'coordinatorFenced':True,'imagesPruned':False}

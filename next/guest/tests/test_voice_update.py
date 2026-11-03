@@ -9,6 +9,9 @@ class Update(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.base=Path(self.tmp.name)
         self.root=self.base/'guest';self.root.mkdir();self.payload=self.base/'payload';self.payload.mkdir()
+        wam=self.root/u.WAM/'wam';wam.mkdir(parents=True)
+        (wam/'__init__.py').write_text('')
+        (wam/'cli.py').write_text('# Discovery fixture; this suite fakes subprocesses.\n')
         for rel in i.FILES:
             target=self.payload/'overlay'/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(ROOT/'overlay'/rel,target)
             target=self.root/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_text('old '+rel)
@@ -20,6 +23,8 @@ class Update(unittest.TestCase):
         self.d={'schema':1,'previousSelection':self.old,'selection':self.new,'archive':'voice-engine.oci.tar','archiveSha256':u.sha(self.payload/'voice-engine.oci.tar'),'imageId':'fake-id','securityPassed':True,'configPreserved':True,'baseLayersPreserved':True}
         self.descriptor=self.payload/'voice-package.json';self.descriptor.write_text(json.dumps(self.d));self.calls=[]
         def run(argv,**kw):
+            if argv[:1]==['sudo'] and 'Config()' not in argv[-1]:
+                return types.SimpleNamespace(stdout='',returncode=0)
             self.calls.append(argv)
             if argv[:3]==['docker','image','inspect']:
                 return types.SimpleNamespace(stdout=json.dumps([{'Id':'fake-id','RepoDigests':[argv[3]],'Architecture':'arm64'}]))
