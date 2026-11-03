@@ -165,8 +165,11 @@ def health(row, get=get_json):
     models = get(base + '/v1/models')
     if not isinstance(models, dict) or not isinstance(models.get('data'), list):
         raise Refusal('Voice model contract is unsupported. Install a compatible voice update.')
-    if not any(m.get('id') == MODEL for m in models['data'] if isinstance(m, dict)):
-        raise Refusal('The required Parakeet model is not installed in the selected engine. Install its compatible voice package.')
+    entries = [m for m in models['data'] if isinstance(m, dict)]
+    speech = ([m for m in entries if m.get('task') == 'automatic-speech-recognition']
+              if any('task' in m for m in entries) else entries)
+    if len(speech) != 1 or speech[0].get('id') != MODEL:
+        raise Refusal('The required Parakeet model is not the only selected speech model. Review its compatible voice package.')
     # A model listing is only preparation evidence, not transcription proof.
     return {'status': 'ok', 'model': MODEL, 'provider': 'local'}
 
