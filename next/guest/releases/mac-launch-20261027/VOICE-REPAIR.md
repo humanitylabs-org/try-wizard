@@ -9,7 +9,15 @@ No provider/model change, stock Hermes patch, owner activation or release.
 `package-voice-image.py --output NEW_DIRECTORY` is native ARM/macOS work only.
 It refuses a different immutable predecessor or source hash, changes no packages
 or runtime image configuration, deletes stale bytecode and repeats inherited
-trust-client probes under read-only/unprivileged execution. It publishes nothing.
+trust-client probes under read-only/unprivileged execution. Native preflight
+found the historical default Docker socket absent. Therefore voice_oci.py
+verifies the original pinned 688MB OCI archive, resolves its final layer source
+and whiteouts, and appends only a small source/bytecode-removal layer. Old blobs
+are copied byte-for-byte, never recompressed or loaded. Only the NEW archive is
+imported into the already-running native wizard-agents build daemon; no Colima
+start/reconfigure, registry pull, legacy base load or owner VM is involved.
+The original receipt/archive identity, modes, sizes and modification metadata
+are preserved. It publishes nothing.
 The owning `package-security-image.py` dispatches `voiceOverlay` targets here.
 
 `resolve-voice-package.py --receipt REAL_RESULT --native PINNED_NATIVE_GUEST

@@ -12,34 +12,41 @@ PREDECESSOR = 'e1c2784dd281d338a1cadb42711527a42cb326e3e91424eb45646670b049a291'
 def sha(path):
     with Path(path).open('rb') as f: return hashlib.file_digest(f,'sha256').hexdigest()
 
-def recipe(path, user):
-    assert re.fullmatch(r'/[a-zA-Z0-9_./-]+/parakeet.py', path)
-    assert re.fullmatch(r'[a-zA-Z0-9_:-]+', user) and user not in ('0','root')
-    # No package installs, certificate changes or runtime dependency replacement.
-    # Delete all stale pyc variants rather than relying on timestamp invalidation.
-    code = "from pathlib import Path; p=Path("+repr(path)+"); [f.unlink() for f in (p.parent/'__pycache__').glob('parakeet.*.pyc')]"
-    return '\n'.join(['FROM '+BASE, 'USER 0', 'COPY --chown=0:0 --chmod=0644 voice-parakeet.py '+path,
-        'RUN python -c '+__import__('shlex').quote(code), 'USER '+user])+'\n'
-
 def build(output):
     assert sys.platform=='darwin' and __import__('platform').machine()=='arm64'
     root=output.resolve();assert root.is_relative_to(Path('/Volumes/ThalesMedia/WizardBuilds'))
     root.mkdir(parents=True,exist_ok=False);env=oci.environment(root)
     def run(argv,**kw): return oci.run(argv,env,**kw)
-    base=json.loads(run([oci.DOCKER,'image','inspect',BASE]))[0]
-    assert base['Architecture']=='arm64' and BASE in base.get('RepoDigests',[])
+    # Native preflight found the historical default daemon gone. Reuse the
+    # authenticated archived secured image without loading or rebuilding it.
+    import voice_oci
+    base_root=Path('/Volumes/ThalesMedia/Projects/wizard-mac/guest-launch-20261027-release-83dc0e3')
+    receipt=base_root/'security-packaging/transcriber/result.json'
+    assert sha(receipt)=='702014b5df665c452e95adc5857d99b4d6a2af424edf68d8fe564217c5d9c213'
+    before=receipt.stat();row=json.loads(receipt.read_text())
+    assert row['ref']+'@'+row['digest']==BASE and row['archiveSha256']=='ba01e1609b8b8f6319d76be42b55d66486b8155c8395d2070b308d630e82cd47'
+    original=oci.validate(base_root,row);metadata=original.stat()
+    archive=root/'image.oci.tar'
+    verified,derivation=voice_oci.derive(original,archive,(HERE/'voice-parakeet.py').read_bytes(),PREDECESSOR,BASE.split('@')[0])
+    assert derivation['baseDigest']==BASE.split('@')[1]
+    fields=('st_dev','st_ino','st_mode','st_size','st_mtime_ns','st_ctime_ns')
+    assert all(getattr(original.stat(),f)==getattr(metadata,f) and getattr(receipt.stat(),f)==getattr(before,f) for f in fields),'Archived predecessor changed'
+    # Existing native build daemon, not an owner Wizard VM. Only the NEW image
+    # is imported. No Colima start/reconfigure or old archive replay is allowed.
+    oci.SOCKET='unix:///Users/thales/.colima/wizard-agents/docker.sock'
+    env=oci.environment(root)
+    transport={k:v for k,v in verified.items() if k!='config'}
+    transport.update(transport='oci-archive',archive=str(archive),archiveSha256=sha(archive),archiveVerified=True,loadVerified=True,ref=BASE.split('@')[0],tagsPublished=False,releasePublished=False)
+    built=oci.load(root,transport,oci.DOCKER,env);transport['imageId']=built['Id']
+    raw_config=verified['config']['config']
+    for key in ('User','Entrypoint','Cmd','Env','WorkingDir','Labels','Volumes'):
+        assert (built['Config'].get(key) or None)==(raw_config.get(key) or None),key
     flags=[oci.DOCKER,'run','--pull=never','--rm','--read-only','--network','none','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','python']
     probe="import inspect,hashlib,json;from speaches.executors import parakeet;print(json.dumps({'path':parakeet.__file__,'sha256':hashlib.sha256(inspect.getsource(parakeet).encode()).hexdigest()}))"
-    old=json.loads(run([*flags,BASE,'-c',probe]));assert old['sha256']==PREDECESSOR
-    context=root/'context';context.mkdir();shutil.copy2(HERE/'voice-parakeet.py',context/'voice-parakeet.py')
-    (context/'Dockerfile').write_text(recipe(old['path'],base['Config']['User']))
-    transport,built=oci.export(root,context,'ghcr.io/humanitylabs-org/wizard-mac-security-transcriber',env)
-    # Config invariance is broader than a list of hand-picked fields.
-    assert built['Config']==base['Config'],'Runtime config changed'
-    assert built['RootFS']['Layers'][:len(base['RootFS']['Layers'])]==base['RootFS']['Layers']
     exact=transport['ref']+'@'+transport['digest'];expected=sha(HERE/'voice-parakeet.py')
     imported=json.loads(run([*flags,exact,'-c',probe]))
-    assert imported=={'path':old['path'],'sha256':expected}
+    assert imported=={'path':derivation['sourcePath'],'sha256':expected}
+    (root/'derivation.json').write_text(json.dumps(derivation,indent=2)+'\n')
     marker=run([*flags,exact,'-c','from speaches.executors.parakeet import WIZARD_PINNED_PARAKEET; print(WIZARD_PINNED_PARAKEET)']);assert marker=='1'
     spec=importlib.util.spec_from_file_location('voice_security_closure',HERE/'security-closure.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     tls=subprocess.run([oci.DOCKER,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',exact,'-s'],input=m.PROBE,text=True,capture_output=True,env=env,timeout=900)
@@ -48,7 +55,7 @@ def build(output):
     (root/'active-python-security.log').write_text(active.stdout+active.stderr)
     assert active.returncode==0,'Active Speaches interpreter trust probe failed'
     row={**transport,'base':BASE,'key':'transcriber','predecessorSourceSha256':PREDECESSOR,
-        'voiceSourceSha256':expected,'recipeSha256':sha(context/'Dockerfile'),
+        'voiceSourceSha256':expected,'recipeSha256':sha(root/'derivation.json'),'baseReceiptSha256':sha(receipt),'baseArchiveSha256':row['archiveSha256'],'derivation':derivation,
         'configPreserved':True,'baseLayersPreserved':True,'staleBytecodeRejected':True,
         'securityPassed':True,'securityLogSha256':sha(root/'security.log'),'activePythonSecurityLogSha256':sha(root/'active-python-security.log'),
         'voiceTranscriptionAccepted':False,'ownerActivation':False}
