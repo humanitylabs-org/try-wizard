@@ -44,10 +44,13 @@ def build(output):
     spec=importlib.util.spec_from_file_location('voice_security_closure',HERE/'security-closure.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     tls=subprocess.run([oci.DOCKER,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','/bin/sh',exact,'-s'],input=m.PROBE,text=True,capture_output=True,env=env,timeout=900)
     (root/'security.log').write_text(tls.stdout+tls.stderr);assert tls.returncode==0,'Inherited trust-client probes failed'
+    active=subprocess.run([oci.DOCKER,'run','--pull=never','--rm','-i','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--cap-drop=ALL','--security-opt=no-new-privileges','--entrypoint','python',exact,'-'],input=(HERE/'security-probe.py').read_text(),text=True,capture_output=True,env=env,timeout=300)
+    (root/'active-python-security.log').write_text(active.stdout+active.stderr)
+    assert active.returncode==0,'Active Speaches interpreter trust probe failed'
     row={**transport,'base':BASE,'key':'transcriber','predecessorSourceSha256':PREDECESSOR,
         'voiceSourceSha256':expected,'recipeSha256':sha(context/'Dockerfile'),
         'configPreserved':True,'baseLayersPreserved':True,'staleBytecodeRejected':True,
-        'securityPassed':True,'securityLogSha256':sha(root/'security.log'),
+        'securityPassed':True,'securityLogSha256':sha(root/'security.log'),'activePythonSecurityLogSha256':sha(root/'active-python-security.log'),
         'voiceTranscriptionAccepted':False,'ownerActivation':False}
     # Receipt is only written after native import, identity and trust gates pass.
     (root/'result.json').write_text(json.dumps(row,indent=2)+'\n');print(json.dumps(row))
