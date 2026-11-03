@@ -85,6 +85,10 @@ class VoiceRecovery(unittest.TestCase):
         with self.assertRaisesRegex(r.Refusal,'required Parakeet model'):
             r.health(ROW,get=lambda url: {'message':'OK'} if url.endswith('health') else {'data':[{'id':'wrong'}]})
 
+    def test_ambiguous_speech_model_selection_refused(self):
+        with self.assertRaisesRegex(r.Refusal,'only selected speech model'):
+            r.health(ROW,get=lambda url:{'message':'OK'} if url.endswith('health') else {'data':[{'id':'other'},{'id':r.MODEL}]})
+
     def test_unsupported_health_terminal(self):
         with self.assertRaisesRegex(r.Refusal,'contract is unsupported'):
             r.health(ROW,get=lambda _: {'status':'ok'})
