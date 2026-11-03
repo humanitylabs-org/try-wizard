@@ -40,7 +40,7 @@ class Update(unittest.TestCase):
         self.assertEqual(self.calls,[])
     def test_foreign_binding_before_lifecycle(self):
         self.binding.write_text('services: {transcriber-engine: {privileged: true}}')
-        with self.assertRaises(r.Refusal):self.apply()
+        with self.assertRaisesRegex(RuntimeError,'security selection'):self.apply()
         self.assertEqual(self.calls,[])
     def test_interrupted_journal_refused(self):
         (self.root/u.STATE).mkdir(parents=True)
