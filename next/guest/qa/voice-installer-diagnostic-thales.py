@@ -29,6 +29,8 @@ def preflight(stage):
     need(str(HERE).startswith('/Volumes/ThalesMedia/WizardBuilds/voice-repair-'),'Wrong stage root')
     for rel,want in stage['files'].items():
         path=HERE/rel;need(path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(HERE) and sha(path)==want and (path.stat().st_mode&0o777)==stage['fileModes'][rel],'Staged file drift '+rel)
+    for row in stage['priorFailureEvidence'].values():
+        need(sha(Path(row['remotePath']))==row['sha256'],'Original A3 failed evidence changed')
     need(not (HERE/'arm-evidence').exists(),'Immutable attempt already used')
     need(metadata(BASELINE)==stage['baselineMetadata'],'Pristine metadata changed since seal')
     need(metadata(BASELINE)['inode']==27850082 and metadata(BASELINE)['mode']==0o400,'Wrong pristine baseline')
@@ -49,6 +51,8 @@ def recovery_binding(stage,completion_sha,full_payload=False):
     need(completion['recoveryStageSha256']==stage['recoveryStageSha256'],'Wrong recovery admission')
     for label in ('nativeReceipt','nativeLog'):
         need(sha(Path(completion[label+'Path']))==completion[label+'Sha256'],'Recovery native evidence drift '+label)
+    native=json.loads(Path(completion['nativeReceiptPath']).read_text())
+    need(native['job_id']==completion['jobId'] and native['state']=='completed' and native['exit_code']==0 and native['log_path']==completion['nativeLogPath'] and native['log_sha256']==completion['nativeLogSha256'],'Native successful completion identity mismatch')
     package_root=Path(stage['recoveryRoot'])/'recovery-evidence';proof_path=package_root/'result.json'
     need(sha(proof_path)==completion['recoveryResultSha256'],'Parent-reviewed recovery result drift')
     proof=json.loads(proof_path.read_text())
