@@ -87,7 +87,8 @@ if not voice_path.is_file() or not (a.payload/'selected-engine.json').is_file():
 voice_spec=importlib.util.spec_from_file_location('voice_component_install',voice_path)
 assert voice_spec is not None and voice_spec.loader is not None
 voice_module=importlib.util.module_from_spec(voice_spec);voice_spec.loader.exec_module(voice_module)
-voice_report=voice_module.install(a.payload)
+voice_report=(voice_module.image_updater(a.payload).apply(a.payload,voice_module)
+              if (a.payload/'voice-package.json').exists() else voice_module.install(a.payload))
 # No .git or existing home replacement: install only the WAM package and this guest overlay's named files.
 install_public_package(a.payload/'wam/wam',Path('/home/wizard/wizard-app-manager/wam'))
 for rel in ('product-plugin','bin/wizard-product-configure','setup/hermes_brain.py','local-proxy.conf',

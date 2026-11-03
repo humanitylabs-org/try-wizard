@@ -180,18 +180,12 @@ def health(row, get=get_json):
 def verify_model_runtime(docker, row):
     # A matching API model name must not silently select FP32, another revision,
     # or a library cache populated from mutable main. This is a read-only probe.
-    probe = r'''import ast, hashlib, inspect, json, textwrap
+    probe = r'''import hashlib, inspect
 from pathlib import Path
-from huggingface_hub.constants import HF_HUB_CACHE
-from speaches.executors.parakeet import ParakeetModelManager
-source = ast.parse(textwrap.dedent(inspect.getsource(ParakeetModelManager._load_fn)))
-assert any(isinstance(n, ast.Call) and any(k.arg == 'quantization' and isinstance(k.value, ast.Constant) and k.value.value == 'int8' for k in n.keywords) for n in ast.walk(source)), 'unsupported_quantization'
-p = Path(HF_HUB_CACHE)/'models--istupakov--parakeet-tdt-0.6b-v2-onnx'
-assert (p/'refs/main').read_text().strip() == '0bbb45a3365852604aef28b538a8f066f4ccaa85', 'model_revision'
-s = p/'snapshots/0bbb45a3365852604aef28b538a8f066f4ccaa85'
-files = {'encoder-model.int8.onnx':'3e0581fda6ab843888b51e56d7ee78b6d5bc3237ec113af1f732d1d5286aa155','decoder_joint-model.int8.onnx':'a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3','vocab.txt':'ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d','config.json':'666903c76b9798caf2c210afd4f6cd60b08a8dbf9800ec8d7a3bc0d2148ac466'}
-for name, digest in files.items():
- with (s/name).open('rb') as f: assert hashlib.file_digest(f,'sha256').hexdigest() == digest, 'model_bytes'
+from speaches.executors import parakeet
+assert hashlib.sha256(Path(parakeet.__file__).read_bytes()).hexdigest() == '4ae97f207b41f21d665e2e99408804cab0937a5d7a8c08dae136e1f1c533151b', 'unsupported_source'
+assert parakeet.WIZARD_PINNED_PARAKEET == 1, 'stale_bytecode'
+parakeet.validated_snapshot(parakeet.MODEL_ID)
 print('verified-parakeet-int8-v1')'''
     result = docker('exec', row['Id'], 'python', '-c', probe)
     if result.returncode or result.stdout.strip() != 'verified-parakeet-int8-v1':
