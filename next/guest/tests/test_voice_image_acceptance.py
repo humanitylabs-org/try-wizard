@@ -83,7 +83,7 @@ class Acceptance(unittest.TestCase):
         # Exercise actual top-level result expression; no VM/archive/helper main.
         inventory=self.host.HERE/'derivative-inventory.json';inventory.write_text('{}')
         completion={'jobId':'synthetic-recovery','recoveryResultSha256':'result','nativeLogSha256':'log'}
-        scope=dict(vars(self.host),stage=stage,a=SimpleNamespace(stage_sha256='s',recovery_completion_sha256='r',source_completion_sha256=save()),lease={},initial={},completion=completion,source_completion=source_completion)
+        scope=dict(vars(self.host),stage=stage,a=SimpleNamespace(stage_sha256='s',recovery_completion_sha256='r',source_completion_sha256=save()),lease={},initial={},completion=completion,source_completion=source_completion,proof={'imageReceiptSha256':'synthetic-image-receipt'})
         exec(compile(result_assignment((QA/'voice-image-acceptance-thales.py').read_text()),'actual-result','exec'),scope)
         self.assertEqual(scope['result']['sourceJobId'],c['jobId']);self.assertFalse(scope['result']['success'])
         self.assertFalse(scope['result']['voiceTranscriptionAccepted'])
