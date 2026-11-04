@@ -70,13 +70,47 @@ import Foundation
                 try require(try String(contentsOf: p.dataHome.appendingPathComponent("os/disk.img"), encoding: .utf8) == "same-state-marker", "reinstall marker")
                 record("Keep reinstalls with the same fixture marker (not guest-boot proof)")
             } else {
-                try require(p.entries.count == 9, "inventory includes DataHome and four paths per domain")
+                try require(p.entries.count == 15, "inventory includes DataHome and seven paths per domain")
                 for e in p.entries { try require(!fm.fileExists(atPath: e.url.path), "entry remained: \(e.url.path)") }
                 try require(events.filter { $0.hasPrefix("prefs:") }.count == 2, "both prefs domains")
                 try require(events.filter { $0.hasPrefix("privacy:") }.count == 2, "both privacy domains")
             }
             try WizardRemoval.execute(p, isStopped: { true }, effects: effects)
             record("\(action.rawValue) inventory, Files preservation, idempotent retry")
+        }
+        let late = try plan("late-storage", .deleteData)
+        try WizardRemoval.execute(late, isStopped: { true }, effects: effects)
+        // Model WebKit recreating every scoped residue path after the first deletion.
+        for entry in late.inventory.dropFirst() { try write(entry.url.appendingPathComponent("late-marker")) }
+        // A separately created DataHome must NEVER be removed by the late storage pass.
+        try write(late.dataHome.appendingPathComponent("new-install"), "retain-new-data")
+        let unrelated = late.library.appendingPathComponent("WebKit/test.wizard.removal.other/marker")
+        try write(unrelated, "retain-unrelated")
+        events = []
+        try WizardRemoval.finishStorageCleanup(late, isStopped: { true }, effects: effects)
+        for entry in late.inventory.dropFirst() { try require(!fm.fileExists(atPath: entry.url.path), "late residue remained") }
+        try require(fm.fileExists(atPath: unrelated.path) && fm.fileExists(atPath: late.dataHome.appendingPathComponent("new-install").path), "late cleanup escaped its storage scope")
+        try require(try String(contentsOf: late.files[0].appendingPathComponent("owner-file.txt"), encoding: .utf8) == "never-change", "late sweep changed Files")
+        try require(!events.contains(where: { $0.hasPrefix("privacy:") || $0.hasPrefix("trash:") }), "late sweep repeated privacy/trash effects")
+        record("late WebKit/cache/cookie/state cleanup preserves Files, unrelated domain and new DataHome")
+        events = []
+        try rejects("late sweep refuses restarted Host") { try WizardRemoval.finishStorageCleanup(late, isStopped: { false }, effects: effects) }
+        try require(events.isEmpty, "late stopped fence allowed effects")
+        let keep = try plan("late-keep", .keepData); events = []
+        try WizardRemoval.finishStorageCleanup(keep, isStopped: { true }, effects: effects)
+        try require(events.isEmpty, "Keep late sweep changed settings"); record("Keep late cleanup is inert")
+
+        // Pure injected preferences only: never call the real user's CFPreferences/TCC here.
+        var prefKeys: [WizardRemovalPreferenceHost: [String]] = [.any: ["DataHome", "Bookmarks"], .current: ["ByHostWindow"]]
+        var flushed: [WizardRemovalPreferenceHost] = []; var processClears = 0
+        try WizardRemovalPreferences.clear("test.wizard.removal", processDomain: { processClears += 1 }, synchronize: { flushed.append($0); return true }, keys: { prefKeys[$0] ?? [] }, remove: { prefKeys[$0] = []; _ = $1 })
+        try require(processClears == 1 && prefKeys.values.allSatisfy(\.isEmpty) && flushed.count == 4, "both host scopes must flush and read back")
+        record("no-reboot preferences clear process, any-host and current-host scopes with readback")
+        try rejects("preferences reject failed synchronization") {
+            try WizardRemovalPreferences.clear("test.wizard.removal", processDomain: {}, synchronize: { _ in false }, keys: { _ in [] }, remove: { _, _ in })
+        }
+        try rejects("preferences reject stale readback") {
+            try WizardRemovalPreferences.clear("test.wizard.removal", processDomain: {}, synchronize: { _ in true }, keys: { _ in ["stale"] }, remove: { _, _ in })
         }
         let external = try plan("external", .deleteData, dataOverride: root.appendingPathComponent("external-volume/WizardData"))
         try WizardRemoval.execute(external, isStopped: { true }, effects: effects)

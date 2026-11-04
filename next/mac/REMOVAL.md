@@ -61,12 +61,30 @@ It does not force-stop to manufacture a 60-second pass. A stuck guest or an
 in-progress guarded update may prevent the one-minute target; that is a failed
 acceptance check, not permission to kill Host or delete a live disk.
 
+## No restart is required
+
+Use the supported preference APIs after a clean App/Host shutdown, not plist deletion
+followed by a Mac reboot. The native flow clears the process domain and both
+current-user any-host/current-host CFPreferences scopes, synchronizes and reads back
+empty key lists. A failed flush/readback is an error, not a reason to reboot or kill
+`cfprefsd`. It clears the live WebKit data store, then repeats the exact scoped
+storage sweep after that asynchronous callback and at data-uninstall termination.
+Keep does none of this. Start Fresh can create new empty storage for onboarding;
+only its chosen DataHome location is deliberately saved again.
+
+The inventory includes each App/Host domain's preference plist, Caches, WebKit,
+HTTPStorages directory, HTTPStorages/Cookies binarycookie files and Saved Application
+State. It never deletes their parent directories or another app's domain. The late
+sweep excludes DataHome so it cannot delete a newly created installation there.
+
 ## Manual removal for older builds
 
 1. **Choose what to keep before doing anything.** Open Wizard's Files folder
    from its menu and note that exact path. Never move or delete that folder.
    Read `defaults read org.humanitylabs.wizard.mvp DataHome` in Terminal. If the
-   key is absent, the data home is `~/Library/Application Support/Wizard`.
+   key is absent, inspect the installed build's storage contract: this branch
+   uses `~/Library/Application Support/Wizard MVP`; older builds may use `Wizard`.
+   Do not choose a default folder by guesswork.
    If it is present, that external/custom folder, not the default, holds the VM.
 2. In the **Wizard Host** menu, stop Wizard OS and wait for it to say stopped;
    then quit Host and Wizard. Do not force-quit Host or remove a running disk.
@@ -80,24 +98,30 @@ acceptance check, not permission to kill Host or delete a live disk.
 5. For each of `org.humanitylabs.wizard.mvp` and
    `org.humanitylabs.wizard.mvp.host`, remove its exact item under
    `~/Library/Preferences` (`<id>.plist`), `~/Library/Caches/<id>`,
-   `~/Library/WebKit/<id>` and `~/Library/HTTPStorages/<id>`.
-   Use `defaults delete <id>` as well so the preferences daemon does not restore
-   the plist. Do not delete the parent Preferences/Caches/WebKit/HTTPStorages
-   folders. Reset privacy with `tccutil reset All <id>` for each identifier.
+   `~/Library/WebKit/<id>`, `~/Library/HTTPStorages/<id>`,
+   `~/Library/HTTPStorages/<id>.binarycookies`, `~/Library/Cookies/<id>.binarycookies`
+   and `~/Library/Saved Application State/<id>.savedState`.
+   Use `defaults delete <id>` while both processes are stopped, rather than
+   deleting a cached plist alone. If host-specific preferences remain, clear the
+   exact domain with `defaults -currentHost delete <id>` as well. Missing domains
+   are harmless. No restart is required. Do not delete any parent folders or kill
+   the preferences daemon. Reset privacy with `tccutil reset All <id>` only if
+   deleting permission history is explicitly intended.
 6. Move Wizard.app to Trash. In System Settings → General → Login Items, remove
    an old Wizard Host entry if one is registered. Keep the Files folder.
 
-These bundle identifiers are verified in the build-308 lineage and the
-in-flight 0.7.2 build source. Actual installed build-309 bundle metadata was
-not inspected while the native worker was unreachable; check it before
-applying these instructions to a differently packaged app.
+These identifiers were read from staged build-308 and build-309 App/Host metadata.
+That is not inspection of James's installed app; check an independently packaged
+app's metadata before applying removal instructions.
 
 ## Developer checks and evidence
 
 `Shared/RemovalContract.swift` has no ambient Wizard paths or OS runner.
 `Tests/RemovalTests.swift` injects a fake home/library, fake preference domains
-and a fake runner. Its fixture snapshots list all nine data/settings paths,
+and a fake runner. Its fixture snapshots list all fifteen data/settings paths,
 plus the app, Files folder and disk, before/after Keep, Delete and Start Fresh.
+It also covers late storage recreation, both preference host scopes and failed
+synchronization/readback through fakes, without touching actual preferences.
 The test's backup copy and marker reinstall are **contract fixtures**, not
 real APFS-clone/guest-boot acceptance.
 
@@ -112,11 +136,15 @@ Do not call this build/contract script full real-app acceptance.
 
 ### Remaining real-app acceptance — test state only
 
-Use a **disposable macOS test account**, a task-owned app copy and a disposable
-`--wizard-data-home` containing a stopped QA VM clone. Never use James's or the
-normal Thales user's preferences/data. The app and Host use per-user defaults,
-so do not run these clicks in the real owner's macOS account. Preserve outputs
-under the task-owned evidence directory, not in the production data home.
+Use a **dedicated disposable macOS test account**, a task-owned app copy and a
+stopped QA VM clone. Creating that account requires separate approval; no such
+approval is implied by preparing native builds/contracts. Set DataHome through
+that disposable user's app defaults: `--wizard-data-home` is **Host-only**, and
+passing it to the App alone does not isolate the App from ambient preferences.
+Never use James's or the normal Thales user's preferences/data. The app and Host
+use per-user defaults, so do not run these clicks in the real owner's macOS
+account. Preserve outputs under the task-owned evidence directory, not in the
+production data home.
 
 1. Record the exact app/Host hashes, bundle IDs, data home and selected Files
    path. Put a known file in Files and a recognizable chat/state marker in the
@@ -141,7 +169,20 @@ under the task-owned evidence directory, not in the production data home.
    task-owned app. Record monotonic elapsed time and the Host/VM stop log.
    Require clean VM stop and Host exit within 60 seconds; no force-stop/kill.
 
-**Not yet run:** native build/contracts and all six real-app checks. The Mac
-worker could not be reached after Wake-on-LAN; do not merge or ship based on
-source inspection alone. The native-dialog part of checks 1–5 needs a human;
-no dialog clicks or real-VM results are claimed by the filesystem unit tests.
+### Recovered evidence and outstanding scope
+
+The original native build plus 18 injected filesystem contracts passed at
+`344868cb045c355b30544805cc297766c07a53b1` (durable receipt
+`heavy_f86f57bbe8914d8faae868856262e247`, exit 0). That is not evidence for later
+code changes or real uninstall. PR #53 CI run `41285459650` succeeded at head
+`9457a507c8e183b4f46fde558da34ff765538b17` via merge `a8a54c2`; its nine
+removal checks are Python source guards. Its Swift/runtime builds target legacy
+`macos/`, not this split App/Host, and do not execute `Tests/RemovalTests.swift`.
+No CI artifact was uploaded. Native compilation/contracts of the latest changes
+still need the prepared parent-submitted Mac worker job.
+
+All six real-app checks remain **not run**. The separate disposable-account
+approval remains outstanding in the owning install-size conversation; do not ask
+twice or create an account. The native-dialog part of checks 1–5 needs that test
+user and a human. No real permission reset, actual uninstall or real-VM result is
+claimed by source guards or filesystem fixtures. Do not merge or ship on that basis.

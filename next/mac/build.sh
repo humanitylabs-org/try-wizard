@@ -28,6 +28,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" 
 
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# ditto preserves sealed dependency modes. Only this newly created output copy
+# may be made owner-writable for inside-out signing; never follow its symlinks.
+/bin/chmod -R u+w "$APP/Contents/Frameworks/Sparkle.framework"
 if [[ "${WIZARD_UPDATE_HOST_FIXTURE:-0}" == 1 ]]; then
   [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]] || { echo "Host fixture requires QA build" >&2; exit 2; }
   "${SWIFTC[@]}" tools/update-host-fixture.swift -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"

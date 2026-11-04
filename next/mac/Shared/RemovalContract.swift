@@ -27,6 +27,10 @@ struct WizardRemovalPlan {
             for kind in ["Caches", "WebKit", "HTTPStorages"] {
                 result.append(Entry(label: "\(kind) (\(id))", url: library.appendingPathComponent("\(kind)/\(id)")))
             }
+            for kind in ["HTTPStorages", "Cookies"] {
+                result.append(Entry(label: "\(kind) cookies (\(id))", url: library.appendingPathComponent("\(kind)/\(id).binarycookies")))
+            }
+            result.append(Entry(label: "Saved application state (\(id))", url: library.appendingPathComponent("Saved Application State/\(id).savedState")))
         }
         return result
     }
@@ -134,6 +138,38 @@ enum WizardRemoval {
             for id in plan.bundleIDs { try fence(); try effects.resetPrivacy(id) }
         }
         if plan.removesApp { try fence(); try effects.trash(plan.app) }
+    }
+
+    /// WKWebsiteDataStore may recreate storage paths while its asynchronous purge completes.
+    /// Sweep only settings/storage, never a new DataHome or the retained shared Files folder.
+    static func finishStorageCleanup(_ plan: WizardRemovalPlan, isStopped: () -> Bool,
+                                     effects: WizardRemovalEffects) throws {
+        guard plan.removesData else { return }
+        func fence() throws {
+            guard isStopped() else { throw WizardRemovalPlan.error("Wizard Host restarted during cleanup.") }
+            try plan.validate()
+        }
+        for id in plan.bundleIDs { try fence(); try effects.clearPreferences(id) }
+        for entry in plan.inventory.dropFirst() { try fence(); try effects.remove(entry.url) }
+    }
+}
+
+/// Injectable no-reboot preference transaction. A successful synchronize alone is not readback.
+/// Production maps both scopes to current-user CFPreferences, never system/global domains.
+enum WizardRemovalPreferenceHost: CaseIterable, Hashable { case any, current }
+enum WizardRemovalPreferences {
+    static func clear(_ id: String, processDomain: () throws -> Void,
+                      synchronize: (WizardRemovalPreferenceHost) -> Bool,
+                      keys: (WizardRemovalPreferenceHost) -> [String],
+                      remove: (WizardRemovalPreferenceHost, [String]) -> Void) throws {
+        try processDomain()
+        for host in WizardRemovalPreferenceHost.allCases {
+            guard synchronize(host) else { throw WizardRemovalPlan.error("Could not read \(id) preferences.") }
+            remove(host, keys(host))
+            guard synchronize(host), keys(host).isEmpty else {
+                throw WizardRemovalPlan.error("Could not clear \(id) preferences. Quit Wizard and retry; a Mac restart is not required.")
+            }
+        }
     }
 }
 

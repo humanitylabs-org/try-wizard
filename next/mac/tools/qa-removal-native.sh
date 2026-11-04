@@ -9,7 +9,8 @@ cd "$(dirname "$0")/.."
 [[ ! -e "$REMOVAL_EVIDENCE" ]] || { printf 'Refusing existing evidence directory\n' >&2; exit 2; }
 mkdir -p "$REMOVAL_EVIDENCE"
 exec > >(tee "$REMOVAL_EVIDENCE/native.log") 2>&1
-bash "$HOME/wd-heal.sh"
+# Prepared workers may pin an exact watchdog dependency; interactive use retains the default.
+bash "${REMOVAL_WD_HEAL:-$HOME/wd-heal.sh}"
 df -h /
 df -h "$REMOVAL_EVIDENCE"
 export SIGN_IDENTITY=- DMG=0

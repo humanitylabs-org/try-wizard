@@ -71,6 +71,24 @@ class RemovalSourceTests(unittest.TestCase):
         self.assertIn('setFrameAutosaveName("")', self.app)
         self.assertIn('store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()', self.native)
 
+    def test_no_reboot_preferences_use_both_host_scopes_and_readback(self):
+        for fragment in ['kCFPreferencesCurrentUser', 'kCFPreferencesAnyHost', 'kCFPreferencesCurrentHost', 'CFPreferencesSetMultiple', 'CFPreferencesCopyKeyList']:
+            self.assertIn(fragment, self.native)
+        self.assertIn('keys(host).isEmpty', self.contract)
+        self.assertIn('for host in WizardRemovalPreferenceHost.allCases', self.contract)
+        self.assertNotIn('killall', self.native)
+
+    def test_scoped_cookies_state_and_late_webkit_sweep(self):
+        for fragment in ['HTTPStorages', 'Cookies', '.binarycookies', 'Saved Application State', '.savedState']:
+            self.assertIn(fragment, self.contract)
+        self.assertIn('for entry in plan.inventory.dropFirst()', self.contract)
+        callback = self.native.index('store.removeData(')
+        sweep = self.native.index('try WizardRemoval.finishStorageCleanup', callback)
+        self.assertLess(callback, sweep)
+        self.assertNotIn('self.lease = nil', self.native[callback - 160:sweep])
+        termination = self.native[self.native.index('func willTerminate()'):self.native.index('private static func clearPreferences')]
+        self.assertIn('finishStorageCleanup', termination)
+
     def test_fixture_runner_does_not_launch_real_app(self):
         script = (ROOT / 'tools/qa-removal-native.sh').read_text()
         self.assertIn('Shared/RemovalContract.swift Tests/RemovalTests.swift', script)

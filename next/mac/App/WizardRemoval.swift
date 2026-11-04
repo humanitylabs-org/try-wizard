@@ -119,20 +119,22 @@ import WebKit
                         if service.status == .enabled || service.status == .requiresApproval { try await service.unregister() }
                         if plan.removesData { self.prepareForDataRemoval() }
                         try WizardRemoval.execute(plan, isStopped: { !HostControl.isRunning && !HostControl.hasForeignRunner }, backup: backup, effects: Self.effects(dataHome: plan.dataHome))
-                        self.lease = nil
                         if plan.removesData {
-                            // Also clear the live WK store for Uninstall(delete), not only Start Fresh.
+                            // Keep disk ownership until the live WebKit purge AND final path sweep finish.
                             let store = WKWebsiteDataStore.default()
                             store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
                                 Task { @MainActor in
-                                    if action == .startFresh {
-                                        // Keep only an external DataHome's location for the new install.
-                                        UserDefaults.standard.set(plan.dataHome.path, forKey: "DataHome")
-                                        self.finish(nil); self.didStartFresh()
-                                    } else {
-                                        self.finalRemovalPlan = plan
-                                        self.finish(nil); NSApp.terminate(nil)
-                                    }
+                                    do {
+                                        try WizardRemoval.finishStorageCleanup(plan, isStopped: { !HostControl.isRunning && !HostControl.hasForeignRunner }, effects: Self.effects(dataHome: plan.dataHome))
+                                        if action == .startFresh {
+                                            // Keep only an external DataHome's location for the new install.
+                                            UserDefaults.standard.set(plan.dataHome.path, forKey: "DataHome")
+                                            self.finish(nil); self.didStartFresh()
+                                        } else {
+                                            self.finalRemovalPlan = plan
+                                            self.finish(nil); NSApp.terminate(nil)
+                                        }
+                                    } catch { self.finish(error) }
                                 }
                             }
                         } else {
@@ -191,16 +193,27 @@ import WebKit
     func willTerminate() {
         guard let plan = finalRemovalPlan else { return }
         do {
-            try plan.validate()
-            for id in plan.bundleIDs {
-                let defaults = id == Bundle.main.bundleIdentifier ? UserDefaults.standard : UserDefaults(suiteName: id)!
-                defaults.removePersistentDomain(forName: id)
-                _ = defaults.synchronize()
+            try WizardRemoval.finishStorageCleanup(plan, isStopped: { !HostControl.isRunning && !HostControl.hasForeignRunner }, effects: Self.effects(dataHome: plan.dataHome))
+        } catch { NSLog("Wizard final storage cleanup failed: \(error.localizedDescription)") }
+    }
+
+    private static func clearPreferences(_ id: String) throws {
+        func host(_ scope: WizardRemovalPreferenceHost) -> CFString {
+            scope == .any ? kCFPreferencesAnyHost : kCFPreferencesCurrentHost
+        }
+        try WizardRemovalPreferences.clear(id, processDomain: {
+            guard let defaults = id == Bundle.main.bundleIdentifier ? UserDefaults.standard : UserDefaults(suiteName: id) else {
+                throw WizardRemovalPlan.error("Could not open \(id) preferences.")
             }
-            for entry in plan.inventory where entry.label.hasPrefix("Preferences (") {
-                if FileManager.default.fileExists(atPath: entry.url.path) { try FileManager.default.removeItem(at: entry.url) }
-            }
-        } catch { NSLog("Wizard final preferences cleanup failed: \(error.localizedDescription)") }
+            defaults.removePersistentDomain(forName: id)
+            guard defaults.synchronize() else { throw WizardRemovalPlan.error("Could not flush \(id) preferences.") }
+        }, synchronize: { scope in
+            CFPreferencesSynchronize(id as CFString, kCFPreferencesCurrentUser, host(scope))
+        }, keys: { scope in
+            CFPreferencesCopyKeyList(id as CFString, kCFPreferencesCurrentUser, host(scope)) as? [String] ?? []
+        }, remove: { scope, keys in
+            CFPreferencesSetMultiple(nil, keys as CFArray, id as CFString, kCFPreferencesCurrentUser, host(scope))
+        })
     }
 
     static func effects(dataHome: URL) -> WizardRemovalEffects {
@@ -216,11 +229,7 @@ import WebKit
                 catch { throw WizardRemovalPlan.error("Cleanup stopped. The old data was moved to \(retired.path); it may be partly removed. \(error.localizedDescription)") }
             } else { try fm.removeItem(at: url) }
         }, clearPreferences: { id in
-            let defaults = id == Bundle.main.bundleIdentifier ? UserDefaults.standard : UserDefaults(suiteName: id)!
-            defaults.removePersistentDomain(forName: id)
-            guard defaults.synchronize(), CFPreferencesSynchronize(id as CFString, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) else {
-                throw WizardRemovalPlan.error("Could not clear \(id) preferences.")
-            }
+            try Self.clearPreferences(id)
         }, resetPrivacy: { id in
             let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil"); p.arguments = ["reset", "All", id]
             p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
