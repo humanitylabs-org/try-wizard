@@ -34,16 +34,18 @@ print(json.dumps({p.value: c.enabled for p, c in cfg.platforms.items()}))
 
 @unittest.skipUnless(SRC and PY, 'set HERMES_SRC and HERMES_PYTHON to run against real Hermes')
 class PostImportWiring(unittest.TestCase):
-    def run_wiring(self, config: str, env_lines: list[str]) -> tuple[dict, dict]:
+    def run_wiring(self, config: str, env_lines: list[str], keep: dict | None = None, out: dict | None = None) -> tuple[dict, dict]:
         with tempfile.TemporaryDirectory() as home:
             Path(home, 'config.yaml').write_text(config)
             Path(home, '.env').write_text('\n'.join(env_lines) + '\n')
             env = {**os.environ, 'HERMES_HOME': home, 'HOME': home, 'PYTHONPATH': SRC}
             for k in [k for k in env if k.startswith(('API_SERVER_', 'TELEGRAM_', 'WHATSAPP_'))]:
                 env.pop(k)
-            done = subprocess.run([PY, '-c', m.POST_IMPORT], input=json.dumps({'api_server': None}), env=env,
+            done = subprocess.run([PY, '-c', m.POST_IMPORT], input=json.dumps({'api_server': None, **(keep or {})}), env=env,
                                   capture_output=True, text=True, timeout=120, check=True)
             report = json.loads(done.stdout.strip().splitlines()[-1])
+            if out is not None:
+                out['config'] = Path(home, 'config.yaml').read_text()
             # In the agent container Wizard's API_SERVER_KEY arrives in the process environment.
             loaded = subprocess.run([PY, '-c', LOAD, SRC], env={**env, 'API_SERVER_KEY': 'k' * 32}, capture_output=True, text=True, timeout=120,
                                     check=True)
@@ -62,6 +64,32 @@ class PostImportWiring(unittest.TestCase):
         self.assertFalse(enabled.get('whatsapp', False), enabled)
         self.assertEqual(sorted(report['disabled_messaging']), ['telegram', 'whatsapp'])
         self.assertTrue(enabled.get('api_server'), enabled)
+
+    def test_wizard_model_replaces_the_imported_one(self):
+        # James, 31 Oct (try-wizard#51): the AI runs through Wizard's own connections, not the imported provider.
+        config = ('model:\n  default: claude-opus\n  provider: anthropic\n'
+                  'fallback_model:\n  provider: anthropic\n  model: claude-sonnet\n')
+        wizard = {'default': 'gpt-x', 'provider': 'openai-codex', 'base_url': 'https://chatgpt.com/backend-api/codex'}
+        out = {}
+        self.run_wiring(config, ['API_SERVER_KEY=' + 'k' * 32], keep={'model': wizard}, out=out)
+        import yaml
+        cfg = yaml.safe_load(out['config'])
+        self.assertEqual(cfg['model'], wizard)
+        self.assertNotIn('fallback_model', cfg)
+
+    def test_keep_wizard_auth_puts_wizard_logins_back(self):
+        with tempfile.TemporaryDirectory() as home:
+            old = (m.DATA, m.UID, m.GID)
+            m.DATA, m.UID, m.GID = Path(home), os.getuid(), os.getgid()
+            try:
+                Path(home, 'auth.json').write_text('{"imported": true}')
+                self.assertTrue(m.keep_wizard_auth(b'{"wizard": true}'))
+                self.assertEqual(Path(home, 'auth.json').read_text(), '{"wizard": true}')
+                self.assertEqual(Path(home, 'auth.json').stat().st_mode & 0o777, 0o600)
+                self.assertFalse(m.keep_wizard_auth(None))
+                self.assertFalse(Path(home, 'auth.json').exists())
+            finally:
+                m.DATA, m.UID, m.GID = old
 
 
 if __name__ == '__main__':
