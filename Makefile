@@ -72,6 +72,7 @@ test:
 test-all: test-swift test-contracts test-guest test-shell test-resize
 
 test-contracts:
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_removal_source.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-mac-factory-admission.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-mac-fresh-install-qa.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-self-update-qa.py"

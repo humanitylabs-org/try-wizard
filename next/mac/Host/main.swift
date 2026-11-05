@@ -279,7 +279,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
 
     var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
     func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
-    func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
+    func stop(forceOnTimeout: Bool, cleanTimeout: TimeInterval = 90, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
         guard let machine = vm else { completion?(); return }
         guard state == .running || state == .starting || state == .error else {
             // A concurrent shutdown is not evidence that the disk is stopped.
@@ -329,7 +329,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 try? machine.requestStop()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + cleanTimeout) {
             guard !finished else { return }
             if !forceOnTimeout {
                 timedOut = true
@@ -569,6 +569,11 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var quitting = false
     var preparingUpdate = false
     var guestPatchBusy = false
+    var orphanShutdownInFlight = false
+    // Capture the installation path before Finder moves the enclosing bundle to Trash.
+    let missingAppWatch = WizardMissingAppWatch(originalApp: Bundle.main.bundleURL
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent())
     private let diskOwnership = WizardDiskOwnership()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -623,7 +628,11 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(command(_:)),
             name: Notification.Name("org.humanitylabs.wizard.mvp.host.command"), object: nil, suspensionBehavior: .deliverImmediately)
         refresh()
+        if missingAppWatch.isMissing() { quitting = true; NSApp.terminate(nil); return }
         vm.start()
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.stopIfOwningAppIsMissing()
+        }
         // A successful stop keeps the durable guest gate closed until the next local boot.
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             guard let self, self.vm.state == .running, !self.preparingUpdate, !self.guestPatchBusy,
@@ -737,6 +746,20 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func stopOS() { if !preparingUpdate && !guestPatchBusy { vm.stop() } }
     @objc func restartOS() { if !preparingUpdate && !guestPatchBusy { vm.restart() } }
     @objc func showLogs() { NSWorkspace.shared.open(WizardShared.logsDir) }
+    func stopIfOwningAppIsMissing() {
+        guard missingAppWatch.isMissing(), !orphanShutdownInFlight, !preparingUpdate, !guestPatchBusy else { return }
+        orphanShutdownInFlight = true
+        log("Owning app is missing; requesting clean VM shutdown")
+        vm.stop(forceOnTimeout: false, cleanTimeout: 45, onTimeout: {
+            // Never force-stop or kill Host to meet the deadline. A late VZ stop still permits exit.
+            self.orphanShutdownInFlight = false
+            log("Missing-app clean stop timed out; retaining Host until the VM stops")
+        }) {
+            self.quitting = true
+            NSApp.terminate(nil)
+        }
+    }
+
     @objc func quitAll() { NSApp.terminate(nil) }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

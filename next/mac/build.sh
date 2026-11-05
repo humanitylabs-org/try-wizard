@@ -28,13 +28,16 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" 
 
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# ditto preserves sealed dependency modes. Only this newly created output copy
+# may be made owner-writable for inside-out signing; never follow its symlinks.
+/bin/chmod -R u+w "$APP/Contents/Frameworks/Sparkle.framework"
 if [[ "${WIZARD_UPDATE_HOST_FIXTURE:-0}" == 1 ]]; then
   [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]] || { echo "Host fixture requires QA build" >&2; exit 2; }
   "${SWIFTC[@]}" tools/update-host-fixture.swift -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
 else
-"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Shared/HostTermination.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/RemovalContract.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Shared/HostTermination.swift Host/main.swift -framework Virtualization -framework AppKit -o "$HOST/Contents/MacOS/Wizard Host"
 fi
-"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/BackupContract.swift App/WizardBackup.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/UpdateArtifact.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/RemovalContract.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/BackupContract.swift App/WizardBackup.swift App/WizardRemoval.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/UpdateArtifact.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
 
 
 plist() { # $1 path $2 name $3 bundle id $4 exec $5 extra
