@@ -683,7 +683,7 @@ final class WizardDragView: NSView {
 
 // MARK: - Window
 
-final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
+final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     let web: WKWebView
     let dragView = WizardDragView()
     private var dragMonitor: Any?
@@ -1361,6 +1361,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // A Save/⤓ tap (<a download>, including blob: files) must land in ~/Downloads, not vanish.
+        if action.shouldPerformDownload { decisionHandler(.download); return }
         guard let url = action.request.url else { decisionHandler(.allow); return }
         // App-origin iframe navigation is not native authority. Preserve Files /
         // installed-app links in their managed frame without whitelisting the
@@ -1371,6 +1373,49 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             decisionHandler(.cancel); return
         }
         decisionHandler(.allow)
+    }
+
+    // MARK: Downloads
+
+    /// Responses the page can't show, or that the server marks as an attachment, download too.
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        if !response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment") {
+            decisionHandler(.download); return
+        }
+        decisionHandler(.allow)
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+    private var downloadTargets: [ObjectIdentifier: URL] = [:]
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        let clean = suggestedFilename.replacingOccurrences(of: "/", with: "-")
+        let name = clean.isEmpty ? "Wizard download" : clean
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        var target = folder.appendingPathComponent(name), n = 2
+        while FileManager.default.fileExists(atPath: target.path) {
+            target = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"); n += 1
+        }
+        downloadTargets[ObjectIdentifier(download)] = target
+        completionHandler(target)
+    }
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let target = downloadTargets.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        // Show it where it landed, like Safari does.
+        NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadTargets.removeValue(forKey: ObjectIdentifier(download))
+        let alert = NSAlert(); alert.messageText = "Couldn't download this file"
+        alert.informativeText = error.localizedDescription; alert.runModal()
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
