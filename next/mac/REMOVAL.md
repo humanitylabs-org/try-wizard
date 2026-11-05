@@ -136,9 +136,15 @@ Do not call this build/contract script full real-app acceptance.
 
 ### Remaining real-app acceptance — test state only
 
-Use a **dedicated disposable macOS test account**, a task-owned app copy and a
-stopped QA VM clone. Creating that account requires separate approval; no such
-approval is implied by preparing native builds/contracts. Set DataHome through
+Use a **dedicated disposable non-admin macOS test account**, a task-owned app
+copy and a stopped QA VM clone. James's current **“qa” approval** authorizes the
+temporary standard account and destructive checks scoped to that account. It
+supersedes the earlier pending-account-approval gate; it does not authorize
+switching/unlocking the occupied normal console, autologin, owner permission or
+TCC changes, access to personal/private content, publication or merging. Native
+GUI/VM work still requires parent-submitted durable Mac-worker admission and a
+verified independent GUI session with model-blind native credential entry. A
+`launchctl asuser` bootstrap alone is not that session. Set DataHome through
 that disposable user's app defaults: `--wizard-data-home` is **Host-only**, and
 passing it to the App alone does not isolate the App from ambient preferences.
 Never use James's or the normal Thales user's preferences/data. The app and Host
@@ -178,11 +184,20 @@ code changes or real uninstall. PR #53 CI run `41285459650` succeeded at head
 `9457a507c8e183b4f46fde558da34ff765538b17` via merge `a8a54c2`; its nine
 removal checks are Python source guards. Its Swift/runtime builds target legacy
 `macos/`, not this split App/Host, and do not execute `Tests/RemovalTests.swift`.
-No CI artifact was uploaded. Native compilation/contracts of the latest changes
-still need the prepared parent-submitted Mac worker job.
+No CI artifact was uploaded. The later pre-brand native candidate at
+`40b720d6e435c8f4a9c7eacb73df74439027886d` compiled and passed 24 injected
+contracts, 11 source guards and one framework-copy signing regression (durable
+receipt `heavy_761a0025d5414355b265479915309856`, exit 0). Parent readback verified
+146 hashed evidence entries. These results do not cover a later branded binary.
 
-All six real-app checks remain **not run**. The separate disposable-account
-approval remains outstanding in the owning install-size conversation; do not ask
-twice or create an account. The native-dialog part of checks 1–5 needs that test
-user and a human. No real permission reset, actual uninstall or real-VM result is
-claimed by source guards or filesystem fixtures. Do not merge or ship on that basis.
+All six real-app checks remain **not run**. Account creation is now approved;
+the remaining prerequisite is a verified independent native GUI/controller and
+model-blind native login route, not another approval request. The recovered
+`secure-desktop-pilot-20261015` staging is inert, root-owned and contains no
+account or credentials. Keep it inert until those prerequisites and the scoped
+filesystem policy are verified; a standard account is not a full filesystem
+sandbox. Prefer the forthcoming **WizardOS.app** / approved dark-icon candidate
+for final acceptance. Pin that candidate's exact app/Host hashes and source
+revision at admission; do not silently replace the tested pre-brand binaries.
+No real permission reset, actual uninstall or real-VM result is claimed by source
+guards or filesystem fixtures. Do not merge or ship on that basis.
