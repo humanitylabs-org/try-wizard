@@ -1,0 +1,175 @@
+import Foundation
+
+enum Response { case alertFirstButtonReturn, cancel, OK }
+final class NSAlert {
+    static var response: Response = .cancel
+    var messageText = "", informativeText = ""
+    var accessoryView: Any?
+    let window = FakeWindow()
+    func addButton(withTitle: String) {}
+    func runModal() -> Response { Self.response }
+}
+final class FakeWindow { var initialFirstResponder: Any? }
+final class NSTextField {
+    static var text = "https://remote.test"
+    var stringValue: String { Self.text }
+    var placeholderString = ""
+    init(frame: CGRect) {}
+}
+final class NSOpenPanel {
+    static var response: Response = .cancel
+    static var selected: URL?
+    var url: URL? { Self.selected }
+    var message = "", canChooseDirectories = false, canChooseFiles = false, canCreateDirectories = false
+    var directoryURL: URL?
+    func runModal() -> Response { Self.response }
+}
+enum Kind { case thisMac, remote }
+struct Backend: Equatable { var kind: Kind; var name: String; var url: String }
+final class Defaults {
+    var confirmed = false
+    func bool(forKey: String) -> Bool { confirmed }
+    func set(_ value: Bool, forKey: String) { confirmed = value }
+    func removeObject(forKey: String) { confirmed = false }
+}
+enum Store {
+    static var backends: [Backend] = []
+    static var activeIndex = 0
+    static var active: Backend? { backends.indices.contains(activeIndex) ? backends[activeIndex] : backends.first }
+    static let d = Defaults()
+}
+enum WizardShared {
+    static var root = URL(fileURLWithPath: CommandLine.arguments[1])
+    static var osInstalled = true
+    static var share: URL?
+    static var shareReads = 0, writes = 0, defaultReads = 0
+    static let filesShareTag = "wizard-files"
+    static let localSetupURL = URL(string: "http://127.0.0.1:48030/")!
+    static var defaultFilesFolder: URL { defaultReads += 1; return root.appendingPathComponent("Documents/Wizard MVP") }
+    static var filesFolder: URL? { shareReads += 1; return share }
+    static func setFilesFolder(_ url: URL) throws { writes += 1; share = url }
+}
+enum HostControl {
+    static var maintenanceInProgress = false
+    static var commands: [String] = []
+    static func send(_ cmd: String) { commands.append(cmd) }
+}
+final class WizardUpdater { static let shared = WizardUpdater(); func admitLegacyBootstrap() -> Bool { false } }
+final class FakeInstaller { func fetchSizeNote(_ done: (String?) -> Void) { done(nil) } }
+final class Overlay { var isHidden = false }
+final class Title { var stringValue = "" }
+final class Web { func stopLoading() {}; func loadHTMLString(_ text: String, baseURL: URL?) {} }
+final class AppDelegate {
+    var allowed = true, deferred = false
+    var callback: ((Bool) -> Void)?
+    func rebuildWizardMenu() {}
+    func admitSharedFolderRestart(_ done: @escaping (Bool) -> Void) {
+        if deferred { callback = done } else { done(allowed) }
+    }
+}
+final class Application { var delegate: Any? = AppDelegate() }
+let NSApp = Application()
+final class Controller: NSObject {
+    var route = "", homeURL: URL?, resolvedOrigins: Set<String> = []
+    let installer = FakeInstaller(), overlay = Overlay()
+    let title = Title(), web = Web()
+    var frozen = false
+    func clearLocalVoice() {}
+    func connectLocal() { route = "local" }
+    func installOnThisMac() { route = "install" }
+    func showOverlay(_ title: String, _ message: String, spinning: Bool = true, actions: [(String, Selector)] = []) { route = title; self.title.stringValue = title }
+    func resolveHome(_ url: URL, done: (URL) -> Void) { done(url) }
+    func load(_ url: URL) { route = "remote" }
+    func loadHome() { route = "home" }
+    func setUpdateFrozen(_ value: Bool) { frozen = value }
+    @objc func useDefaultFilesFolder() { setFilesFolder(WizardShared.defaultFilesFolder) }
+    // PRODUCTION_METHODS
+}
+let local = Backend(kind: .thisMac, name: "This Mac", url: WizardShared.localSetupURL.absoluteString)
+let remote = Backend(kind: .remote, name: "Remote", url: "https://remote.test")
+var failures = 0, checks = 0
+func check(_ name: String, _ ok: Bool) {
+    checks += 1
+    if ok { print("PASS \(name)") } else { failures += 1; print("FAIL \(name)") }
+}
+func reset(_ backend: Backend? = local, installed: Bool = true, share: URL? = nil) -> Controller {
+    Store.backends = backend.map { [$0] } ?? []; Store.activeIndex = 0; Store.d.confirmed = false
+    WizardShared.osInstalled = installed; WizardShared.share = share
+    WizardShared.shareReads = 0; WizardShared.defaultReads = 0; WizardShared.writes = 0
+    HostControl.commands = []; HostControl.maintenanceInProgress = false
+    NSAlert.response = .cancel; NSOpenPanel.response = .cancel
+    NSApp.delegate = AppDelegate()
+    return Controller()
+}
+var c = reset(nil, installed: false); c.begin()
+check("fresh-hosting-first", c.route == "Where should Wizard live?" && WizardShared.defaultReads == 0 && WizardShared.shareReads == 0)
+c = reset(); c.begin()
+check("local-no-share", c.route == "local" && WizardShared.defaultReads == 0 && WizardShared.shareReads == 0 && WizardShared.writes == 0)
+c = reset(remote); c.begin()
+check("retained-remote", c.route == "remote" && WizardShared.shareReads == 0)
+let saved = WizardShared.root.appendingPathComponent("saved-share")
+try FileManager.default.createDirectory(at: saved, withIntermediateDirectories: true)
+let sentinel = saved.appendingPathComponent("keep.txt"); try "keep".write(to: sentinel, atomically: true, encoding: .utf8)
+c = reset(local, share: saved); c.begin()
+let preservedAfterResume = try String(contentsOf: sentinel)
+check("saved-share-compatibility", c.route == "local" && WizardShared.share == saved && WizardShared.writes == 0 && preservedAfterResume == "keep")
+c = reset(local, installed: false, share: saved); c.begin()
+check("abandoned-local", c.route == "Where should Wizard live?" && WizardShared.writes == 0)
+c = reset(nil, installed: false); c.chooseThisMac()
+check("explicit-local-before-install", c.route == "install" && Store.d.confirmed && WizardShared.shareReads == 0)
+c = reset(nil, installed: false); c.chooseRemote()
+check("remote-cancel-before-commit", Store.backends.isEmpty && HostControl.commands.isEmpty)
+c = reset(nil, installed: false); NSAlert.response = .alertFirstButtonReturn; c.chooseRemote()
+check("explicit-remote", Store.active?.kind == .remote && c.route == "remote" && WizardShared.shareReads == 0)
+c = reset(nil, installed: false); c.backToChooser()
+check("back-before-commit", Store.backends.isEmpty && c.route == "Where should Wizard live?" && WizardShared.writes == 0)
+c = reset(local, share: saved); Store.d.confirmed = true; c.startFreshOnboarding()
+let preservedAfterFreshRoute = try String(contentsOf: sentinel)
+check("start-fresh", Store.backends.isEmpty && !Store.d.confirmed && c.route == "Where should Wizard live?" && WizardShared.share == saved && preservedAfterFreshRoute == "keep")
+let chosen = WizardShared.root.appendingPathComponent("explicit-share")
+c = reset(); c.setFilesFolder(chosen)
+check("first-explicit-share-cancel", WizardShared.writes == 0 && HostControl.commands.isEmpty)
+c = reset(); NSAlert.response = .alertFirstButtonReturn
+(NSApp.delegate as! AppDelegate).allowed = false; c.setFilesFolder(chosen)
+check("busy-share-no-commit", WizardShared.writes == 0 && HostControl.commands.isEmpty)
+c = reset(); NSAlert.response = .alertFirstButtonReturn; c.setFilesFolder(chosen)
+check("first-explicit-share", WizardShared.share == chosen && WizardShared.writes == 1 && HostControl.commands == ["restart"])
+c = reset(); NSAlert.response = .alertFirstButtonReturn
+let delegate = NSApp.delegate as! AppDelegate; delegate.deferred = true
+c.setFilesFolder(chosen); Store.backends = [remote]; delegate.callback?(true)
+check("stale-share-callback", WizardShared.writes == 0 && HostControl.commands.isEmpty)
+c = reset(); c.chooseFilesFolder()
+check("picker-cancel-preserves-share", WizardShared.writes == 0 && HostControl.commands.isEmpty)
+// Exercise the actual production persistence against a disposable directory,
+// with no UserDefaults or owner-home access.
+enum PersistedShare {
+    static var supportDir: URL { WizardShared.root.appendingPathComponent("support") }
+    static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
+    // PRODUCTION_PERSISTENCE
+}
+check("persisted-unset-is-supported", PersistedShare.filesFolder == nil)
+try PersistedShare.setFilesFolder(saved)
+check("persisted-exact-selection", PersistedShare.filesFolder == saved)
+let priorBytes = try Data(contentsOf: PersistedShare.filesFolderFile)
+_ = PersistedShare.filesFolder
+check("persisted-read-does-not-migrate", try Data(contentsOf: PersistedShare.filesFolderFile) == priorBytes)
+
+final class VZSharedDirectory { let url: URL; let readOnly: Bool; init(url: URL, readOnly: Bool) { self.url = url; self.readOnly = readOnly } }
+final class VZSingleDirectoryShare { let directory: VZSharedDirectory; init(directory: VZSharedDirectory) { self.directory = directory } }
+final class VZVirtioFileSystemDeviceConfiguration { let tag: String; var share: VZSingleDirectoryShare?; init(tag: String) { self.tag = tag } }
+final class Configuration { var directorySharingDevices: [VZVirtioFileSystemDeviceConfiguration] = [] }
+func log(_ text: String) {}
+func shareConfiguration() -> Configuration {
+    let c = Configuration()
+    // PRODUCTION_HOST_SHARE
+    return c
+}
+WizardShared.share = nil
+check("host-nil-share-no-device", shareConfiguration().directorySharingDevices.isEmpty)
+WizardShared.share = saved
+let device = shareConfiguration().directorySharingDevices.first
+check("host-saved-share-exact-subtree", device?.tag == "wizard-files" && device?.share?.directory.url == saved && device?.share?.directory.readOnly == false)
+let finalSentinel = try String(contentsOf: sentinel)
+check("shared-files-never-moved-or-deleted", finalSentinel == "keep")
+print("RESULT \(checks) checks; \(failures) failed. Mocked UI/Host; no real TCC/VM.")
+exit(failures == 0 ? 0 : 1)

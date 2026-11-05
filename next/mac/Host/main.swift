@@ -509,7 +509,8 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
         c.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
 
-        // The Wizard's files folder (~/Wizard by default) is the guest's Runtipi media root (virtio-fs tag wizard-files).
+        // Optional, explicitly chosen Mac folder. Nil deliberately adds no device:
+        // wizard-media uses the guest disk. Preserve saved shares on normal boots.
         if let folder = WizardShared.filesFolder {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let fs = VZVirtioFileSystemDeviceConfiguration(tag: WizardShared.filesShareTag)

@@ -77,12 +77,13 @@ enum WizardShared {
     static var logsDir: URL { supportDir.appendingPathComponent("logs", isDirectory: true) }
     static var statusFile: URL { supportDir.appendingPathComponent("host-status.json") }
 
-    /// The Mac folder shared into Wizard OS as its user-files folder (Runtipi media root). Chosen on first run;
-    /// nil = not chosen yet (the guest then keeps files on its own disk).
+    /// Optional Mac folder shared into Wizard OS as its user-files folder (Runtipi media root).
+    /// Consent is just-in-time at an explicit sharing action, NEVER first run/startup.
+    /// nil is a complete supported configuration: the guest keeps files on its own disk.
     static let filesShareTag = "wizard-files"
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
-    // User-created files belong in a Finder-visible folder. Changing this suggestion
-    // never changes a persisted files-folder.json or moves an existing user's files.
+    // Legacy location retained for removal protection/compatibility, NOT onboarding.
+    // Never create/access/suggest it at startup or change a saved share implicitly.
     static var defaultFilesFolder: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Wizard MVP", isDirectory: true)

@@ -1044,7 +1044,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         guard let backend = Store.active else { showChooser(); return }
         switch backend.kind {
         case .thisMac:
-            guard WizardShared.filesFolder != nil else { askFilesFolder(); return }
+            // Old builds saved thisMac before the owner accepted or cancelled
+            // native setup. An unfinished legacy selection is not consent to download.
+            guard WizardShared.osInstalled || Store.d.bool(forKey: "localHostingConfirmed") else { showChooser(); return }
+            // A Mac folder is optional. Files live on the guest disk until the
+            // owner explicitly chooses to share a folder or uploads selected files.
             guard WizardShared.osInstalled else { installOnThisMac(); return }
             guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
             connectLocal()
@@ -1147,10 +1151,18 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                               ("On another computer…", #selector(chooseRemote))])
     }
 
+    /// Called only after the existing stopped-disk Start Fresh transaction succeeds.
+    func startFreshOnboarding() {
+        Store.backends = []; Store.activeIndex = 0
+        Store.d.removeObject(forKey: "localHostingConfirmed")
+        showChooser()
+    }
+
     @objc func chooseThisMac() {
         var list = Store.backends.filter { $0.kind != .thisMac }
         list.insert(Backend(kind: .thisMac, name: "This Mac", url: WizardShared.localSetupURL.absoluteString), at: 0)
         Store.backends = list; Store.activeIndex = 0
+        Store.d.set(true, forKey: "localHostingConfirmed")
         begin()
     }
 
@@ -1177,51 +1189,66 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         begin()
     }
 
-    /// First run on this Mac: where the Wizard keeps its files. The folder is shared into Wizard OS (virtio-fs) as the
-    /// apps' user-files folder; app databases stay on the Wizard OS disk.
+    /// Explicit sharing only; never called by begin/install/startup.
     func askFilesFolder(sizeNote: String? = nil) {
-        let home = WizardShared.defaultFilesFolder
-        let title = "Choose your shared folder"
-        showOverlay(title,
-                    "Documents, images, audio, videos and transcripts you or your Wizard save here. "
-                    + "Open this shared folder in Finder, or add files for your Wizard to use.\n\n"
-                    + "Folder: \((home.path as NSString).abbreviatingWithTildeInPath)" + (sizeNote.map { "\n\n" + $0 } ?? ""),
+        guard Store.active?.kind == .thisMac else { return }
+        showOverlay("Share a Mac folder with Wizard?",
+                    "Wizard already keeps files on its own disk. You can upload selected files without sharing a folder.\n\n"
+                    + "If you choose a folder, Wizard can read and change everything inside that folder, not the rest of your Mac. "
+                    + "Sharing a folder restarts Wizard OS and makes that folder its Files view. Existing files on Wizard's disk stay there; they are not moved or deleted.",
                     spinning: false,
-                    actions: [("Use This Folder", #selector(useDefaultFilesFolder)),
-                              ("Choose Folder…", #selector(chooseFilesFolder)),
-                              ("Back", #selector(backToChooser))])
-        // Say how much space Wizard OS will take before anything downloads (only on this Mac's first install).
-        if sizeNote == nil && !WizardShared.osInstalled {
-            installer.fetchSizeNote { [weak self] note in
-                guard let self, let note, self.title.stringValue == title, !self.overlay.isHidden else { return }
-                self.askFilesFolder(sizeNote: note)
-            }
-        }
+                    actions: [("Choose Folder…", #selector(chooseFilesFolder)), ("Cancel", #selector(cancelFilesFolder))])
     }
 
-    @objc func useDefaultFilesFolder() { setFilesFolder(WizardShared.defaultFilesFolder) }
+    @objc func cancelFilesFolder() { overlay.isHidden = true; loadHome() }
 
     @objc func chooseFilesFolder() {
+        guard Store.active?.kind == .thisMac else { return }
         let panel = NSOpenPanel()
-        panel.message = "Choose the folder for your Wizard's files"
+        panel.message = "Choose only the folder you want to share with Wizard (read and write)"
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { cancelFilesFolder(); return }
         setFilesFolder(url)
     }
 
     func setFilesFolder(_ url: URL) {
-        do {
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-            try WizardShared.setFilesFolder(url)
-        } catch {
-            showOverlay("Couldn't use that folder", error.localizedDescription, spinning: false,
-                        actions: [("Choose Folder…", #selector(chooseFilesFolder)), ("Back", #selector(backToChooser))])
-            return
+        guard Store.active?.kind == .thisMac, !HostControl.maintenanceInProgress else { return }
+        let alert = NSAlert()
+        alert.messageText = "Share this folder with Wizard?"
+        alert.informativeText = "Wizard can read and change everything in \(url.path). Wizard OS will restart to use this as its Files view. Files already on its disk stay there, but are not shown while the Mac folder is shared. Nothing is moved or deleted."
+        alert.addButton(withTitle: "Share Folder and Restart"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { cancelFilesFolder(); return }
+        let selectedBackend = Store.active
+        // Reuse update/removal's existing native + trusted-page idle admission.
+        (NSApp.delegate as? AppDelegate)?.admitSharedFolderRestart { [weak self] allowed in
+            guard let self else { return }
+            guard allowed, Store.active == selectedBackend else {
+                self.setUpdateFrozen(false)
+                self.showOverlay("Folder sharing can wait", "Finish the current recording, backup, download or update, then choose the folder again.", spinning: false,
+                                 actions: [("Back", #selector(self.cancelFilesFolder))])
+                return
+            }
+            do {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                try WizardShared.setFilesFolder(url)
+            } catch {
+                self.setUpdateFrozen(false)
+                self.showOverlay("Couldn't use that folder", error.localizedDescription, spinning: false,
+                                 actions: [("Choose Folder…", #selector(self.chooseFilesFolder)), ("Cancel", #selector(self.cancelFilesFolder))])
+                return
+            }
+            // Boot-time virtio-fs is the existing sharing mechanism, not hot attach.
+            // Retire the frozen document before restart so capture cannot start in it.
+            self.web.stopLoading(); self.web.loadHTMLString("", baseURL: nil)
+            if WizardShared.osInstalled {
+                HostControl.send("restart")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard Store.active == selectedBackend else { return }
+                    self?.begin()
+                }
+            } else { self.begin() }
         }
-        // A running Wizard OS picks the share up on its next start.
-        if WizardShared.osInstalled { HostControl.send("restart") }
-        begin()
     }
 
     @objc func backToChooser() { showChooser() }
@@ -1350,7 +1377,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                 }
                 if elapsed > 0.6 && !shown {
                     shown = true
-                    self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
+                    self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. Your files stay on Wizard's own disk unless you choose to share a Mac folder.")
                 }
             }, done: { [weak self] ok in
                 guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
@@ -1625,7 +1652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         removal.didStartFresh = { [weak self] in
             self?.controller.web.loadHTMLString("", baseURL: nil)
-            self?.rebuildWizardMenu(); self?.controller.begin()
+            self?.controller.startFreshOnboarding(); self?.rebuildWizardMenu()
         }
         self.removal = removal
         }
@@ -2312,7 +2339,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
+    func admitSharedFolderRestart(_ done: @escaping (Bool) -> Void) {
+        let busy = MainActor.assumeIsolated { backup?.isBusy == true || WizardUpdater.shared.hasPendingWork || removal?.busy == true }
+        guard !busy, !controller.installer.isBusy, !HostControl.hasForeignRunner,
+              !MeetingRecorder.shared.isRecording, VoiceKeys.shared.state["mode"] as? String == "idle" else { done(false); return }
+        if HostControl.isRunning { controller.admitUpdateRestart(done) }
+        else { done(true) }
+    }
+
     @objc func showFilesFolder() {
+        guard Store.active?.kind == .thisMac else { openView("/files"); return }
         if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
     }
 }
