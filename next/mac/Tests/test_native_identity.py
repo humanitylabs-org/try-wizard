@@ -20,6 +20,8 @@ class NativeIdentityTests(unittest.TestCase):
     def test_maintenance_regeneration_preserves_committed_bytes(self):
         try: import PIL
         except ImportError: self.skipTest('Pillow maintenance-only dependency absent; native pack/pixel tests still run')
+        if PIL.__version__ != '12.3.0':
+            self.skipTest('Pillow 12.3.0 maintenance check requires its pinned environment; native builds use stdlib only')
         with tempfile.TemporaryDirectory() as tmp:
             assets=Path(tmp)/'brand'
             shutil.copytree(identity.DARK,assets/'dark')
