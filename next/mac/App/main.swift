@@ -464,15 +464,66 @@ enum HostControl {
     }
 
     /// Internal MVP: start on demand, never register or change daily login services.
-    static func ensureRunning() {
-        guard !maintenanceInProgress, !hasForeignRunner else { NSLog("Wizard: maintenance or another candidate Host is active; not launching"); return }
-        if !isRunning {
-            let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
-            cfg.arguments = ["--wizard-data-home", WizardShared.supportDir.path]
-            NSWorkspace.shared.openApplication(at: embeddedHostURL, configuration: cfg) { _, err in
-                if let err { NSLog("Wizard: couldn't launch Wizard Host: \(err)") }
+    /// A Workspace failure happens before Host can write host-status.json. Return it
+    /// to the caller instead of leaving the window to report a readiness timeout.
+    static func ensureRunning(completion: @escaping (String?) -> Void = { _ in }) {
+        recordLaunchDiagnostic("Host launch requested; dataHome=\(WizardShared.supportDir.path); embeddedHost=\(embeddedHostURL.path)")
+        var completed = false
+        func finish(_ error: String?) {
+            DispatchQueue.main.async {
+                guard !completed else { return }
+                completed = true
+                recordLaunchDiagnostic(error ?? "Host launch accepted; readiness probes may now begin.")
+                completion(error)
             }
         }
+        // Workspace can itself wait for macOS. Keep the original 120-second
+        // startup budget bounded, and ignore a callback arriving after this gate.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+            finish("macOS didn't finish opening Wizard's local Host within two minutes. See app-startup.log in Show Logs.")
+        }
+        guard !maintenanceInProgress else {
+            finish("Wizard is preparing a local maintenance operation. Wait for it to finish before starting Wizard OS.")
+            return
+        }
+        guard !hasForeignRunner else {
+            finish("Another copy of Wizard is running its local Host. Quit that copy before starting Wizard OS here; this copy hasn't sent it a start command.")
+            return
+        }
+        if isRunning {
+            recordLaunchDiagnostic("Reusing the already-running embedded Host; existing launch arguments are unchanged.")
+            finish(nil); return
+        }
+        let cfg = NSWorkspace.OpenConfiguration(); cfg.activates = false; cfg.addsToRecentItems = false
+        cfg.arguments = ["--wizard-data-home", WizardShared.supportDir.path]
+        NSWorkspace.shared.openApplication(at: embeddedHostURL, configuration: cfg) { app, err in
+            if let err {
+                finish("Wizard couldn't start its local Host: \(err.localizedDescription)")
+            } else if app?.bundleURL?.resolvingSymlinksInPath() == embeddedHostURL.resolvingSymlinksInPath() {
+                finish(nil)
+            } else {
+                finish("macOS didn't open this copy's Wizard Host. No start command was sent.")
+            }
+        }
+    }
+
+    /// Separate from Host's VM status: an App launch error must not impersonate a
+    /// Host/VM failure. Show Logs opens this same directory even if Host never ran.
+    private static func recordLaunchDiagnostic(_ message: String) {
+        NSLog("Wizard: %@", message)
+        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+        let url = WizardShared.logsDir.appendingPathComponent("app-startup.log")
+        do {
+            try FileManager.default.createDirectory(at: WizardShared.logsDir, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+            } else {
+                try Data(line.utf8).write(to: url, options: .atomic)
+            }
+        } catch { NSLog("Wizard: couldn't save Host launch diagnostic: %@", error.localizedDescription) }
     }
 
     static func send(_ command: String) {
@@ -1226,7 +1277,6 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                 let bad = err.localizedDescription.contains("valid Wizard OS")
                 self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
-                HostControl.send("start")
                 self.connectLocal()
             }
         }
@@ -1277,33 +1327,43 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         startLocalVoice()
         let generation = voiceConnectionGeneration
         let started = Date()
-        HostControl.ensureRunning()
-        HostControl.send("start")
         var shown = false
         var failed = false
-        HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
+        HostControl.ensureRunning { [weak self] error in
             guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
-            if let error = Self.hostStartError(since: started) {
+            if let error {
                 failed = true
-                if Self.isFolderBlocked(error) { self.showFolderBlocked(); return }
                 self.showOverlay("Wizard OS didn't start", error, spinning: false,
                                  actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
                 return
             }
-            if elapsed > 0.6 && !shown {
-                shown = true
-                self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
-            }
-        }, done: { [weak self] ok in
-            guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
-            if ok {
-                NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
-                self.load(WizardShared.localSetupURL)
-            } else {
-                self.showOverlay("Wizard OS didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
-                                 actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
-            }
-        })
+            HostControl.send("start")
+            let remaining = max(0, 120 - Date().timeIntervalSince(started))
+            HostControl.waitForLocalWizard(timeout: remaining, tick: { [weak self] elapsed in
+                guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
+                if let error = Self.hostStartError(since: started) {
+                    failed = true
+                    if Self.isFolderBlocked(error) { self.showFolderBlocked(); return }
+                    self.showOverlay("Wizard OS didn't start", error, spinning: false,
+                                     actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
+                    return
+                }
+                if elapsed > 0.6 && !shown {
+                    shown = true
+                    self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
+                }
+            }, done: { [weak self] ok in
+                guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
+                if ok {
+                    NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
+                    self.load(WizardShared.localSetupURL)
+                } else {
+                    failed = true
+                    self.showOverlay("Wizard OS didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
+                                     actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
+                }
+            })
+        }
     }
 
     func load(_ url: URL) {

@@ -1,0 +1,148 @@
+import Foundation
+
+// No AppKit, LaunchServices, owner defaults, app process or VM is touched. These
+// substitutes execute the extracted production HostControl and connectLocal.
+final class NSRunningApplication {
+    var bundleURL: URL?
+    init(_ url: URL?) { bundleURL = url }
+    static var inventory: [NSRunningApplication] = []
+    static func runningApplications(withBundleIdentifier _: String) -> [NSRunningApplication] { inventory }
+}
+final class NSWorkspace {
+    final class OpenConfiguration {
+        var activates = true
+        var addsToRecentItems = true
+        var arguments: [String] = []
+    }
+    static let shared = NSWorkspace()
+    var error: Error?
+    var returnedURL: URL?
+    var opens = 0
+    var config: OpenConfiguration?
+    var hold = false
+    var pending: ((NSRunningApplication?, Error?) -> Void)?
+    func openApplication(at _: URL, configuration: OpenConfiguration,
+                         completionHandler: @escaping (NSRunningApplication?, Error?) -> Void) {
+        opens += 1; config = configuration
+        if hold { pending = completionHandler; return }
+        completionHandler(returnedURL.map { NSRunningApplication($0) }, error)
+    }
+}
+final class DistributedNotificationCenter {
+    static let shared = DistributedNotificationCenter()
+    static func `default`() -> DistributedNotificationCenter { shared }
+    static var commands: [String] = []
+    func postNotificationName(_ name: Notification.Name, object: String, userInfo: [AnyHashable: Any]?, deliverImmediately: Bool) {
+        Self.commands.append(object)
+    }
+}
+enum WizardShared {
+    static let supportDir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["WIZARD_TEST_HOME"]!)
+    static let logsDir = supportDir.appendingPathComponent("logs")
+    static let hostBundleID = "test.no-actual-host"
+    static let localSetupURL = URL(string: "http://127.0.0.1:1/test-no-request")!
+    static var probes = 0
+    static func probeReady(_ completion: @escaping (Bool) -> Void) { probes += 1; completion(true) }
+}
+enum Kind { case thisMac, remote }
+struct Backend { let kind: Kind }
+enum Store { static var active: Backend? = Backend(kind: .thisMac) }
+
+// PRODUCTION_HOSTCONTROL
+
+final class Controller: NSObject {
+    var voiceConnectionGeneration = 1
+    var overlays: [String] = []
+    var loaded = false
+    func startLocalVoice() {}
+    static func hostStartError(since: Date) -> String? { nil }
+    static func isFolderBlocked(_ message: String) -> Bool { false }
+    func showFolderBlocked() { preconditionFailure("not a folder test") }
+    func showOverlay(_ title: String, _ subtitle: String, spinning: Bool = true, actions: [(String, Selector)] = []) { overlays.append(subtitle) }
+    func load(_ url: URL) { loaded = true }
+    @objc func retry() {}
+    @objc func backToChooser() {}
+
+    // PRODUCTION_CONNECTLOCAL
+}
+
+func reset() {
+    NSRunningApplication.inventory = []
+    let w = NSWorkspace.shared
+    w.error = nil; w.returnedURL = HostControl.embeddedHostURL
+    w.opens = 0; w.config = nil; w.hold = false; w.pending = nil
+    DistributedNotificationCenter.commands = []
+    WizardShared.probes = 0
+    Store.active = Backend(kind: .thisMac)
+    HostControl.maintenanceInProgress = false
+}
+func pump(until test: () -> Bool) {
+    let deadline = Date().addingTimeInterval(2)
+    while !test() && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+    precondition(test(), "fixture callback didn't finish")
+}
+func expectFailure(_ contains: String, setup: () -> Void) {
+    reset(); setup()
+    let c = Controller(); c.connectLocal()
+    pump { !c.overlays.isEmpty }
+    precondition(c.overlays.last!.contains(contains), c.overlays.description)
+    precondition(DistributedNotificationCenter.commands.isEmpty)
+    precondition(WizardShared.probes == 0 && !c.loaded)
+    let saved = try! String(contentsOf: WizardShared.logsDir.appendingPathComponent("app-startup.log"), encoding: .utf8)
+    precondition(saved.contains(contains))
+}
+
+expectFailure("fixture launch refused") { NSWorkspace.shared.error = NSError(domain: "test.workspace", code: 7, userInfo: [NSLocalizedDescriptionKey: "fixture launch refused"]) }
+precondition(NSWorkspace.shared.opens == 1)
+print("PASS workspace-error: immediate caller/UI diagnostic, durable App log, no start/readiness")
+expectFailure("Another copy of Wizard") { NSRunningApplication.inventory = [NSRunningApplication(URL(fileURLWithPath: "/fixture/other.app"))] }
+precondition(NSWorkspace.shared.opens == 0)
+print("PASS foreign-runner: no launch, command or readiness")
+expectFailure("maintenance") { HostControl.maintenanceInProgress = true }
+precondition(NSWorkspace.shared.opens == 0)
+print("PASS maintenance: no launch, command or readiness")
+expectFailure("macOS didn't open this copy") { NSWorkspace.shared.returnedURL = URL(fileURLWithPath: "/fixture/other.app") }
+print("PASS wrong-returned-bundle: caller/UI error, no command/readiness")
+expectFailure("macOS didn't open this copy") { NSWorkspace.shared.returnedURL = nil }
+print("PASS nil-returned-app: caller/UI error, no command/readiness")
+
+reset()
+var completionOnMain = false
+HostControl.ensureRunning { error in precondition(error == nil); completionOnMain = Thread.isMainThread }
+pump { completionOnMain }
+precondition(NSWorkspace.shared.config?.arguments == ["--wizard-data-home", WizardShared.supportDir.path])
+precondition(NSWorkspace.shared.config?.activates == false && NSWorkspace.shared.config?.addsToRecentItems == false)
+print("PASS expected-returned-bundle: completion on main, exact isolated data-home args")
+
+reset()
+NSRunningApplication.inventory = [NSRunningApplication(HostControl.embeddedHostURL)]
+let existing = Controller(); existing.connectLocal()
+pump { existing.loaded }
+precondition(NSWorkspace.shared.opens == 0 && DistributedNotificationCenter.commands == ["start"] && WizardShared.probes == 1)
+print("PASS existing-expected-runner: no launch, one start and readiness")
+
+reset()
+let fresh = Controller(); fresh.connectLocal()
+pump { fresh.loaded }
+precondition(NSWorkspace.shared.opens == 1 && DistributedNotificationCenter.commands == ["start"] && WizardShared.probes == 1)
+print("PASS new-expected-runner: launch then one start and readiness")
+
+for changeBackend in [false, true] {
+    reset(); NSWorkspace.shared.hold = true
+    let stale = Controller(); stale.connectLocal()
+    if changeBackend { Store.active = Backend(kind: .remote) } else { stale.voiceConnectionGeneration += 1 }
+    NSWorkspace.shared.pending?(NSRunningApplication(HostControl.embeddedHostURL), nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    precondition(stale.overlays.isEmpty && !stale.loaded && DistributedNotificationCenter.commands.isEmpty && WizardShared.probes == 0)
+    print("PASS stale-launch-callback: \(changeBackend ? "remote backend" : "new generation") does not send or load")
+}
+reset(); NSWorkspace.shared.hold = true
+var completions = 0
+HostControl.ensureRunning { _ in completions += 1 }
+NSWorkspace.shared.pending?(NSRunningApplication(HostControl.embeddedHostURL), nil)
+NSWorkspace.shared.pending?(nil, NSError(domain: "test.workspace", code: 8))
+pump { completions == 1 }
+RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+precondition(completions == 1)
+print("PASS duplicate-workspace-callback: completion delivered once")
+print("HOST_LAUNCH_FIXTURE_OK (11 cases; fake Workspace/processes/probes; no App/VM launch)")
