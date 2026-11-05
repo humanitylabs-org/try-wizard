@@ -1,4 +1,7 @@
 import Foundation
+// Extracted chooseRemote uses NSRect(x:y:width:height:). Foundation alone
+// exposes the C geometry type, but not CoreGraphics' Swift initializer.
+import CoreGraphics
 
 enum Response { case alertFirstButtonReturn, cancel, OK }
 final class NSAlert {
