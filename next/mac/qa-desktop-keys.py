@@ -9,7 +9,7 @@ if not URL:raise SystemExit('Set QA_NATIVE_URL to the desktop URL under test')
 WORK_ROOT = pathlib.Path(os.environ.get("WIZARD_WORK_ROOT") or pathlib.Path(os.environ.get("TMPDIR") or "/tmp") / "wizard-work").expanduser().resolve()
 WORK_ROOT.mkdir(parents=True, exist_ok=True)
 BASE=(WORK_ROOT / 'Projects/wizard-desktop/dynamic-keys')
-APP=BASE/'native/dist/Wizard.app';OUT=BASE/'evidence/native';OUT.mkdir(parents=True,exist_ok=True)
+APP=BASE/'native/dist/WizardOS.app';OUT=BASE/'evidence/native';OUT.mkdir(parents=True,exist_ok=True)
 DOMAIN='org.humanitylabs.wizard';passed=[]
 def run(*args,check=True):return sp.run(args,check=check,text=True,stdout=sp.PIPE,stderr=sp.PIPE)
 def qa(cmd):return run('/tmp/wizard-qa-post',cmd)
@@ -34,7 +34,7 @@ def wait(js):
  raise AssertionError('native state deadline: '+js)
 (WORK_ROOT / 'AndroidBuilds').mkdir(parents=True, exist_ok=True)
 lock=open(str(WORK_ROOT / 'AndroidBuilds/worker.lock'),'a');fcntl.flock(lock,fcntl.LOCK_EX)
-if run('pgrep','-f','/Wizard.app/Contents/MacOS/Wizard',check=False).stdout.strip():raise SystemExit('Prior native app is running; preserve it')
+if run('pgrep','-f',r'/(Wizard|WizardOS|Wizard MVP)\.app/Contents/MacOS/Wizard',check=False).stdout.strip():raise SystemExit('Prior native app is running; preserve it')
 backup=OUT/'defaults.plist';saved=run('defaults','export',DOMAIN,str(backup),check=False).returncode==0;proc=None;receipt={}
 try:
  for k,v in [('QAHooks','true'),('LegacyUX','false'),('voiceKeysEnabled','false')]:run('defaults','write',DOMAIN,k,'-bool',v)

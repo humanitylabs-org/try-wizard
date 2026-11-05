@@ -729,7 +729,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "Wizard"
+        window.title = "WizardOS"
         window.titlebarAppearsTransparent = true
         window.minSize = NSSize(width: 380, height: 560)
         window.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.06, blue: 0.08, alpha: 1)
@@ -1196,7 +1196,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         let item = folder.standardizedFileURL.path.hasPrefix(documents + "/") ? "Documents Folder" : "this folder"
         showOverlay("Wizard can't use your shared folder",
                     "macOS didn't allow Wizard to open \(path), so Wizard's computer can't start. macOS won't ask again: "
-                    + "open System Settings → Privacy & Security → Files & Folders, turn on \(item) under Wizard MVP, "
+                    + "open System Settings → Privacy & Security → Files & Folders, turn on \(item) under WizardOS, "
                     + "then click Try Again. Or choose a different folder for your Wizard's files.",
                     spinning: false,
                     actions: [("Try Again", #selector(retry)), ("Open Privacy Settings", #selector(openFilesPrivacy)),
@@ -1236,7 +1236,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get Wizard OS",
-                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with WizardOS. Other guest versions are not compatible with this build.",
                     spinning: false,
                     actions: [("Download Wizard OS", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),

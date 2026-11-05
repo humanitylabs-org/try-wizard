@@ -84,7 +84,7 @@ def main():
                    RELEASE_ID=spec['source'],SIGN_IDENTITY='-',DMG='0')
         check('native307-build',['bash',mac/'build.sh'],1200)
         app=Path(spec['candidateApp']); assert app.parent==Path('/Applications') and not app.exists()
-        check('install-owned-candidate',['cp','-cR',mac/'dist/Wizard.app',app],120)
+        check('install-owned-candidate',['cp','-cR',mac/'dist/WizardOS.app',app],120)
         result['candidateApp']=str(app);result['phase']='candidate-built';save()
         check('legacy061-candidate',[spec['python'],mac/'Tests/legacy061_probe.py','--root',root/'vm',
               '--baseline-disk',spec['baselineDisk'],'--boot-dir',spec['bootDir'],

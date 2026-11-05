@@ -29,7 +29,7 @@ Run the existing `next/mac/build.sh` under the shared `$WIZARD_WORK_ROOT/Android
 
 ## Stage the feed (do not publish)
 
-`next/mac/tools/make-update-feed.py <Wizard.app> <output-directory> --base-url <approved-GitHub-release-download-base-or-loopback> --sign-tool <Sparkle-dir>/bin/sign_update --key-file <restricted-private-key-on-Thales>`
+`next/mac/tools/make-update-feed.py <WizardOS.app> <output-directory> --base-url <approved-GitHub-release-download-base-or-loopback> --sign-tool <Sparkle-dir>/bin/sign_update --key-file <restricted-private-key-on-Thales>`
 
 The script archives with ditto, signs the archive, writes a contract-bearing appcast, signs the **complete** appcast and runs the Sparkle verification tool for both. It writes byte/SHA/build receipts. Verify actual receipts, not the script's existence. Keep the private key directory0700/file0600; the developer QA key generator prints only a public key. Developer QA keys are not production signing authority.
 

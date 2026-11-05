@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Thales native regression: exercise Command-W through AppKit's real menu.
-Usage: python3 qa-command-w.py dist/Wizard.app https://.../wizard-os-home/desktop.html
+Usage: python3 qa-command-w.py dist/WizardOS.app https://.../wizard-os-home/desktop.html
 Run under the shared worker lock. Keeps defaults and any prior Wizard.app intact.
 """
 import json, os, pathlib, subprocess as sp, sys, time
@@ -35,8 +35,8 @@ def ok(c,n):
 def command():
  run('bash','qa.sh','show-window')
  result=waitfile('/tmp/wizard-mvp-qa-command-w.txt','command-w');ok(result=='true','AppKit accepts the Command-W menu equivalent');time.sleep(.3)
-prior=run('pgrep','-f','/Wizard.app/Contents/MacOS/Wizard',check=False).stdout.splitlines()
-if prior: raise SystemExit('Another Wizard.app is running; leave it intact and queue QA.')
+prior=run('pgrep','-f',r'/(Wizard|WizardOS|Wizard MVP)\.app/Contents/MacOS/Wizard',check=False).stdout.splitlines()
+if prior: raise SystemExit('Another WizardOS or legacy Wizard app is running; leave it intact and queue QA.')
 backup=OUT/'defaults.plist'; saved=run('defaults','export',domain,str(backup),check=False).returncode==0
 proc=None
 try:

@@ -587,7 +587,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try diskOwnership.acquire() }
         catch { log(error.localizedDescription); exit(1) }
         if WizardShared.legacyBootstrapNeeded && WizardShared.coldBootstrapToken == nil {
-            log("Legacy disk requires explicit cold upgrade in Wizard.app"); exit(1)
+            log("Legacy disk requires explicit cold upgrade in WizardOS.app"); exit(1)
         }
         log("Wizard Host launched (pid \(mine))")
 

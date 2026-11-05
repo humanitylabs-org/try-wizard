@@ -1,0 +1,52 @@
+{
+  "designerFolder": "https://drive.google.com/drive/folders/1NstTcGF7tIrH3Mgb-sHrmaHNRaewoBcr",
+  "source": "AW-icon-sq-purple-white.jpg; AW-icon-white.png; AW-logo-select-hat.png",
+  "policy": "Only supplied designer rasters: transparent padding crop, proportionate downscale and platform padding. No redraw. Semantic app sigils/action stars remain unchanged.",
+  "web": {
+    "web/brand/wizard-mark-purple.png": "39d00522f07c5e6e07c5caaebbde7921741dbe2a244269c7e214c3990f83caa0",
+    "web/brand/wizard-mark-white.png": "05e6cfe39615fa5ca4a04131c94ac9691939cfb428f389565e9ed052e3aac09a",
+    "web/icon-192.png": "e204bf847f4ad7bfe6addb750dd28336863ee577d258f54aa3b143a9e703f302",
+    "web/icon-512.png": "228489a32e0c6e0d7e668e7cbe752fbfd6bfc9c8de23b45552325ab23bc91481",
+    "web/apple-touch-icon.png": "aba1dd08f8ca7f56a41e06f4dcce42405f3197b919f3f2852184221ae5e1da38",
+    "web/favicon.ico": "3d234a59b2f297e4dff4b17111ad9da794efbd9bab5171ceb40afc5fb84e306a"
+  },
+  "pwaIcons": "PWA/app icons: the supplied white hat (web/brand/wizard-mark-white.png) composited, not redrawn, on a Void #0B0A10 tile with an Ultraviolet #7A5CFF glow and faint dot grid; hat tinted white to Ultraviolet. Generator: tools/brand/render-pwa-icons.cjs.",
+  "androidLauncher": {
+    "generator": "tools/brand/render-pwa-icons.cjs --android",
+    "source": "web/brand/wizard-mark-white.png",
+    "sourceSha256": "05e6cfe39615fa5ca4a04131c94ac9691939cfb428f389565e9ed052e3aac09a",
+    "composition": "Same Void tile, ultraviolet glow, dot grid and supplied hat as PWA. Adaptive 108dp canvas; central 72dp viewport; 40.32dp hat inside the 66dp safe circle. Opaque background and transparent foreground. White-alpha monochrome layer for Android 13+ themed icons. Legacy square and circular PNGs at mdpi through xxxhdpi.",
+    "publication": "Source-only candidate; no version bump, signing, feed or publication. Device build proof required before merge.",
+    "resources": {
+      "android/app/src/main/res/mipmap-anydpi/ic_launcher.xml": "e8200c4fc8e07fda81e7f093c1ee85f99dcf2fe8697bcf2b28404b80892748f9",
+      "android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml": "e8200c4fc8e07fda81e7f093c1ee85f99dcf2fe8697bcf2b28404b80892748f9",
+      "android/app/src/main/res/mipmap-anydpi-v33/ic_launcher.xml": "3003196af2ea0bf160619bcc047002eb06fa674441ca1832b8d747d2c8b358a5",
+      "android/app/src/main/res/mipmap-anydpi-v33/ic_launcher_round.xml": "3003196af2ea0bf160619bcc047002eb06fa674441ca1832b8d747d2c8b358a5",
+      "android/app/src/main/res/mipmap-hdpi/ic_launcher.png": "22fb9cd9c30cc8ddaaffc6ac9c1021202b4914e86267fdaaca71a6ad4ddcebf4",
+      "android/app/src/main/res/mipmap-hdpi/ic_launcher_background.png": "5399a853f27976df020dd31a1a42c7e344d87146f9d6e4430c0253881aa390f5",
+      "android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png": "6e922d6d990ee3ddfc27479fef4c569df5511c4ac5b7bf49f0ad5d45a7aabd20",
+      "android/app/src/main/res/mipmap-hdpi/ic_launcher_monochrome.png": "f87217c0467225264540a12f782b8b4d75fd98bad2c9759a4bf33d1eb8ee77cf",
+      "android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png": "e07006a179532d7083c3664474ad036788fa9c77d66b0b6ca3c276e3650467a7",
+      "android/app/src/main/res/mipmap-mdpi/ic_launcher.png": "f42c39b002c5cc55d9a58fff5a59e9ca992e39d59e3e39b6c540d13dc954b91f",
+      "android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png": "6227db0943621ba83d7b8b8bc3121958932f520297411dfe0655f9b8a2fc3338",
+      "android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png": "93d1ad7bc4002907af5dedfefb9363fae824fae9cb443b6dc3ff223cf3b385aa",
+      "android/app/src/main/res/mipmap-mdpi/ic_launcher_monochrome.png": "e357fcc630114e9223f8f907a815fad5ca1296828f4635ec93de0ddc313211fb",
+      "android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png": "7e0b7e073964a410c9b089e982f2f8ae8e71d7416c7ec6fd7cc1ad3294802a52",
+      "android/app/src/main/res/mipmap-xhdpi/ic_launcher.png": "370a0d2204c875d674258e958fc6984b332a1e590c2686283518faa6833e5cd6",
+      "android/app/src/main/res/mipmap-xhdpi/ic_launcher_background.png": "49d20834f7174cdc32de07159226327b13170f29ce26359a06a8a9f3482fd895",
+      "android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png": "9fc1e64bca69f474c4ea7b5d6bcc8ead797b60578d3e83a86b99336e4152e195",
+      "android/app/src/main/res/mipmap-xhdpi/ic_launcher_monochrome.png": "b1a303ad40418e44f5fe1772c14950f5fb02016797bde1089e828882e4d6fb65",
+      "android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png": "3fb364342c16230f26e2a5f72b3424dc1dd29b08f35d2ebaa6333b57a8d1d55a",
+      "android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png": "19dc322fe3094eb17970285e80fc1f2b5237ed69a5ad652dd6af7811d9e963e3",
+      "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png": "5ebca0ac6256a966f70e9cd00f2630a8aa590b2415ab22d1b1c4b5f210cc6e4a",
+      "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png": "244e9c4adddc792b11598d386d2a4e63b66a2209564644d5c39f21fee4af36ff",
+      "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_monochrome.png": "e956320531fd00a992909bd6ee82fd8c6ca69f2dcdb0c614b1d68118b06f5311",
+      "android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png": "44130209f7b11c0c99cb0dd342395882a3109bfa9c276d702fd68f01376dcacf",
+      "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": "0b100a393a0b1622045385aaa4fe85c14f900d15661db1ea03fa994c21097b36",
+      "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png": "e86266328cc4b75d0c701a5021b160702612acfd14f9ca69c15c9ec6cc40fa65",
+      "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png": "bfb51cdcb6e037836e7ceafbfc0d2e483d02343f7e0203db7e6935ba98104dc6",
+      "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_monochrome.png": "09a0210b301ba5abeb95ebd9e3137617cc5d7d8c727f05b54f7a97e3a6024287",
+      "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png": "232080051e44bec4960326a12fb94852aef4918428b0778e101d499cb3928082"
+    }
+  }
+}

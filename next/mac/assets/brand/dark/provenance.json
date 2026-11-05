@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "source_repository": "https://github.com/humanitylabs-org/wizard-ux",
+  "source_revision": "8ee53f3aca865e356d760a82bd43b2cc5b940d06",
+  "source_path": "web/icon-512.png",
+  "source_introduced_revision": "70d16116c387553461692d3b8951206badb555f3",
+  "source_sha256": {
+    "wizard-ux-icon-512.png": "228489a32e0c6e0d7e668e7cbe752fbfd6bfc9c8de23b45552325ab23bc91481",
+    "render-pwa-icons.cjs": "e13381e0021bb978699be3c942faa8a1faa34b8109042322e12b104932b262d1",
+    "wizard-mark-white.png": "05e6cfe39615fa5ca4a04131c94ac9691939cfb428f389565e9ed052e3aac09a",
+    "brand-provenance.json": "eac6077bf3dd343fcb58d0ad6c627c4e53a488ed069073bea8bd1c3977691494"
+  },
+  "generated_sha256": {
+    "wizard-icon-16.png": "16a5a87e1c162ecfe384cf0b7f06593fab1bc59f8d8372246d98bed395c446a6",
+    "wizard-icon-32.png": "940c40d8da4a28d6682b6d83cc0f2e6c3610127bf90fa42713f4fa524a509a6b",
+    "wizard-icon-64.png": "8e586aba097f5370f63e8b3fe00a94540739931a7c63329ff038f2aad3a6f5fe",
+    "wizard-icon-128.png": "20b4c15a3fc729a4c48213d60651951842dfd412c3d609f86882c33e59bd8451",
+    "wizard-icon-256.png": "9b05575b99ca3f77598d72fe80b8cbb991a3b84ad4839215356ed917c91acf19",
+    "wizard-icon-512.png": "228489a32e0c6e0d7e668e7cbe752fbfd6bfc9c8de23b45552325ab23bc91481",
+    "wizard-icon-1024.png": "50adab765a8b2996788e0091a21953ee356e2b3a2f65725ce1ae9e9025262d7f"
+  },
+  "rgba_sha256": {
+    "wizard-icon-16.png": "af6b65dec8820ac7bea0690b68491724e46eb9111c5ef685b6c4c13d9a7102c5",
+    "wizard-icon-32.png": "a721b6b3c233cb9e36141ac0b8da1ae4e50e58fd5b68873c0c81d89e52987e35",
+    "wizard-icon-64.png": "3a0f2ba3c6285be21345bb795a41816b8e836d18af4056a813675b2738cb3c60",
+    "wizard-icon-128.png": "b0d2327fb4d11d411a2a296f9b7e23a540266fd02e367cfa95cef46d59b5f651",
+    "wizard-icon-256.png": "fa56357da1bf89526d8a5c0ce203cee65a8b5e274742cdb9bf9f62eafdf8344e",
+    "wizard-icon-512.png": "1951b6b320126cd7294f32c36e8099a9d0a107d0eb478088ed503832b9e10a44",
+    "wizard-icon-1024.png": "d56059505d23f8ac3fca2c6e1dfd07f03a81cb21233329f15b9edf3df4d0b702"
+  },
+  "transforms": "Use canonical approved Void #0B0A10 raster, ultraviolet glow/dot grid and white-to-ultraviolet supplied hat unchanged. Exact original bytes at 512; Pillow 12.3.0 RGBA LANCZOS scale only at other sizes (1024 is an upscale from the approved 512 raster, not new artwork). Existing ICNS packer embeds these PNG bytes without re-encoding. Original canonical compositor and designer-mark provenance retained, not a second drawing pipeline.",
+  "visual_inspection": "Compared actual canonical icon against existing purple Mac icon. Canonical has nearly black corners, faint dots, ultraviolet central glow and white-to-purple hat. Existing Mac icon has flat purple background/white hat. Native-only selection; no web, guest, PWA or semantic icon replacement."
+}

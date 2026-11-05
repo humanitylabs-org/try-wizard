@@ -15,7 +15,7 @@ root.mkdir(parents=True, exist_ok=True)
 evidence = root/'evidence'; evidence.mkdir(exist_ok=True)
 feed = root/'feed'; feed.mkdir(exist_ok=True)
 data = root/'data'; runtime = None
-installed = root/'installed/Wizard.app'; installed.parent.mkdir(exist_ok=True)
+installed = root/'installed/WizardOS.app'; installed.parent.mkdir(exist_ok=True)
 builds=list(range(a.first_build,a.first_build+3))
 results = []; requests = []; feed_requests = []; server = None; preference_backup = None; passed = False
 
@@ -141,7 +141,7 @@ def stage(build, mutate=None, signing_key=None):
     # QA artifacts are deliberately refused by the release feed tool. Construct
     # this disposable, loopback-only feed here, never through that release path.
     import xml.etree.ElementTree as X
-    bundle=root/f'build-{build}/Wizard.app'
+    bundle=root/f'build-{build}/WizardOS.app'
     metadata=plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
     manifest=json.loads((bundle/'Contents/Resources/wizard-release.json').read_text())
     assert manifest['qa'] is True and metadata['WizardUpdateQA'] is True
@@ -248,7 +248,7 @@ try:
     cache = pathlib.Path.home()/'Library/Caches'; cache.mkdir(parents=True, exist_ok=True)
     runtime = tempfile.TemporaryDirectory(prefix='wizard-update-qa-', dir=cache)
     data = pathlib.Path(runtime.name)/'data'; data.mkdir()
-    installed = pathlib.Path(runtime.name)/'installed/Wizard.app'; installed.parent.mkdir()
+    installed = pathlib.Path(runtime.name)/'installed/WizardOS.app'; installed.parent.mkdir()
     record('isolated-local-runtime', {'dataHome': str(data), 'installedApp': str(installed)})
     key=root/'update-key'; signer=a.sparkle/'bin/sign_update'
     # Exporting a dedicated keychain item could touch the production signer. Use a
@@ -267,9 +267,9 @@ try:
     for build in builds:
         with (evidence/f'build-{build}.log').open('w') as log:
             run(['bash',source/'build.sh'],env=env|{'BUILD':str(build),'VER':f'0.7.1-qa.{build}'},stdout=log,stderr=subprocess.STDOUT)
-            run(['ditto',source/'dist/Wizard.app',root/f'build-{build}/Wizard.app'],stdout=log,stderr=subprocess.STDOUT)
+            run(['ditto',source/'dist/WizardOS.app',root/f'build-{build}/WizardOS.app'],stdout=log,stderr=subprocess.STDOUT)
     for build in builds:
-        bundle=root/f'build-{build}/Wizard.app'
+        bundle=root/f'build-{build}/WizardOS.app'
         run(['codesign','--verify','--deep','--strict',bundle])
         info=subprocess.run(['codesign','-d','--verbose=4',bundle],capture_output=True,text=True,check=True).stderr
         assert 'Signature=adhoc' in info, info
@@ -318,7 +318,7 @@ try:
     pref=root/'preferences.plist'; pref.write_bytes(plistlib.dumps(prefs)); run(['defaults','import',domain,pref])
     first=a.first_build
     stage(first+1)
-    run(['ditto',root/f'build-{first}/Wizard.app',installed])
+    run(['ditto',root/f'build-{first}/WizardOS.app',installed])
     run(['open','-n','-a',installed,'--args','--wizard-data-home',data])
     end=time.time()+20
     while not live() and not (data/'updates/ui.json').exists() and time.time()<end: time.sleep(.1)
@@ -480,7 +480,7 @@ finally:
             if server: server.shutdown()
             if runtime:
                 shutil.copytree(data, root/'data', dirs_exist_ok=True, symlinks=True)
-                if installed.exists(): shutil.copytree(installed, root/'installed/Wizard.app', dirs_exist_ok=True, symlinks=True)
+                if installed.exists(): shutil.copytree(installed, root/'installed/WizardOS.app', dirs_exist_ok=True, symlinks=True)
         finally:
             if runtime: runtime.cleanup()
             for path in [root/'update-key',root/'wrong-update-key',root/'restore.plist',root/'preferences.plist',evidence/'preferences-before.plist']:

@@ -3,7 +3,7 @@
 ## Launch context matters
 
 For the installed-path acceptance test, install the selected ad-hoc or signed
-`Wizard.app` in `/Applications` (or the GUI user's `Applications`), but keep the
+`WizardOS.app` in `/Applications` (or the GUI user's `Applications`), but keep the
 QA DataHome, disk, logs, evidence, source and build products on the external work
 volume. Do not run `Contents/MacOS/Wizard` through SSH `Popen` and call that a
 Finder/LaunchServices launch. The embedded Host and Sparkle relaunch have their
@@ -36,7 +36,7 @@ Under the existing shared **POSIX** `worker.lock` (`lockf -k`, bounded admission
 and lease), run:
 
 ```
-python3 tools/qa-installed-host.py --app /Applications/Wizard.app \
+python3 tools/qa-installed-host.py --app /Applications/WizardOS.app \
   --data-home "$OWNED_EXTERNAL_DATA_HOME" \
   --evidence "$NEW_EXTERNAL_EVIDENCE_DIRECTORY" \
   --notify "$COMPILED_UPDATE_QA_NOTIFY"

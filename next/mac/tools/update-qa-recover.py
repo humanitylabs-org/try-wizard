@@ -13,7 +13,7 @@ allowed={'SUUpdateGroupIdentifier','SULastCheckTime','QAWebStorage'}
 assert changed<=allowed and current.get('DataHome')==before.get('DataHome'), 'Unknown preference changes; preserve other owner state and stop'
 for row in subprocess.check_output(['ps','-axo','pid,args'],text=True).splitlines():
  parts=row.strip().split(None,1)
- if len(parts)==2 and parts[1].startswith(str(R/'installed/Wizard.app/Contents/Frameworks/Sparkle.framework')+'/'):
+ if len(parts)==2 and parts[1].startswith(str(R/'installed/WizardOS.app/Contents/Frameworks/Sparkle.framework')+'/'):
   try:os.kill(int(parts[0]),signal.SIGTERM)
   except ProcessLookupError:pass
 subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp'],check=True)

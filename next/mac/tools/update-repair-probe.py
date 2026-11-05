@@ -2,7 +2,7 @@
 """Thales-only under worker.lock: bounded real installer/Host diagnosis, not full QA."""
 import functools,http.server,json,os,pathlib,plistlib,signal,subprocess,threading,time
 R=pathlib.Path(os.environ['UPDATER_ROOT']); E=R/'evidence-repair'/os.environ.get('PROBE_ID','probe1'); E.mkdir(parents=True,exist_ok=False)
-A=pathlib.Path(os.environ.get('UPDATER_INSTALL_PATH',str(R/'installed/Wizard.app'))).expanduser()
+A=pathlib.Path(os.environ.get('UPDATER_INSTALL_PATH',str(R/'installed/WizardOS.app'))).expanduser()
 # Normal Applications placement distinguishes updater code from a headless
 # removable-volume permission gate. Only this explicitly owned QA bundle moves.
 if 'UPDATER_INSTALL_PATH' in os.environ:
@@ -65,7 +65,7 @@ try:
  for key,val in [('QAHooks','true'),('VoiceKeys','false'),('QAWebStorage','true')]:run(['defaults','write','org.humanitylabs.wizard.mvp',key,'-bool',val])
  subprocess.run(['defaults','delete','org.humanitylabs.wizard.mvp','backends'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  assert not processes(),'owned candidate already active'
- run(['/usr/bin/ditto',R/'build-101/Wizard.app',A])
+ run(['/usr/bin/ditto',R/'build-101/WizardOS.app',A])
  for name in ['host-status.json','updates/transaction.json','updates/ui.json']:(D/name).unlink(missing_ok=True)
  h=A/'Contents/Library/LoginItems/Wizard Host.app/Contents/MacOS/Wizard Host'
  host=subprocess.Popen([str(h),'--wizard-data-home',str(D)],stdout=(E/'host.stdout').open('w'),stderr=(E/'host.stderr').open('w'))

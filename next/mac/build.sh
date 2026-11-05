@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build Wizard.app (front end) with Wizard Host.app (back-end runner) embedded as a login item.
-# Runs on Thales. Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
+# Build WizardOS.app with the compatibility-path Wizard Host.app login item.
+# Runs on Thales. Output: dist/WizardOS.app, dist/Wizard-<ver>.dmg
 set -euo pipefail
 VER=${VER:-0.7.0}
 BUILD=${BUILD:?Set BUILD to a new monotonic positive release build number}
@@ -13,7 +13,7 @@ SPARKLE_FEED=${SPARKLE_FEED:-https://downloads.aiwizards.com/mac/appcast.xml}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
 RELEASE_ID=${RELEASE_ID:-$(git rev-parse HEAD)}
 OUT=$SRC/dist
-rm -rf "$OUT/Wizard.app" "$OUT/obj"; mkdir -p "$OUT/obj"
+rm -rf "$OUT/WizardOS.app" "$OUT/obj"; mkdir -p "$OUT/obj"
 
 TARGET="arm64-apple-macos14.0"
 SWIFTC=(xcrun swiftc -O -target "$TARGET" -swift-version 5)
@@ -22,7 +22,7 @@ SWIFTC=(xcrun swiftc -O -target "$TARGET" -swift-version 5)
 if [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]]; then SWIFTC+=(-D WIZARD_UPDATE_QA); fi
 export WIZARD_UPDATE_QA
 
-APP=$OUT/Wizard.app
+APP=$OUT/WizardOS.app
 HOST=$APP/Contents/Library/LoginItems/"Wizard Host.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" "$HOST/Contents/Resources"
 
@@ -60,9 +60,10 @@ $5
 </dict></plist>
 EOF
 }
-plist "$APP/Contents/Info.plist" "Wizard MVP" org.humanitylabs.wizard.mvp Wizard \
+plist "$APP/Contents/Info.plist" "WizardOS" org.humanitylabs.wizard.mvp Wizard \
   '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
-plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
+# Keep executable and embedded Host paths stable: released updater contracts bind them.
+plist "$HOST/Contents/Info.plist" "WizardOS Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
 # Public metadata only. A private GitHub feed fails visibly; no embedded login/token.
 export APP SPARKLE_PUBLIC_KEY SPARKLE_FEED RELEASE_ID BUILD
@@ -112,13 +113,20 @@ PY
 mkdir -p "$APP/Contents/Resources/bring-hermes"
 install -m 755 bring-hermes/wizard-bring-hermes "$APP/Contents/Resources/bring-hermes/wizard-bring-hermes"
 
-python3 assets/build-icon.py assets/brand "$OUT/obj/Wizard.icns"
+python3 assets/build-icon.py assets/brand "$OUT/obj/Wizard.icns" --dark
 for bundle in "$APP" "$HOST"; do
   cp "$OUT/obj/Wizard.icns" "$bundle/Contents/Resources/Wizard.icns"
   cp assets/brand/wizard-mark-{purple,white}.png "$bundle/Contents/Resources/"
-  cp assets/brand/provenance.json "$bundle/Contents/Resources/WizardBrandProvenance.json"
+  cp assets/brand/dark/provenance.json "$bundle/Contents/Resources/WizardBrandProvenance.json"
 done
 
+
+# Mandatory final-bundle gate for both native identities and decoded icon pixels.
+if [[ "${WIZARD_UPDATE_QA:-0}" == 1 ]]; then
+  python3 tools/verify-native-identity.py "$APP" --allow-qa > "$OUT/native-identity.json"
+else
+  python3 tools/verify-native-identity.py "$APP" > "$OUT/native-identity.json"
+fi
 
 cat > "$OUT/obj/host.entitlements" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -146,9 +154,9 @@ du -sh "$APP"
 
 if [[ "${DMG:-1}" == 1 ]]; then
   STAGE=$OUT/obj/dmg; rm -rf "$STAGE"; mkdir -p "$STAGE"
-  ditto "$APP" "$STAGE/Wizard MVP.app"; ln -s /Applications "$STAGE/Applications"
+  ditto "$APP" "$STAGE/WizardOS.app"; ln -s /Applications "$STAGE/Applications"
   rm -f "$OUT/Wizard-$VER.dmg"
-  hdiutil create -quiet -volname "Wizard" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg"
+  hdiutil create -quiet -volname "WizardOS" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg"
   shasum -a 256 "$OUT/Wizard-$VER.dmg"; ls -la "$OUT/Wizard-$VER.dmg"
 fi
 echo BUILD_OK

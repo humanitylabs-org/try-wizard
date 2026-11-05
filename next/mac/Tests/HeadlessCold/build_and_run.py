@@ -142,7 +142,7 @@ def main():
                    GUEST_UPDATE_PAYLOAD=str(payload), RELEASE_ID=PRODUCTION, SIGN_IDENTITY='-', DMG='0')
         report['phase'] = 'native-build'; save()
         check('native307-build', ['bash',mac/'build.sh'], 1200)
-        check('install-owned-candidate', ['/bin/cp','-cR',mac/'dist/Wizard.app',app])
+        check('install-owned-candidate', ['/bin/cp','-cR',mac/'dist/WizardOS.app',app])
         check('candidate-signature', ['codesign','--verify','--deep','--strict',app])
         release = json.loads((app/'Contents/Resources/wizard-release.json').read_text())
         assert release['releaseID'] == PRODUCTION and release['build'] == '307'

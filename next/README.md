@@ -6,7 +6,7 @@ not implement it or change the App installation lane.
 
 ## What runs where
 
-- **Wizard.app**: a native AppKit/WebKit window, about 2 MB to download. It contains
+- **WizardOS.app**: a native AppKit/WebKit window. It contains
   no Linux disk. The embedded **Wizard Host** login item runs the local VM and keeps
   it alive after the window closes.
 - **Wizard OS 0.2.0**: headless Debian 13 arm64, Docker/Runtipi and Wizard App Manager,
@@ -116,7 +116,7 @@ export W="$PWD/out/wizard-os-build"
 # export WIZARD_BUILD_ENV=/path/to/your/docker-env.sh
 # export COLIMA_PROFILE=wb
 bash next/guest/build-image.sh           # base → provision → pack
-bash next/mac/build.sh                   # Wizard.app, Wizard-0.2.3.dmg
+bash next/mac/build.sh                   # WizardOS.app, Wizard-<VER>.dmg
 bash next/guest/split-release.sh out/wizard-os-0.2.0.tar.xz out/feed   # parts + latest.json
 # If building from a source export without .git, set BUILD_SOURCE_SHA explicitly.
 ```

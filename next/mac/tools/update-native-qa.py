@@ -4,7 +4,7 @@ No VM/account preservation assertion is made by this native-only probe.
 """
 import functools,http.server,json,os,pathlib,plistlib,shutil,signal,subprocess,threading,time,xml.etree.ElementTree as X
 R=pathlib.Path(os.environ['UPDATER_ROOT']); S=R/'source/next/mac'; E=R/'evidence'; E.mkdir(exist_ok=True)
-D=R/'native-data'; F=R/'feed'; A=R/'installed/Wizard.app'; NS='http://www.andymatuschak.org/xml-namespaces/sparkle'
+D=R/'native-data'; F=R/'feed'; A=R/'installed/WizardOS.app'; NS='http://www.andymatuschak.org/xml-namespaces/sparkle'
 receipts=[]; app=None; server=None; pref=E/'prefs-before.plist'; mode={'feed':'normal'}
 skip_host=os.environ.get('UPDATER_SKIP_HOST')=='1'
 def run(args,**kw):
@@ -46,7 +46,7 @@ def launch():
 def stage(build):
  env={**os.environ,'VER':'0.6.'+str(build),'BUILD':str(build),'SPARKLE_DIR':str(R/'sparkle'),'SPARKLE_PUBLIC_KEY':public,'SPARKLE_FEED':'http://127.0.0.1:48210/appcast.xml','DMG':'0','RELEASE_ID':os.environ.get('RELEASE_ID','updater-native-local-qa')}
  with (E/f'build-{build}.log').open('w') as log:run(['/bin/bash',S/'build.sh'],env=env,stdout=log,stderr=subprocess.STDOUT)
- b=R/f'build-{build}/Wizard.app'; b.parent.mkdir(exist_ok=True); run(['/usr/bin/ditto',S/'dist/Wizard.app',b])
+ b=R/f'build-{build}/WizardOS.app'; b.parent.mkdir(exist_ok=True); run(['/usr/bin/ditto',S/'dist/WizardOS.app',b])
  run(['/usr/bin/python3',S/'tools/make-update-feed.py',b,F,'--base-url','http://127.0.0.1:48210','--sign-tool',R/'sparkle/bin/sign_update','--key-file',R/'signer/developer.key'])
  return b
 class Handler(http.server.SimpleHTTPRequestHandler):
