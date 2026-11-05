@@ -32,6 +32,10 @@ def main():
         extracted.append('@objc ' + signature + ' {' + (body(source, signature) if signature in source else fallback) + '}')
     template = Path(__file__).with_name('OnboardingPrivacy.swift.in').read_text()
     fixture = template.replace('// PRODUCTION_METHODS', '\n'.join(extracted))
+    admission = 'func admitSharedFolderRestart(_ done: @escaping (Bool) -> Void)'
+    # Baseline had no admission guard; keep its absence explicit in the model.
+    admission_body = body(source, admission) if admission in source else 'controller.admitUpdateRestart(done)'
+    fixture = fixture.replace('// PRODUCTION_ADMISSION', admission + ' {' + admission_body + '}')
     shared = (args.source_root / 'Shared/Shared.swift').read_text()
     persisted = 'static var filesFolder: URL? {' + body(shared, 'static var filesFolder: URL?') + '}\n'
     persisted += 'static func setFilesFolder(_ url: URL) throws {' + body(shared, 'static func setFilesFolder(_ url: URL)') + '}\n'

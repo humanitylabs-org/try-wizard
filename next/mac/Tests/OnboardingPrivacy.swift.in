@@ -51,21 +51,34 @@ enum WizardShared {
 }
 enum HostControl {
     static var maintenanceInProgress = false
+    static var isRunning = true, hasForeignRunner = false
     static var commands: [String] = []
     static func send(_ cmd: String) { commands.append(cmd) }
 }
-final class WizardUpdater { static let shared = WizardUpdater(); func admitLegacyBootstrap() -> Bool { false } }
-final class FakeInstaller { func fetchSizeNote(_ done: (String?) -> Void) { done(nil) } }
+final class WizardUpdater { static let shared = WizardUpdater(); var hasPendingWork = false; func admitLegacyBootstrap() -> Bool { false } }
+final class FakeInstaller { var isBusy = false; func fetchSizeNote(_ done: (String?) -> Void) { done(nil) } }
 final class Overlay { var isHidden = false }
 final class Title { var stringValue = "" }
 final class Web { func stopLoading() {}; func loadHTMLString(_ text: String, baseURL: URL?) {} }
-final class AppDelegate {
+final class GateController {
     var allowed = true, deferred = false
     var callback: ((Bool) -> Void)?
-    func rebuildWizardMenu() {}
-    func admitSharedFolderRestart(_ done: @escaping (Bool) -> Void) {
+    let installer = FakeInstaller()
+    func admitUpdateRestart(_ done: @escaping (Bool) -> Void) {
         if deferred { callback = done } else { done(allowed) }
     }
+}
+final class Busy { var isBusy = false, busy = false }
+final class MeetingRecorder { static let shared = MeetingRecorder(); var isRecording = false }
+final class VoiceKeys { static let shared = VoiceKeys(); var state: [String: Any] = ["mode": "idle"] }
+final class AppDelegate {
+    let controller = GateController()
+    var backup: Busy?, removal: Busy?
+    var allowed: Bool { get { controller.allowed } set { controller.allowed = newValue } }
+    var deferred: Bool { get { controller.deferred } set { controller.deferred = newValue } }
+    var callback: ((Bool) -> Void)? { controller.callback }
+    func rebuildWizardMenu() {}
+    // PRODUCTION_ADMISSION
 }
 final class Application { var delegate: Any? = AppDelegate() }
 let NSApp = Application()
@@ -97,6 +110,9 @@ func reset(_ backend: Backend? = local, installed: Bool = true, share: URL? = ni
     WizardShared.osInstalled = installed; WizardShared.share = share
     WizardShared.shareReads = 0; WizardShared.defaultReads = 0; WizardShared.writes = 0
     HostControl.commands = []; HostControl.maintenanceInProgress = false
+    HostControl.isRunning = true; HostControl.hasForeignRunner = false
+    MeetingRecorder.shared.isRecording = false; VoiceKeys.shared.state = ["mode": "idle"]
+    WizardUpdater.shared.hasPendingWork = false
     NSAlert.response = .cancel; NSOpenPanel.response = .cancel
     NSApp.delegate = AppDelegate()
     return Controller()
@@ -138,6 +154,10 @@ c = reset(); NSAlert.response = .alertFirstButtonReturn
 let delegate = NSApp.delegate as! AppDelegate; delegate.deferred = true
 c.setFilesFolder(chosen); Store.backends = [remote]; delegate.callback?(true)
 check("stale-share-callback", WizardShared.writes == 0 && HostControl.commands.isEmpty)
+c = reset(); NSAlert.response = .alertFirstButtonReturn
+let busyDelegate = NSApp.delegate as! AppDelegate; busyDelegate.deferred = true
+c.setFilesFolder(chosen); MeetingRecorder.shared.isRecording = true; busyDelegate.callback?(true)
+check("native-busy-during-admission", WizardShared.writes == 0 && HostControl.commands.isEmpty)
 c = reset(); c.chooseFilesFolder()
 check("picker-cancel-preserves-share", WizardShared.writes == 0 && HostControl.commands.isEmpty)
 // Exercise the actual production persistence against a disposable directory,

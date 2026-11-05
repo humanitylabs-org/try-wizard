@@ -2340,10 +2340,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
     func admitSharedFolderRestart(_ done: @escaping (Bool) -> Void) {
-        let busy = MainActor.assumeIsolated { backup?.isBusy == true || WizardUpdater.shared.hasPendingWork || removal?.busy == true }
-        guard !busy, !controller.installer.isBusy, !HostControl.hasForeignRunner,
-              !MeetingRecorder.shared.isRecording, VoiceKeys.shared.state["mode"] as? String == "idle" else { done(false); return }
-        if HostControl.isRunning { controller.admitUpdateRestart(done) }
+        let nativeIdle = { [weak self] () -> Bool in
+            guard let self else { return false }
+            let busy = MainActor.assumeIsolated { self.backup?.isBusy == true || WizardUpdater.shared.hasPendingWork || self.removal?.busy == true }
+            return !busy && !self.controller.installer.isBusy && !HostControl.hasForeignRunner
+                && !MeetingRecorder.shared.isRecording && VoiceKeys.shared.state["mode"] as? String == "idle"
+        }
+        guard nativeIdle() else { done(false); return }
+        // Native activity may change while trusted-document admission is pending.
+        if HostControl.isRunning { controller.admitUpdateRestart { allowed in done(allowed && nativeIdle()) } }
         else { done(true) }
     }
 

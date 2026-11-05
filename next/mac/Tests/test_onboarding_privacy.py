@@ -43,7 +43,7 @@ class OnboardingPrivacy(unittest.TestCase):
             self.assertLess(share.index('alert.runModal()'), share.index(operation))
             self.assertLess(share.index('guard allowed, Store.active == selectedBackend'), share.index(operation))
         gate = body(self.app, 'func admitSharedFolderRestart')
-        for required in ['backup?.isBusy', 'hasPendingWork', 'MeetingRecorder.shared.isRecording', 'admitUpdateRestart(done)', 'hasForeignRunner']:
+        for required in ['backup?.isBusy', 'hasPendingWork', 'MeetingRecorder.shared.isRecording', 'admitUpdateRestart {', 'hasForeignRunner', 'done(allowed && nativeIdle())']:
             self.assertIn(required, gate)
         explicit = body(self.app, 'func askFilesFolder')
         self.assertNotIn('defaultFilesFolder', explicit)
