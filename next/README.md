@@ -28,6 +28,15 @@ not the owner's subscription; no API key is embedded in the image.
 
 ## Requirements and measurements
 
+Native web downloads require macOS 15.2 or later so WebKit can verify the actual
+user gesture and originating frame before allocating a destination. The new
+download feature is safely unavailable on 15.0/15.1 (and earlier); a confirmation
+fallback needs separate review. Selected remote shell user saves remain allowed;
+installed-app frames are download-only under the trusted local shell, not granted
+script or media authority. In-flight names compare canonical Unicode and folded
+case while preserving filename spelling and suffix style. This is not an atomic
+reservation against unrelated processes creating filesystem entries later.
+
 Apple Silicon, macOS **14 or later**. Build tools: Xcode command-line tools, Docker
 (via Colima), Python 3 and `xz`. Use a Docker-shared build directory. A 16 GB Mac is
 recommended for the complete local stack, especially alongside other applications.

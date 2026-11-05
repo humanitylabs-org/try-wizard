@@ -4,6 +4,14 @@ import Foundation
 struct DownloadDestinations {
     private var targets: [ObjectIdentifier: URL] = [:]
 
+    // Conservative identity for ordinary case-insensitive APFS. Keep the chosen
+    // spelling in targets; only comparisons use canonical Unicode + case folding.
+    private func identity(_ url: URL) -> String {
+        url.path.precomposedStringWithCanonicalMapping
+            .folding(options: [.caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .precomposedStringWithCanonicalMapping
+    }
+
     mutating func reserve(for download: ObjectIdentifier, suggestedFilename: String,
                           folder: URL, fileExists: (String) -> Bool) -> URL {
         if let target = targets[download] { return target }
@@ -12,7 +20,7 @@ struct DownloadDestinations {
         let name = clean.isEmpty || clean == "." || clean == ".." ? "Wizard download" : clean
         let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
         var target = folder.appendingPathComponent(name), n = 2
-        while targets.values.contains(target) || fileExists(target.path) {
+        while targets.values.contains(where: { identity($0) == identity(target) }) || fileExists(target.path) {
             target = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"); n += 1
         }
         targets[download] = target

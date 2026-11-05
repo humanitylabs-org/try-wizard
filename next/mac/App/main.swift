@@ -1389,23 +1389,42 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         download.delegate = self
     }
     private var downloadTargets = DownloadDestinations()
+    // Keep the actual object alive for exactly the admitted reservation lifetime;
+    // an ObjectIdentifier alone does not prevent address reuse.
+    private var activeDownloads: [ObjectIdentifier: WKDownload] = [:]
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        // Actual WebKit gesture/frame metadata is required. Downloads are safely
+        // unavailable on macOS 15.0/15.1 pending a separately reviewed consent fallback.
+        guard #available(macOS 15.2, *) else { completionHandler(nil); return }
+        guard download.isUserInitiated,
+              allowsNative(download.originatingFrame) ||
+                (isTrustedDocument && Store.active?.kind == .thisMac &&
+                 NativeOrigin(download.originatingFrame.securityOrigin)?.isInstalledApp == true)
+        else { completionHandler(nil); return }
         let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        activeDownloads[ObjectIdentifier(download)] = download
         let target = downloadTargets.reserve(for: ObjectIdentifier(download), suggestedFilename: suggestedFilename,
-                                            folder: folder, fileExists: { FileManager.default.fileExists(atPath: $0) })
+                                            folder: folder, fileExists: {
+                                                // Attributes include dangling symlinks; no cross-process atomicity claimed.
+                                                (try? FileManager.default.attributesOfItem(atPath: $0)) != nil
+                                            })
         completionHandler(target)
     }
     func downloadDidFinish(_ download: WKDownload) {
+        activeDownloads.removeValue(forKey: ObjectIdentifier(download))
         guard let target = downloadTargets.release(ObjectIdentifier(download)) else { return }
         // Show it where it landed, like Safari does.
         NSWorkspace.shared.activateFileViewerSelecting([target])
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        downloadTargets.release(ObjectIdentifier(download))
+        activeDownloads.removeValue(forKey: ObjectIdentifier(download))
+        let target = downloadTargets.release(ObjectIdentifier(download))
+        guard target != nil, (error as NSError).code != NSURLErrorCancelled, let window else { return }
         let alert = NSAlert(); alert.messageText = "Couldn't download this file"
-        alert.informativeText = error.localizedDescription; alert.runModal()
+        alert.informativeText = error.localizedDescription
+        alert.beginSheetModal(for: window, completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

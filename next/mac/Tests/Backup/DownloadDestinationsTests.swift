@@ -2,6 +2,21 @@ import XCTest
 @testable import WizardBackupContract
 
 final class DownloadDestinationsTests: XCTestCase {
+    // Allocator tests only: these do not exercise WKDownload gesture/frame metadata.
+    func testCaseAndCanonicalUnicodeReserveDistinctDestinations() {
+        let folder = URL(fileURLWithPath: "/Downloads", isDirectory: true)
+        let downloads = (0..<4).map { _ in NSObject() }
+        var destinations = DownloadDestinations()
+        let names = ["Report.pdf", "report.pdf", "\u{00e9}.pdf", "e\u{0301}.pdf"]
+        let actual = names.enumerated().map { index, name in
+            destinations.reserve(for: ObjectIdentifier(downloads[index]), suggestedFilename: name,
+                                 folder: folder, fileExists: { _ in false }).lastPathComponent
+        }
+        XCTAssertEqual(actual, ["Report.pdf", "report 2.pdf", "\u{00e9}.pdf", "e\u{0301} 2.pdf"])
+        XCTAssertEqual(Array(actual[3].unicodeScalars), Array("e\u{0301} 2.pdf".unicodeScalars),
+                       "Chosen filename spelling is preserved, not normalized for storage")
+    }
+
     func testRapidDuplicatesReserveBeforeBytesExistAndRelease() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
