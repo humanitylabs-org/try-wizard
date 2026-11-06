@@ -277,6 +277,25 @@ def env_merge(wizard_lines: list[str]) -> list[str]:
     return sorted(set(replaced))
 
 
+def read_wizard_auth() -> bytes | None:
+    """Snapshot an ordinary auth file without following a planted final-component link."""
+    import stat
+
+    try:
+        fd = os.open(DATA / "auth.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("Wizard auth.json must be a regular file")
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def keep_wizard_auth(wizard_auth: bytes | None) -> bool:
     """Put Wizard's auth.json back over the imported one: the AI runs on Wizard's connections, and the imported
     Hermes's own model logins (and their OAuth refresh tokens) stay on the machine they came from."""
@@ -409,8 +428,7 @@ def do_import(zip_path: Path) -> dict:
 
 
 def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], rec: dict) -> dict:
-    auth = DATA / "auth.json"
-    wizard_auth = auth.read_bytes() if auth.is_file() else None   # Wizard's AI connections (ChatGPT/Claude)
+    wizard_auth = read_wizard_auth()   # Wizard's AI connections (ChatGPT/Claude)
     log("restoring the backup with stock hermes import")
     in_engine(image, ["/opt/hermes/.venv/bin/hermes", "import", "--force", "/import/import.zip"],
               mounts=[f"{work}:/import:ro"])

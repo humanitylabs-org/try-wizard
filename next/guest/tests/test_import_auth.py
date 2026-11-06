@@ -24,7 +24,7 @@ loader.exec_module(m)
 
 class KeepWizardAuth(unittest.TestCase):
     def setUp(self):
-        self.home = tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"])
+        self.home = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
         self.addCleanup(self.home.cleanup)
         self.data = Path(self.home.name)
         self.settings = mock.patch.multiple(m, DATA=self.data, UID=os.getuid(), GID=os.getgid())
@@ -34,6 +34,29 @@ class KeepWizardAuth(unittest.TestCase):
         self.predictable = self.data / "auth.json.wizard-import"
         self.wizard = b'{"synthetic_wizard": "fixture-only"}\n\x00'
         self.old = b'{"synthetic_imported": true}'
+
+    def test_snapshot_rejects_symlink_before_import_engine_runs(self):
+        target = self.data / "root-only-sentinel"
+        target.write_bytes(b"synthetic-private-sentinel")
+        self.auth.symlink_to(target)
+        with mock.patch.object(m, "in_engine", side_effect=RuntimeError("engine reached")) as engine:
+            with self.assertRaises(OSError):
+                m._import_into(self.data, "synthetic-image", {}, [], {})
+            engine.assert_not_called()
+        self.assertEqual(target.read_bytes(), b"synthetic-private-sentinel")
+
+    def test_snapshot_rejects_nonregular_file_before_import_engine_runs(self):
+        self.auth.mkdir()
+        with mock.patch.object(m, "in_engine", side_effect=RuntimeError("engine reached")) as engine:
+            with self.assertRaises(OSError):
+                m._import_into(self.data, "synthetic-image", {}, [], {})
+            engine.assert_not_called()
+
+    def test_snapshot_preserves_exact_regular_auth_bytes(self):
+        self.auth.write_bytes(self.wizard)
+        self.assertEqual(m.read_wizard_auth(), self.wizard)
+        self.auth.unlink()
+        self.assertIsNone(m.read_wizard_auth())
 
     def test_absent_wizard_auth_unlinks_imported_auth(self):
         self.auth.write_bytes(self.old)
