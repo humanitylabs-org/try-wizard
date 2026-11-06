@@ -107,7 +107,15 @@ enum WizardUpdate {
         let status = json(WizardShared.statusFile)
         guard let pid = status["pid"] as? Int32, kill(pid, 0) == 0 else { done(nil); return }
         if ["stopped", "notInstalled"].contains(status["state"] as? String ?? "") { done(nil); return }
-        guard status["state"] as? String == "running" else { done("Wizard OS is starting or stopping"); return }
+        // An error must not permanently block an update; the Host independently
+        // checks actual VM state and preserves guest maintenance admission.
+        switch status["state"] as? String ?? "" {
+        case "running": break
+        case "error": done(nil); return
+        case "starting": done("Wizard OS on this Mac is still starting. Try again when it's ready."); return
+        case "stopping": done("Wizard OS on this Mac is stopping. Try again in a moment."); return
+        default: done("Wizard OS on this Mac is busy. Try again in a moment."); return
+        }
         var req = URLRequest(url: WizardShared.localUXHealthURL); req.timeoutInterval = 4; req.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.dataTask(with: req) { data, response, _ in
             var reason: String? = "Cannot verify local agent activity — retry when Wizard OS is ready"
