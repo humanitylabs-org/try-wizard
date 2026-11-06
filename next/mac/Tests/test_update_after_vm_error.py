@@ -3,9 +3,9 @@
 
 Owner report (6 Nov 2026): the bar said "Wizard OS is starting or stopping" and Update and restart did nothing,
 forever. The local VM was in its "error" state, which the updater treated like a start/stop in progress.
-The App can request recovery from an error, but the Host bypasses maintenance
-only when the actual VM is absent or stopped; a live errored VM keeps admission.
-These source contracts do not establish native shutdown or notice-bar geometry.
+The App can request recovery from an error. The new Host error-state bypass
+requires the actual VM to be absent or stopped; existing cold-bootstrap admission
+is unchanged. These source contracts do not establish native shutdown or geometry.
 """
 import re
 import sys
