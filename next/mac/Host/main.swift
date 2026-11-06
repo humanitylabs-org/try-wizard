@@ -694,8 +694,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSApp.terminate(nil)
             }
         }
-        // A failed Wizard OS has no agent work to protect: stop what is left (if anything) and update.
-        if self.vm.state == .stopped || self.vm.state == .notInstalled || self.vm.state == .error || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
+        // Only bypass the guest lease for an error when no VM remains running.
+        // Cold bootstrap can report error while it still owns a live VM.
+        if self.vm.state == .stopped || self.vm.state == .notInstalled || (self.vm.state == .error && self.vm.canTerminateWithoutStopping) || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
         else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
     }
 

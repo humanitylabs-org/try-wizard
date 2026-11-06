@@ -107,8 +107,8 @@ enum WizardUpdate {
         let status = json(WizardShared.statusFile)
         guard let pid = status["pid"] as? Int32, kill(pid, 0) == 0 else { done(nil); return }
         if ["stopped", "notInstalled"].contains(status["state"] as? String ?? "") { done(nil); return }
-        // A local Wizard OS that failed ("error") has nothing running to protect, so it must not block an update:
-        // the Host stops whatever is left. Only a real start or stop in progress waits.
+        // An error must not permanently block an update; the Host independently
+        // checks actual VM state and preserves guest maintenance admission.
         switch status["state"] as? String ?? "" {
         case "running": break
         case "error": done(nil); return
