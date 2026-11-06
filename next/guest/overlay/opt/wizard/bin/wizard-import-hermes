@@ -297,8 +297,8 @@ def read_wizard_auth() -> bytes | None:
 
 
 def keep_wizard_auth(wizard_auth: bytes | None) -> bool:
-    """Put Wizard's auth.json back over the imported one: the AI runs on Wizard's connections, and the imported
-    Hermes's own model logins (and their OAuth refresh tokens) stay on the machine they came from."""
+    """Restore Wizard's stock auth.json sign-ins instead of the imported auth.json.
+    Provider API keys held separately in .env are not changed by this helper."""
     auth = DATA / "auth.json"
     if wizard_auth is None:
         auth.unlink(missing_ok=True)
