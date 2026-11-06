@@ -674,6 +674,26 @@ final class WizardDragView: NSView {
     """
 }
 
+// MARK: - Zoom
+
+/// Page zoom for the main window (View › Zoom In / Zoom Out / Actual Size), kept across launches.
+enum WizardZoom {
+    static let key = "WizardPageZoom"
+    static let steps: [CGFloat] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+    static var saved: CGFloat {
+        get {
+            let v = CGFloat(UserDefaults.standard.double(forKey: key))
+            return v >= steps.first! && v <= steps.last! ? v : 1
+        }
+        set { UserDefaults.standard.set(Double(newValue), forKey: key) }
+    }
+    /// The next step above (by > 0) or below (by < 0) the current zoom, clamped to the ends.
+    static func step(from current: CGFloat, by: Int) -> CGFloat {
+        if by > 0 { return steps.first { $0 > current + 0.001 } ?? steps.last! }
+        return steps.last { $0 < current - 0.001 } ?? steps.first!
+    }
+}
+
 // MARK: - Window
 
 final class WizardWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate {
@@ -740,6 +760,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         web.setValue(false, forKey: "drawsBackground")
         web.customUserAgent = nil
         web.allowsBackForwardNavigationGestures = false
+        web.pageZoom = WizardZoom.saved
 
         let root = NSView()
         root.wantsLayer = true
@@ -1744,6 +1765,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         view.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         view.items.last?.keyEquivalentModifierMask = [.command, .control]
         view.addItem(withTitle: "Full App", action: #selector(fullWizardApp(_:)), keyEquivalent: "f").target = self
+        view.addItem(.separator())
+        // Standard Mac zoom: ⌘0 / ⌘+ (also ⌘=) / ⌘−. The whole page scales, so more fits on a small screen.
+        view.addItem(withTitle: "Actual Size", action: #selector(zoomWizardReset(_:)), keyEquivalent: "0").target = self
+        view.addItem(withTitle: "Zoom In", action: #selector(zoomWizardIn(_:)), keyEquivalent: "+").target = self
+        view.addItem(withTitle: "Zoom In", action: #selector(zoomWizardIn(_:)), keyEquivalent: "=").target = self
+        view.items.last?.isHidden = true // still answers ⌘= (US keyboards type + as ⇧=)
+        view.items.last?.allowsKeyEquivalentWhenHidden = true
+        view.addItem(withTitle: "Zoom Out", action: #selector(zoomWizardOut(_:)), keyEquivalent: "-").target = self
+        view.addItem(.separator())
         let focusKeys: [(String, String, Selector)] = [
             ("Focus App Above", "\u{F700}", #selector(focusWizardAppUp(_:))),
             ("Focus App Below", "\u{F701}", #selector(focusWizardAppDown(_:))),
@@ -2153,6 +2183,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func reload() { controller.begin() }
+
+    @objc func zoomWizardIn(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: 1)) }
+    @objc func zoomWizardOut(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: -1)) }
+    @objc func zoomWizardReset(_ sender: Any?) { setWizardZoom(1) }
+    func setWizardZoom(_ zoom: CGFloat) {
+        controller.web.pageZoom = zoom
+        WizardZoom.saved = zoom
+    }
     @objc func switchBackend(_ sender: NSMenuItem) { Store.activeIndex = sender.tag; rebuildWizardMenu(); controller.begin() }
     @objc func installFromFile() {
         var list = Store.backends.filter { $0.kind != .thisMac }
