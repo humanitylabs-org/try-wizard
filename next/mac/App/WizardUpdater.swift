@@ -68,6 +68,8 @@ final class NoticeBarView: NSView {
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
+        // Belt and braces: Later never grows past a normal button, whatever the label does.
+        later.widthAnchor.constraint(lessThanOrEqualToConstant: 110).isActive = true
         action.target = self; action.action = #selector(updateAndRestart)
         later.target = self; later.action = #selector(hideNotice)
         for control in [label, action, later] { control.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(control) }

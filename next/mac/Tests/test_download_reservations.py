@@ -79,17 +79,29 @@ class DownloadReservationContract(unittest.TestCase):
         self.contains(failure, "alert.beginSheetModal(for: window, completionHandler: nil)")
         self.assertFalse("runModal" in failure, "Downloads must not run an app-modal alert")
 
+    def test_reveal_burst_is_coalesced_after_authorized_release(self):
+        finish = self.section("func downloadDidFinish", "didFailWithError")
+        self.before(finish, "guard let target = downloadTargets.release", "queueDownloadReveal(target)")
+        self.assertNotIn("activateFileViewerSelecting", finish)
+        reveal = self.section("private func queueDownloadReveal", "func downloadDidFinish")
+        self.contains(reveal, "guard downloadReveals.append(target) else { return }")
+        self.contains(reveal, "DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in")
+        self.before(reveal, "let targets = self.downloadReveals.drain()", "activateFileViewerSelecting(targets)")
+        for fragment in ["struct DownloadRevealBatch", "let shouldSchedule = pending.isEmpty",
+                         "pending.append(target)", "return shouldSchedule", "defer { pending.removeAll() }"]:
+            self.contains(HELPER, fragment)
+
     def test_author_download_routes_and_authorized_reveal_remain(self):
         for fragment in ["if action.shouldPerformDownload { decisionHandler(.download); return }",
                          '!response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")',
                          "navigationAction: WKNavigationAction, didBecome download: WKDownload",
                          "navigationResponse: WKNavigationResponse, didBecome download: WKDownload",
-                         "NSWorkspace.shared.activateFileViewerSelecting([target])",
+                         "NSWorkspace.shared.activateFileViewerSelecting(targets)",
                          "Couldn't download this file", ".downloadsDirectory, in: .userDomainMask",
                          'homeDirectoryForCurrentUser.appendingPathComponent("Downloads")']:
             self.contains(SOURCE, fragment)
         finish = self.section("func downloadDidFinish", "didFailWithError")
-        self.before(finish, "guard let target = downloadTargets.release", "activateFileViewerSelecting")
+        self.before(finish, "guard let target = downloadTargets.release", "queueDownloadReveal(target)")
 
     def test_helper_is_in_real_build_and_existing_native_suite(self):
         self.contains((MAC / "build.sh").read_text(), "Shared/DownloadDestinations.swift")

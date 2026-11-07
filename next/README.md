@@ -36,6 +36,9 @@ installed-app frames are download-only under the trusted local shell, not grante
 script or media authority. In-flight names compare canonical Unicode and folded
 case while preserving filename spelling and suffix style. This is not an atomic
 reservation against unrelated processes creating filesystem entries later.
+Successful completions within a fixed 300 ms window share one Finder reveal;
+subsequent completions do not postpone that window. Real Finder/timer behavior
+and older-system download feedback remain native acceptance work.
 
 Apple Silicon, macOS **14 or later**. Build tools: Xcode command-line tools, Docker
 (via Colima), Python 3 and `xz`. Use a Docker-shared build directory. A 16 GB Mac is

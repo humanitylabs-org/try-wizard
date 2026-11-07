@@ -2,7 +2,27 @@ import XCTest
 @testable import WizardBackupContract
 
 final class DownloadDestinationsTests: XCTestCase {
-    // Allocator tests only: these do not exercise WKDownload gesture/frame metadata.
+    // Allocator/batch tests only: no actual WKDownload, Finder or timer dispatch.
+    func testRevealBurstSchedulesOnceAndRetainsEveryTarget() {
+        var batch = DownloadRevealBatch()
+        let urls = (0..<20).map { URL(fileURLWithPath: "/Downloads/report \($0).pdf") }
+        XCTAssertTrue(batch.append(urls[0]))
+        for url in urls.dropFirst() { XCTAssertFalse(batch.append(url)) }
+        XCTAssertEqual(batch.drain(), urls)
+    }
+
+    func testRevealDrainAllowsNextBurstAndEmptyDrainIsHarmless() {
+        var batch = DownloadRevealBatch()
+        let first = URL(fileURLWithPath: "/Downloads/first.pdf")
+        let second = URL(fileURLWithPath: "/Downloads/second.pdf")
+        XCTAssertEqual(batch.drain(), [])
+        XCTAssertTrue(batch.append(first))
+        XCTAssertEqual(batch.drain(), [first])
+        XCTAssertEqual(batch.drain(), [])
+        XCTAssertTrue(batch.append(second))
+        XCTAssertEqual(batch.drain(), [second])
+    }
+
     func testCaseAndCanonicalUnicodeReserveDistinctDestinations() {
         let folder = URL(fileURLWithPath: "/Downloads", isDirectory: true)
         let downloads = (0..<4).map { _ in NSObject() }

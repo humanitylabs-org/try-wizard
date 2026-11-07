@@ -1,5 +1,23 @@
 import Foundation
 
+/// Main-queue batch shared by the native controller and focused XCTest cases.
+/// Only the first completion schedules a reveal; later completions join that
+/// fixed window without moving its deadline. Draining starts a fresh batch.
+struct DownloadRevealBatch {
+    private var pending: [URL] = []
+
+    mutating func append(_ target: URL) -> Bool {
+        let shouldSchedule = pending.isEmpty
+        pending.append(target)
+        return shouldSchedule
+    }
+
+    mutating func drain() -> [URL] {
+        defer { pending.removeAll() }
+        return pending
+    }
+}
+
 /// Used on WebKit's delegate queue. Admission reserves a name before WebKit writes bytes.
 struct DownloadDestinations {
     private var targets: [ObjectIdentifier: URL] = [:]
