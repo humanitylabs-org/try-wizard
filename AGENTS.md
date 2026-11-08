@@ -1,6 +1,6 @@
 # Agents working on try-wizard
 
-Try Wizard is Wizard for the Mac: a native Mac app that runs Wizard OS in its own small Linux VM and shows Wizard UX in a window. It is a fork of Try Omarchy. The current app lives in `next/`; the older QEMU-based app is kept for reference. Read the team rules below before you start.
+Try Wizard is Wizard for the Mac: a native Mac app that runs WizardOS in its own small Linux VM and shows Wizard UX in a window. It is a fork of Try Omarchy. The current app lives in `next/`; the older QEMU-based app is kept for reference. Read the team rules below before you start.
 
 ## This repo
 
@@ -47,10 +47,10 @@ Machine-specific paths and hosts come from env vars: `WIZARD_WORK_ROOT`,
 paths or tailnet hostnames; the tracked-file portable-paths guard in the normal
 test/CI command enforces this. Historical evidence/receipts are explicitly exempt.
 
-<!-- wizard-os-team-rules v4 (24 Oct 2026). Same text in every Wizard OS repo; the canonical copy is humanitylabs-org/wizard-os AGENTS.md. Change it there first, then copy the block to every repo in one round of PRs. -->
-## Wizard OS team rules (identical in every repo)
+<!-- wizard-os-team-rules v4 (24 Oct 2026). Same text in every WizardOS repo; the canonical copy is humanitylabs-org/wizard-os AGENTS.md. Change it there first, then copy the block to every repo in one round of PRs. -->
+## WizardOS team rules (identical in every repo)
 
-Wizard OS is built by James, Jan and Miguel together with their agents. Archimedes commits as `defleur-agents` and Oscar as `oscarhenrycollins`. Every repo belongs to Wizard OS as a whole, and no repo belongs to one person. Make the change that is best for the whole system, and build on each other's work.
+WizardOS is built by James, Jan and Miguel together with their agents. Archimedes commits as `defleur-agents` and Oscar as `oscarhenrycollins`. Every repo belongs to WizardOS as a whole, and no repo belongs to one person. Make the change that is best for the whole system, and build on each other's work.
 
 ### Branches
 
@@ -108,7 +108,7 @@ Every change reaches `main` one of two ways: **propose a fix** (`tier: recommend
 
 ### Tracking
 
-**The [Wizard OS · PR pipeline](https://github.com/orgs/humanitylabs-org/projects/1) board is the source of truth for where every PR is**, across all repos: Draft → In review → Merged → On Latest → On Stable, or Dropped. wizard-os `tools/pr_board.py` syncs it every 15 minutes from the PRs and the release pointers, so nobody moves cards by hand; keep the tier label right and the board stays right. Check it before asking someone where a change is, and link it in status updates instead of listing PRs.
+**The [WizardOS · PR pipeline](https://github.com/orgs/humanitylabs-org/projects/1) board is the source of truth for where every PR is**, across all repos: Draft → In review → Merged → On Latest → On Stable, or Dropped. wizard-os `tools/pr_board.py` syncs it every 15 minutes from the PRs and the release pointers, so nobody moves cards by hand; keep the tier label right and the board stays right. Check it before asking someone where a change is, and link it in status updates instead of listing PRs.
 
 ### Merging
 

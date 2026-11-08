@@ -1,6 +1,6 @@
 #!/bin/bash
 : "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
-# In-guest acceptance (Wizard OS 0.2 stack) through the QA dev shell (qa-guest.sh):
+# In-guest acceptance (WizardOS 0.2 stack) through the QA dev shell (qa-guest.sh):
 #   wam doctor all PASS; `wam install` of one store app; Mac-folder ownership; does the agent see the apps' tools?
 set -u
 EV=${1:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/evidence/guest}

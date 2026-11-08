@@ -1,8 +1,8 @@
 #!/bin/bash
 : "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
-# Lifecycle acceptance on Thales (Wizard OS 0.2 stack). Assumes qa-fresh.sh ran (installed + onboarded).
-#   1. close the window: Wizard OS keeps running        2. warm open x3 (Wizard OS running)
-#   3. cold open x2 (Wizard OS stopped)                  4. chats, installed apps and files survive all of it
+# Lifecycle acceptance on Thales (WizardOS 0.2 stack). Assumes qa-fresh.sh ran (installed + onboarded).
+#   1. close the window: WizardOS keeps running        2. warm open x3 (WizardOS running)
+#   3. cold open x2 (WizardOS stopped)                  4. chats, installed apps and files survive all of it
 #   5. memory: VM process footprint, guest free -m, per-container memory
 set -u
 EV=${1:-$WIZARD_WORK_ROOT/Projects/wizard-desktop/wizard-os-020/evidence/lifecycle}
@@ -21,7 +21,7 @@ appopen_until_ux() { # seconds from `open` until the Wizard UX page finished loa
   rm -f /tmp/wizard-mvp-qa-state.json
   while python3 -c "import time,sys;sys.exit(0 if time.time()-$t0<240 else 1)"; do
     sleep 0.1; /tmp/wizard-mvp-qa-post state 2>/dev/null; sleep 0.05
-    python3 -c "import json,sys;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));sys.exit(0 if (d['overlayHidden'] and d['loadedAt']>$t0 and '/wizard-ux/' in d['url']) or d['title'].startswith(('Can','Wizard OS didn')) else 1)" 2>/dev/null && break
+    python3 -c "import json,sys;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));sys.exit(0 if (d['overlayHidden'] and d['loadedAt']>$t0 and '/wizard-ux/' in d['url']) or d['title'].startswith(('Can','WizardOS didn')) else 1)" 2>/dev/null && break
   done
   python3 -c "import json;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));print('%.2f'%(d['loadedAt']-$t0) if d['overlayHidden'] and d['loadedAt'] else 'FAIL '+d['title']+' / '+d['subtitle'])"
 }
@@ -48,7 +48,7 @@ snapshot_data() { # chats, installed apps, files: compared before/after
 mkdir -p "$HOME/Wizard/Documents"; date > "$HOME/Wizard/Documents/lifecycle-marker.txt"
 BEFORE=$(snapshot_data); echo "$BEFORE"
 
-echo "== 1. window closed -> Wizard OS keeps running"
+echo "== 1. window closed -> WizardOS keeps running"
 osascript -e 'tell application "Wizard" to quit' 2>/dev/null; sleep 2
 pgrep -x Wizard >/dev/null && echo "app still running" || echo "app quit"
 grep state "$AS/host-status.json"
@@ -56,10 +56,10 @@ curl -s -m 3 http://127.0.0.1:48030/healthz && echo " <- front door answering wi
 curl -s -m 3 http://127.0.0.1:48023/wizard/health | head -c 120; echo " <- wizard-shell answering"
 mem
 
-echo "== 2. warm open (Wizard OS running)"
+echo "== 2. warm open (WizardOS running)"
 for n in 1 2 3; do echo "warm_open_s=$(appopen_until_ux)"; osascript -e 'tell application "Wizard" to quit' 2>/dev/null; sleep 2; done
 
-echo "== 3. cold open (Wizard OS stopped)"
+echo "== 3. cold open (WizardOS stopped)"
 for n in 1 2; do
   hostcmd stop
   for i in $(seq 1 120); do sleep 0.5; grep -q '"stopped"' "$AS/host-status.json" && break; done
@@ -70,7 +70,7 @@ for n in 1 2; do
 done
 sleep 60; echo "== memory after cold boot + 60 s"; mem
 
-echo "== 4. chats, installed apps and files after quit/reopen and two Wizard OS restarts"
+echo "== 4. chats, installed apps and files after quit/reopen and two WizardOS restarts"
 AFTER=$(snapshot_data); echo "$AFTER"
 [ "$BEFORE" = "$AFTER" ] && echo "PERSIST_OK" || echo "PERSIST_DIFF"
 curl -s http://127.0.0.1:48030/api/state | python3 -c "import json,sys;d=json.load(sys.stdin);print('name',d['name'],'done',d['done'],'brain',(d['brain'] or {}).get('label'))"

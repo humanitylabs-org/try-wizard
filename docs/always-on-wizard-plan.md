@@ -20,13 +20,13 @@
 | Network | Wi-Fi | Wired ethernet |
 | Power | Always plugged in, never sleeps | Plus a small UPS |
 
-- Wizard OS is ARM64-only today, so Intel Macs are unsupported until an x86_64 image ships.
+- WizardOS is ARM64-only today, so Intel Macs are unsupported until an x86_64 image ships.
 - Old laptops are acceptable: cap the charge at about 80% and allow lid-closed operation.
 - Remote access is Tailscale; public publishing goes through a Cloudflare tunnel. No static IP or port forwarding.
 
 ## Thales split (when Archimedes moves)
 
-- Wizard OS VM: 8 vCPU, 16 GB RAM, disk on the external `ThalesMedia` SSD.
+- WizardOS VM: 8 vCPU, 16 GB RAM, disk on the external `ThalesMedia` SSD.
 - macOS keeps 16 GB and does Android builds, ffmpeg/VideoToolbox rendering and Mizel capture. The VM cannot reach Apple's hardware encoders, so media work stays native.
 
 ## Phase 1 — installer gaps (product work, benefits every customer)
@@ -35,8 +35,8 @@
 2. **Growable disk on a chosen volume.** ([#2](https://github.com/humanitylabs-org/try-wizard/issues/2)) The rootfs is a fixed ~2 GB image in `~/Library/Application Support/Wizard/os`. Grow on demand and allow placement on an external volume.
 3. **Encrypted export/import bundle.** ([#3](https://github.com/humanitylabs-org/try-wizard/issues/3)) One bundle carries the Wizard core (memory, skills, sessions, config, credentials, app data) between VPS, Mac VM and Wizard One. The same code powers migration, backup and restore. **Build this first.**
 4. **Headless always-on mode.** ([#4](https://github.com/humanitylabs-org/try-wizard/issues/4)) Start at boot without a GUI login, restart on crash, keep the host awake.
-5. **Tailscale inside Wizard OS.** ([#5](https://github.com/humanitylabs-org/try-wizard/issues/5)) The guest is behind host NAT today; it needs its own tailnet identity so phones and other tailnet devices reach it directly.
-6. **In-place Wizard OS updates.** ([#6](https://github.com/humanitylabs-org/try-wizard/issues/6)) Existing installs need guest updates without a reinstall.
+5. **Tailscale inside WizardOS.** ([#5](https://github.com/humanitylabs-org/try-wizard/issues/5)) The guest is behind host NAT today; it needs its own tailnet identity so phones and other tailnet devices reach it directly.
+6. **In-place WizardOS updates.** ([#6](https://github.com/humanitylabs-org/try-wizard/issues/6)) Existing installs need guest updates without a reinstall.
 7. **Scheduled off-machine backups.** ([#7](https://github.com/humanitylabs-org/try-wizard/issues/7)) The export bundle on a schedule to object storage, with a tested restore.
 
 ## Phase 2 — Thales preparation

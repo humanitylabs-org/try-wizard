@@ -2,7 +2,7 @@ import AppKit
 import Darwin
 import Virtualization
 
-// Wizard Host: the menu-bar service that runs Wizard OS (a lightweight Linux VM on
+// Wizard Host: the menu-bar service that runs WizardOS (a lightweight Linux VM on
 // Apple's Virtualization framework) and keeps it running after the Wizard window closes.
 
 func log(_ message: String) {
@@ -173,7 +173,7 @@ final class ColdBootstrapSerial {
     }
 }
 
-// MARK: - Wizard OS virtual machine
+// MARK: - WizardOS virtual machine
 
 final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListenerDelegate {
     enum State: String { case notInstalled, stopped, starting, running, stopping, error }
@@ -204,7 +204,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         cleanupColdSerial()
         guard WizardShared.osInstalled else { state = .notInstalled; return }
         if let free = Self.freeBytes(), free < Self.minFreeToStart {
-            fail(String(format: "Not enough free space on this Mac to run Wizard OS safely (%.1f GB free, needs %.0f GB).",
+            fail(String(format: "Not enough free space on this Mac to run WizardOS safely (%.1f GB free, needs %.0f GB).",
                         Double(free) / 1e9, Double(Self.minFreeToStart) / 1e9))
             return
         }
@@ -217,7 +217,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             socketDevice?.setSocketListener(openURLListener, forPort: WizardShared.hostOpenURLPort)
             bootStartedAt = Date(); readyAt = nil; lastError = nil
             state = .starting
-            log("starting Wizard OS (cpus=\(config.cpuCount) mem=\(config.memorySize >> 20)MiB)")
+            log("starting WizardOS (cpus=\(config.cpuCount) mem=\(config.memorySize >> 20)MiB)")
             machine.start { [weak self] result in
                 guard let self, self.vm === machine, self.state == .starting else { return }
                 if case .failure(let error) = result {
@@ -233,7 +233,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         }
     }
 
-    // Wizard OS's disk is a sparse file: when the Mac's volume fills up, its writes fail and the guest file system is
+    // WizardOS's disk is a sparse file: when the Mac's volume fills up, its writes fail and the guest file system is
     // damaged. Refuse to start below 2 GB free; shut down cleanly below 1 GB while running.
     static let minFreeToStart: Int64 = 2_000_000_000
     static let minFreeRunning: Int64 = 1_000_000_000
@@ -247,7 +247,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         diskTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] t in
             guard let self, self.state == .running || self.state == .starting else { t.invalidate(); return }
             if let free = Self.freeBytes(), free < Self.minFreeRunning {
-                log(String(format: "only %.2f GB free on this Mac; stopping Wizard OS to protect its disk", Double(free) / 1e9))
+                log(String(format: "only %.2f GB free on this Mac; stopping WizardOS to protect its disk", Double(free) / 1e9))
                 self.stop { [weak self] in self?.lastError = "Stopped: this Mac is almost out of disk space."; self?.state = .error }
             }
         }
@@ -266,7 +266,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 DispatchQueue.main.async {
                     if ok {
                         self.readyAt = Date()
-                        log(String(format: "Wizard OS ready in %.2fs", self.bootSeconds ?? -1))
+                        log(String(format: "WizardOS ready in %.2fs", self.bootSeconds ?? -1))
                         self.state = .running
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: poll)
@@ -292,7 +292,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         let idleColdBoot = coldSerial.map { !$0.delivered } ?? false
         cancelColdSerialWait()
         state = .stopping
-        log("stopping Wizard OS")
+        log("stopping WizardOS")
         var finished = false
         var timedOut = false
         let done = { [weak self] in
@@ -320,7 +320,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             }
             return
         }
-        // Ask Wizard OS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
+        // Ask WizardOS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
         socketDevice?.connect(toPort: WizardShared.guestControlPort) { result in
             if case .success(let conn) = result {
                 _ = "poweroff\n".withCString { write(conn.fileDescriptor, $0, 9) }
@@ -393,7 +393,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         DispatchQueue.main.async {
             guard self.vm === virtualMachine else { return }
             self.cleanupColdSerial()
-            log("Wizard OS powered off")
+            log("WizardOS powered off")
             if let c = self.stopCompletion { self.stopCompletion = nil; c() }
             else { self.vm = nil; self.socketDevice = nil; self.state = .stopped }
         }
@@ -401,7 +401,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         DispatchQueue.main.async {
             guard self.vm === virtualMachine else { return }
-            self.fail("Wizard OS stopped: \(error.localizedDescription)")
+            self.fail("WizardOS stopped: \(error.localizedDescription)")
         }
     }
 
@@ -419,7 +419,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                url.scheme == "https", url.host != nil {
                 _ = DispatchQueue.main.sync { NSWorkspace.shared.open(url) }
                 reply = "opened\n"
-                log("opened link from Wizard OS: \(url.host ?? "")")
+                log("opened link from WizardOS: \(url.host ?? "")")
             }
             _ = reply.withCString { write(fd, $0, strlen($0)) }
             DispatchQueue.main.async {
@@ -486,7 +486,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.bootLoader = boot
         let cores = ProcessInfo.processInfo.processorCount
         c.cpuCount = max(VZVirtualMachineConfiguration.minimumAllowedCPUCount, min(4, max(2, cores / 2)))
-        // Wizard OS 0.2 runs Docker, Runtipi and the default apps: give it the manifest's memory (6 GiB) on Macs with
+        // WizardOS 0.2 runs Docker, Runtipi and the default apps: give it the manifest's memory (6 GiB) on Macs with
         // 16 GB or more, 4 GiB otherwise. Pages the guest never touches cost the Mac nothing.
         let physical = ProcessInfo.processInfo.physicalMemory
         let wantMiB = UInt64((manifest["memoryMiB"] as? Int) ?? 4096)
@@ -694,7 +694,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSApp.terminate(nil)
             }
         }
-        // A failed Wizard OS has no agent work to protect: stop what is left (if anything) and update.
+        // A failed WizardOS has no agent work to protect: stop what is left (if anything) and update.
         if self.vm.state == .stopped || self.vm.state == .notInstalled || self.vm.state == .error || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
         else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
     }

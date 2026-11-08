@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wizard OS factory trim and first-launch app fetches. Runs as the `wizard` user (uid 1000).
+"""WizardOS factory trim and first-launch app fetches. Runs as the `wizard` user (uid 1000).
 
   wizard-apps factory [--hermes-image REF]
       Build time only. Leaves the factory disk with what's needed to reach a first chat: the App Manager stack,

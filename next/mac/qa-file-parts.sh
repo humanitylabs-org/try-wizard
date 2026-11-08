@@ -1,9 +1,9 @@
 #!/bin/bash
-# File-install acceptance for split Wizard OS archives (Choose Downloaded File… with every part selected).
+# File-install acceptance for split WizardOS archives (Choose Downloaded File… with every part selected).
 #   Phase 1: parts on an external drive. macOS holds the read until the user allows "Removable Volumes";
 #            the app must say so (instead of sitting on "Checking…") and must not touch the current OS.
-#   Phase 2: the same parts in an internal folder install Wizard OS and boot it.
-# Wipes the QA Wizard OS (back it up first). Isolated QA only.
+#   Phase 2: the same parts in an internal folder install WizardOS and boot it.
+# Wipes the QA WizardOS (back it up first). Isolated QA only.
 #   WIZARD_QA_ALLOW_STATE_MUTATION=1 qa-file-parts.sh <Wizard.dmg> <feed dir on external drive> <evidence dir>
 set -uo pipefail
 [ "${WIZARD_QA_ALLOW_STATE_MUTATION:-}" = 1 ] || { echo 'Explicit isolated-QA opt-in required'; exit 1; }
@@ -25,7 +25,7 @@ fresh_app() {
   /tmp/wizard-mvp-qa-post "files-folder $HOME/Wizard"; sleep 6
   echo "start: $(st)"
 }
-stop; rm -rf "$AS/os" "$AS/os-staging"   # this QA replaces the local QA Wizard OS; back it up first
+stop; rm -rf "$AS/os" "$AS/os-staging"   # this QA replaces the local QA WizardOS; back it up first
 python3 - "$AS" <<'PY' || exit 1
 import shutil,sys,os
 os.makedirs(sys.argv[1],exist_ok=True)

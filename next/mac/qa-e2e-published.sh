@@ -1,6 +1,6 @@
 #!/bin/bash
 # End-to-end acceptance on Thales from the PUBLISHED artifacts: install the DMG from the private
-# download page, wipe Wizard OS + app prefs, choose "On this Mac", and let the app pull Wizard OS
+# download page, wipe WizardOS + app prefs, choose "On this Mac", and let the app pull WizardOS
 # from the app's configured OS feed. Set WIZARD_QA_DOWNLOAD_BASE to the published release directory.
 set -u
 : "${WIZARD_QA_DOWNLOAD_BASE:?Set WIZARD_QA_DOWNLOAD_BASE to the published release directory URL}"
@@ -15,7 +15,7 @@ echo "== stop running Wizard"
 pkill -x Wizard; pkill -TERM -f "Wizard Host.app/Contents/MacOS"
 for i in $(seq 1 30); do pgrep -f "Wizard Host.app/Contents/MacOS" >/dev/null || break; sleep 1; done
 
-echo "== wipe Wizard OS, logs, prefs (keep the old QEMU build's VM dir)"
+echo "== wipe WizardOS, logs, prefs (keep the old QEMU build's VM dir)"
 rm -rf "$AS/os" "$AS/logs" "$AS/host-status.json" "$AS/downloads"
 defaults delete org.humanitylabs.wizard.mvp >/dev/null 2>&1 || true
 defaults delete org.humanitylabs.wizard.mvp.host >/dev/null 2>&1 || true
@@ -38,11 +38,11 @@ open "$APP"; sleep 2
 cd $W/mac; bash qa.sh choose-this-mac >/dev/null 2>&1
 while python3 -c "import time,sys;sys.exit(0 if time.time()-$t0<240 else 1)"; do
   sleep 1; /tmp/wizard-mvp-qa-post state 2>/dev/null; sleep 0.1
-  python3 -c "import json,sys;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));sys.exit(0 if d['overlayHidden'] or d['title'].startswith(('Can','Wizard OS didn','Couldn')) else 1)" 2>/dev/null && break
+  python3 -c "import json,sys;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));sys.exit(0 if d['overlayHidden'] or d['title'].startswith(('Can','WizardOS didn','Couldn')) else 1)" 2>/dev/null && break
 done
 python3 -c "import json,time;d=json.load(open('/tmp/wizard-mvp-qa-state.json'));print('first_run_to_window_s=%.1f'%(time.time()-$t0), '|', d['title'], '|', d['url'])"
 grep -E "downloaded|verified|unpack|ready in|feed" "$AS/logs/host.log" "$AS/logs/app.log" 2>/dev/null | tail -6
-cat "$AS/os/manifest.json" 2>/dev/null | python3 -c "import json,sys;print('installed Wizard OS', json.load(sys.stdin)['version'])"
+cat "$AS/os/manifest.json" 2>/dev/null | python3 -c "import json,sys;print('installed WizardOS', json.load(sys.stdin)['version'])"
 curl -s http://127.0.0.1:48030/api/state; echo
 bash qa.sh "snapshot /tmp/wq-e2e.png" >/dev/null 2>&1; sleep 2; ls -la /tmp/wq-e2e.png
 

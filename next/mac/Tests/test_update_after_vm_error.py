@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A failed local Wizard OS must not block a Mac app update.
+"""A failed local WizardOS must not block a Mac app update.
 
-Owner report (6 Nov 2026): the bar said "Wizard OS is starting or stopping" and Update and restart did nothing,
+Owner report (6 Nov 2026): the bar said "WizardOS is starting or stopping" and Update and restart did nothing,
 forever. The local VM was in its "error" state, which the updater treated like a start/stop in progress.
 A failed VM has no agent work to protect, so the update proceeds and the Host stops whatever is left.
 """

@@ -232,7 +232,7 @@ class BackupDoor:
             return reply({"ok": True, "version": 1, "stored_key": bool(raw.get("stored")), "key_id": raw.get("key_id"),
                           "busy": self.lock.locked(), "name": str(self.name_provider())[:80]})
         except (OSError, ValueError, asyncio.TimeoutError):
-            return reply({"ok": False, "version": 0, "error": "Needs Wizard OS update"}, 503)
+            return reply({"ok": False, "version": 0, "error": "Needs WizardOS update"}, 503)
 
     async def status(self, request):
         ident = request.match_info.get("job")

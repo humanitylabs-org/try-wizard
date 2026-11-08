@@ -58,10 +58,10 @@ import Darwin
         }
         let status = WizardUpdate.json(WizardShared.statusFile)
         if status["state"] as? String == "error", (status["updatedAt"] as? Double ?? 0) >= start.timeIntervalSince1970 {
-            finish(status["error"] as? String ?? "Wizard OS could not start; restoring the stopped disk"); return
+            finish(status["error"] as? String ?? "WizardOS could not start; restoring the stopped disk"); return
         }
         let waited = Date().timeIntervalSince(start)
-        guard waited < 900 else { finish("Wizard OS did not start within 15 minutes; restoring the stopped disk"); return }
+        guard waited < 900 else { finish("WizardOS did not start within 15 minutes; restoring the stopped disk"); return }
         if waited > 3 && !waitingNoticeShown {
             waitingNoticeShown = true
             onProgress("Waiting for macOS to start Wizard's computer. If it asks whether Wizard may access a folder, click Allow.")

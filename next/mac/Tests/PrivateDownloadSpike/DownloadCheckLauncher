@@ -4,7 +4,7 @@ set -euo pipefail
 BASE=$(cd "$(dirname "$0")/../Resources" && pwd)
 DEST="$HOME/Downloads/Wizard Download Check/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$DEST"
-/usr/bin/osascript -e 'display dialog "This check opens GitHub sign-in, then automatically downloads the 1.27 GB Wizard OS test image. It verifies the file and leaves your installed Wizard and VM untouched. Your sign-in stays inside this temporary native window." with title "Wizard Download Check" buttons {"Cancel", "Start"} default button "Start"' >/dev/null
+/usr/bin/osascript -e 'display dialog "This check opens GitHub sign-in, then automatically downloads the 1.27 GB WizardOS test image. It verifies the file and leaves your installed Wizard and VM untouched. Your sign-in stays inside this temporary native window." with title "Wizard Download Check" buttons {"Cancel", "Start"} default button "Start"' >/dev/null
 export WIZARD_SPIKE_AUTH_SECONDS=900
 "$BASE/PrivateDownloadSpike" \
  'https://github.com/login?return_to=%2Fhumanitylabs-org%2Ftry-wizard%2Freleases%2Ftag%2Fmac-mvp-0.6.0' \

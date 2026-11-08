@@ -6,7 +6,7 @@ enum WizardShared {
     static let hostBundleID = "org.humanitylabs.wizard.mvp.host"
     static let appBundleID = "org.humanitylabs.wizard.mvp"
 
-    /// Mac loopback ports bridged into Wizard OS over vsock.
+    /// Mac loopback ports bridged into WizardOS over vsock.
     static let uxPort: UInt16 = 48023      // -> guest 8923 -> the wizard-shell app (Agent Service + Wizard UX)
     static let setupPort: UInt16 = 48030   // -> guest 8930 (front door / onboarding)
     static let guestUXPort: UInt32 = 8923
@@ -76,7 +76,7 @@ enum WizardShared {
     static var logsDir: URL { supportDir.appendingPathComponent("logs", isDirectory: true) }
     static var statusFile: URL { supportDir.appendingPathComponent("host-status.json") }
 
-    /// The Mac folder shared into Wizard OS as its user-files folder (Runtipi media root). Chosen on first run;
+    /// The Mac folder shared into WizardOS as its user-files folder (Runtipi media root). Chosen on first run;
     /// nil = not chosen yet (the guest then keeps files on its own disk).
     static let filesShareTag = "wizard-files"
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }

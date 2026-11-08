@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared runtime environment for Wizard OS services on the VM host. Sourced, not executed.
+# Shared runtime environment for WizardOS services on the VM host. Sourced, not executed.
 export WIZARD_ROOT=/var/lib/wizard
 export RUNTIPI_ROOT=/home/wizard/runtipi
 export PATH=/home/wizard/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

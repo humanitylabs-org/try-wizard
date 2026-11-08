@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Wizard for Mac front door + first-run onboarding (Wizard OS 0.2 stack).
+"""Wizard for Mac front door + first-run onboarding (WizardOS 0.2 stack).
 
-Runs on the Wizard OS VM host as the `wizard` user (docker group). Everything else is a Runtipi app installed by
+Runs on the WizardOS VM host as the `wizard` user (docker group). Everything else is a Runtipi app installed by
 os.sh: Hermes Agent (`hermes-agent`), the Wizard shell with the Agent Service and Wizard UX (`wizard-shell`), Files,
 Transcriber, and so on. The Mac window always opens this server first:
 

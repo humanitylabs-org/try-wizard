@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build-time only (kernel command line has wizard.provision=1): install Wizard OS 0.2.0 with the real
+# Build-time only (kernel command line has wizard.provision=1): install WizardOS 0.2.0 with the real
 # one-liner (os.sh = wizard-app-manager get.sh, fresh mode), check it, strip per-box identity, power off.
 # Every step's time goes to /var/lib/wizard/provision.json so the build can report it.
 set -uo pipefail

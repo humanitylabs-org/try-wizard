@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Put a Wizard OS feed folder (latest.json + archive or parts) on Cloudflare R2 and print a signed test feed URL.
+"""Put a WizardOS feed folder (latest.json + archive or parts) on Cloudflare R2 and print a signed test feed URL.
 
   publish-r2.py <feed dir> [--bucket aiwizards-downloads] [--prefix os/<version>/] [--days 7]
 

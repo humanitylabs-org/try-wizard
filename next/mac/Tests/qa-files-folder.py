@@ -30,7 +30,7 @@ try:
  log=(E/'app.log').open('w');process=sp.Popen([str(APP/'Contents/MacOS/Wizard')],stdout=log,stderr=sp.STDOUT)
  time.sleep(3)
  records=[]
- for size,note in [('900x660',''),('640x460',''),('380x538',''),('380x538','Wizard OS download: about 1.27 GB. Local voice models download once in the background. Keep at least 20 GB of free disk space available.')]:
+ for size,note in [('900x660',''),('640x460',''),('380x538',''),('380x538','WizardOS download: about 1.27 GB. Local voice models download once in the background. Keep at least 20 GB of free disk space available.')]:
   qa('window-size '+size);qa('files-folder-preview '+note);time.sleep(.6);s=state()
   assert s['title']=='Choose your shared folder' and not s['overlayHidden']
   assert s['subtitleLinesLimit']==0

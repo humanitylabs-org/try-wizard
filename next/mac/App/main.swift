@@ -4,7 +4,7 @@ import CryptoKit
 import ServiceManagement
 import WebKit
 
-// Wizard: the native front end. Opens instantly and connects to a Wizard OS back end,
+// Wizard: the native front end. Opens instantly and connects to a WizardOS back end,
 // either on this Mac (run by the Wizard Host menu-bar service) or on another computer.
 
 // MARK: - Back-end connections
@@ -40,7 +40,7 @@ enum Store {
     }
 }
 
-// MARK: - Wizard OS installer (download on demand)
+// MARK: - WizardOS installer (download on demand)
 
 final class OSInstaller: NSObject, URLSessionDataDelegate {
     var onProgress: ((String, Double?) -> Void)?
@@ -62,19 +62,19 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     /// A feed names one archive, or the same archive split into ordered parts (each small enough for Cloudflare to
     /// cache at its edge). `sha256` is always the hash of the whole archive; each part also carries its own hash.
     struct Part: Decodable { let url: String; let bytes: Int64?; let sha256: String }
-    /// Apps Wizard OS fetches by itself right after first launch (voice), so the space they take is never a surprise.
+    /// Apps WizardOS fetches by itself right after first launch (voice), so the space they take is never a surprise.
     struct Background: Decodable { let label: String; let bytes: Int64?; let installBytes: Int64? }
     struct Feed: Decodable {
         let version: String; let url: String?; let sha256: String; let bytes: Int64?; let installBytes: Int64?
         let parts: [Part]?
         let background: [Background]?
-        /// Everything Wizard OS will take on this Mac once the background downloads finish.
+        /// Everything WizardOS will take on this Mac once the background downloads finish.
         var totalInstallBytes: Int64 { (installBytes ?? (11 << 30)) + (background ?? []).reduce(0) { $0 + ($1.installBytes ?? 0) } }
     }
 
     static func gb(_ b: Int64) -> String { String(format: "%.1f GB", Double(b) / 1e9) }
 
-    /// "Wizard OS will use about 6.4 GB on this Mac: 1.1 GB to download now, then 1.3 GB for voice in the background."
+    /// "WizardOS will use about 6.4 GB on this Mac: 1.1 GB to download now, then 1.3 GB for voice in the background."
     static func sizeNote(_ f: Feed) -> String {
         var s = "\(WizardOSName.text) will use about \(gb(f.totalInstallBytes)) on this Mac"
         if let b = f.bytes { s += ": \(gb(b)) to download now" }
@@ -85,7 +85,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         return s + "."
     }
 
-    /// Read the feed only to say how much space Wizard OS needs (shown before anything downloads).
+    /// Read the feed only to say how much space WizardOS needs (shown before anything downloads).
     func fetchSizeNote(_ done: @escaping (String?) -> Void) {
         var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 6
         URLSession.shared.dataTask(with: req) { data, resp, _ in
@@ -411,7 +411,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let h = try FileHandle(forWritingTo: disk); try h.truncate(atOffset: 64 << 30); try h.close()
         if fm.fileExists(atPath: dest.path) {
             // Keep the existing disk (the Wizard's memory, chats and installed apps); only replace boot files.
-            // A disk from a different stack (0.1/0.2 bundled Hermes vs the Runtipi-based Wizard OS) can't boot the new
+            // A disk from a different stack (0.1/0.2 bundled Hermes vs the Runtipi-based WizardOS) can't boot the new
             // kernel's system, so it's kept beside it as disk-previous.img instead and the new disk is used.
             let old = dest.appendingPathComponent("disk.img")
             func stack(_ dir: URL) -> String {
@@ -1191,8 +1191,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         begin()
     }
 
-    /// First run on this Mac: where the Wizard keeps its files. The folder is shared into Wizard OS (virtio-fs) as the
-    /// apps' user-files folder; app databases stay on the Wizard OS disk.
+    /// First run on this Mac: where the Wizard keeps its files. The folder is shared into WizardOS (virtio-fs) as the
+    /// apps' user-files folder; app databases stay on the WizardOS disk.
     func askFilesFolder(sizeNote: String? = nil) {
         let home = WizardShared.defaultFilesFolder
         let title = "Choose your shared folder"
@@ -1204,7 +1204,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                     actions: [("Use This Folder", #selector(useDefaultFilesFolder)),
                               ("Choose Folder…", #selector(chooseFilesFolder)),
                               ("Back", #selector(backToChooser))])
-        // Say how much space Wizard OS will take before anything downloads (only on this Mac's first install).
+        // Say how much space WizardOS will take before anything downloads (only on this Mac's first install).
         if sizeNote == nil && !WizardShared.osInstalled {
             installer.fetchSizeNote { [weak self] note in
                 guard let self, let note, self.title.stringValue == title, !self.overlay.isHidden else { return }
@@ -1233,7 +1233,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                         actions: [("Choose Folder…", #selector(chooseFilesFolder)), ("Back", #selector(backToChooser))])
             return
         }
-        // A running Wizard OS picks the share up on its next start.
+        // A running WizardOS picks the share up on its next start.
         if WizardShared.osInstalled { HostControl.send("restart") }
         begin()
     }
@@ -1416,7 +1416,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     private func loadFailed(_ error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
-        // Wizard OS on this Mac may still be bringing a service up: retry quietly before showing an error.
+        // WizardOS on this Mac may still be bringing a service up: retry quietly before showing an error.
         if Store.active?.kind == .thisMac, localRetries < 12 {
             localRetries += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardShared.localSetupURL) }
@@ -1942,7 +1942,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // Simulate a Mac that can't reach the download feed.
             UserDefaults.standard.set("http://127.0.0.1:9/none.json", forKey: "osFeedURL"); addThisMac()
         case "install-file":
-            // Same path as "Choose Wizard OS File…" after the user picks a file.
+            // Same path as "Choose WizardOS File…" after the user picks a file.
             // Several files (parts) are separated by "|".
             let urls = arg.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
             controller.showOverlay("Setting up Wizard on this Mac", "Checking \(urls.first?.lastPathComponent ?? "")…", progress: nil)
@@ -2264,7 +2264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func addThisMac() { controller.chooseThisMac(); rebuildWizardMenu() }
     @objc func addRemote() { controller.chooseRemote(); rebuildWizardMenu() }
-    /// Backs up the Hermes on this Mac with its own `hermes backup` and makes it the agent in Wizard OS on this Mac
+    /// Backs up the Hermes on this Mac with its own `hermes backup` and makes it the agent in WizardOS on this Mac
     /// (bundled wizard-bring-hermes posts it to the VM's front door). The Mac's Hermes is left as it is.
     @objc func bringHermes() {
         let alert = NSAlert()

@@ -1,5 +1,5 @@
 [Unit]
-Description=Wizard OS control channel from the Mac
+Description=WizardOS control channel from the Mac
 After=network.target
 
 [Service]

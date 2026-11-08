@@ -1,5 +1,5 @@
 [Unit]
-Description=Install Wizard OS with os.sh (image build only)
+Description=Install WizardOS with os.sh (image build only)
 ConditionKernelCommandLine=wizard.provision=1
 Wants=network-online.target
 After=network-online.target systemd-resolved.service wizard-firstboot.service
