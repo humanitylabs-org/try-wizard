@@ -165,6 +165,12 @@ report = {"disabled_messaging": [], "paused_jobs": []}
 # 1. Wizard's wiring wins: the VM terminal, the app gateway, Wizard's skills and plugins, the API server.
 if keep.get("terminal") is not None:
     cfg["terminal"] = keep["terminal"]
+# The AI runs through Wizard's own connections (James, 31 Oct, try-wizard#51): the imported Hermes's model and
+# provider choice don't come along, or the agent would ask a login that stayed on the old machine.
+if keep.get("model") is not None:
+    cfg["model"] = keep["model"]
+    for k in ("fallback_model", "fallback_providers"):
+        cfg.pop(k, None)
 if keep.get("mcp_wizard") is not None:
     cfg.setdefault("mcp_servers", {})
     if not isinstance(cfg["mcp_servers"], dict): cfg["mcp_servers"] = {}
@@ -184,6 +190,13 @@ if keep.get("api_server") is not None:
     platforms["api_server"] = keep["api_server"]
 else:
     platforms.pop("api_server", None)
+# Hermes also reads platform blocks nested under `gateway:` (`gateway.platforms.<p>`, then `gateway.<p>`, which wins
+# last). An imported `gateway.platforms.api_server.enabled: false` (common on a desktop Hermes) would keep the API
+# server the Agent Service talks to switched off, so only Wizard's top-level block may speak for it.
+gw = cfg.get("gateway") if isinstance(cfg.get("gateway"), dict) else {}
+nested = [gw.get("platforms") if isinstance(gw.get("platforms"), dict) else {}, gw]
+for section in nested:
+    section.pop("api_server", None)
 
 # 2. Messaging off: an explicit `enabled: false` beats credentials in .env, and the credentials stay for later.
 from gateway.config import Platform
@@ -194,6 +207,18 @@ except Exception:
 from hermes_cli.config import load_env
 env = load_env() or {}
 names = set(platforms) - {"api_server"}
+for section in nested:
+    for name, block in section.items():
+        if name == "platforms" or not isinstance(block, dict):
+            continue
+        try:
+            Platform(name)
+        except ValueError:
+            continue
+        if block.get("enabled") is not False:
+            names.add(name)
+        if block.get("enabled") is True:   # a nested enable would win over the top-level disable below
+            block["enabled"] = False
 for plat, keys in CREDS.items():
     if any(env.get(k) for k in keys):
         names.add(plat.value)
@@ -229,6 +254,7 @@ def wizard_wiring() -> dict:
     cfg = cfg if isinstance(cfg, dict) else {}
     plugins = (cfg.get("plugins") or {}).get("enabled") or []
     return {"terminal": cfg.get("terminal"),
+            "model": cfg.get("model"),
             "mcp_wizard": (cfg.get("mcp_servers") or {}).get("wizard"),
             "external_dirs": [d for d in ((cfg.get("skills") or {}).get("external_dirs") or []) if "wizard" in str(d)],
             "plugins": [p for p in plugins if p in WIZARD_PLUGINS],
@@ -249,6 +275,50 @@ def env_merge(wizard_lines: list[str]) -> list[str]:
     os.chown(tmp, UID, GID)
     os.replace(tmp, envp)
     return sorted(set(replaced))
+
+
+def read_wizard_auth() -> bytes | None:
+    """Snapshot an ordinary auth file without following a planted final-component link."""
+    import stat
+
+    try:
+        fd = os.open(DATA / "auth.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("Wizard auth.json must be a regular file")
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def keep_wizard_auth(wizard_auth: bytes | None) -> bool:
+    """Restore Wizard's stock auth.json sign-ins instead of the imported auth.json.
+    Provider API keys held separately in .env are not changed by this helper."""
+    auth = DATA / "auth.json"
+    if wizard_auth is None:
+        auth.unlink(missing_ok=True)
+        return False
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(prefix="auth.json.wizard-import-", dir=DATA)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            fd = None  # the file object now owns the descriptor, including on failure
+            os.fchmod(f.fileno(), 0o600)
+            f.write(wizard_auth)
+            f.flush()
+            os.fchown(f.fileno(), UID, GID)
+        os.replace(tmp, auth)
+        return True
+    finally:
+        if fd is not None:
+            os.close(fd)
+        Path(tmp).unlink(missing_ok=True)
 
 
 def tighten_vm_key() -> None:
@@ -358,10 +428,12 @@ def do_import(zip_path: Path) -> dict:
 
 
 def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], rec: dict) -> dict:
+    wizard_auth = read_wizard_auth()   # Wizard's AI connections (ChatGPT/Claude)
     log("restoring the backup with stock hermes import")
     in_engine(image, ["/opt/hermes/.venv/bin/hermes", "import", "--force", "/import/import.zip"],
               mounts=[f"{work}:/import:ro"])
     rec["env_replaced"] = env_merge(wizard_env)
+    rec["kept_wizard_ai"] = keep_wizard_auth(wizard_auth)
     report = json.loads(in_engine(image, ["/opt/hermes/.venv/bin/python", "-c", POST_IMPORT],
                                   stdin=json.dumps(wiring)).strip().splitlines()[-1])
     rec.update(report)
