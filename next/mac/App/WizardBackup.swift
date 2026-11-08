@@ -29,7 +29,7 @@ final class WizardBackupClient: NSObject, URLSessionTaskDelegate {
             if let message = object?["error"] as? String, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw BackupFailure(String(message.prefix(300)))
             }
-            throw BackupFailure("Wizard could not complete the backup request. Check that Wizard OS is running and up to date.")
+            throw BackupFailure("Wizard could not complete the backup request. Check that \(WizardOSName.text) is running and up to date.")
         }
         return result
     }
@@ -109,7 +109,7 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
             let item = menu.addItem(withTitle: title, action: selector, keyEquivalent: "")
             item.target = self; items.append(item)
         }
-        let item = NSMenuItem(title: "Backup needs Wizard OS update", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "Backup needs \(WizardOSName.text) update", action: nil, keyEquivalent: "")
         item.isEnabled = false; menu.addItem(item); note = item
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
@@ -124,7 +124,7 @@ final class WizardBackupController: NSObject, NSMenuItemValidation {
         let info = local ? (try? await client.call("capabilities")) : nil
         supported = (info?["version"] as? Int) == 1
         for item in items { item.isEnabled = supported && local }
-        note?.title = local ? "Backup needs Wizard OS update" : "Select This Mac to back up or restore"
+        note?.title = local ? "Backup needs \(WizardOSName.text) update" : "Select This Mac to back up or restore"
         note?.isHidden = supported && local
     }
     private func alert(_ title: String, _ message: String, buttons: [String] = ["OK"]) -> NSAlert {

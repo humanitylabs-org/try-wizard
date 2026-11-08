@@ -20,3 +20,16 @@ enum WizardBrand {
         return mark
     }
 }
+
+/// The product name people read: "WizardOS", one word (wizard-os#436). Ids, paths and URLs keep their names.
+/// Off by default, so every string still says "Wizard OS":
+/// `defaults write org.humanitylabs.wizard.mvp WizardOSName -bool YES` turns it on (Wizard and Wizard Host).
+enum WizardOSName {
+    static let key = "WizardOSName"
+    static var isOn: Bool {
+        let defaults = Bundle.main.bundleIdentifier == WizardShared.appBundleID
+            ? UserDefaults.standard : UserDefaults(suiteName: WizardShared.appBundleID)
+        return defaults?.bool(forKey: key) ?? false
+    }
+    static var text: String { isOn ? "WizardOS" : "Wizard OS" }
+}

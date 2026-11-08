@@ -594,12 +594,12 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Wizard", action: #selector(openWizard), keyEquivalent: "o").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Restart Wizard OS", action: #selector(restartOS), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Stop Wizard OS", action: #selector(stopOS), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Start Wizard OS", action: #selector(startOS), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Restart \(WizardOSName.text)", action: #selector(restartOS), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Stop \(WizardOSName.text)", action: #selector(stopOS), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Start \(WizardOSName.text)", action: #selector(startOS), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Show Logs", action: #selector(showLogs), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Wizard (stops Wizard OS)", action: #selector(quitAll), keyEquivalent: "q").target = self
+        menu.addItem(withTitle: "Quit Wizard (stops \(WizardOSName.text))", action: #selector(quitAll), keyEquivalent: "q").target = self
         item.menu = menu
 
         // One Wizard icon: Wizard.app owns it while it runs; this one only shows when the app isn't running.
@@ -702,12 +702,12 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func refresh() {
         let text: String
         switch vm.state {
-        case .notInstalled: text = "Wizard OS is not installed"
-        case .stopped: text = "Wizard OS is stopped"
-        case .starting: text = "Wizard OS is starting…"
+        case .notInstalled: text = "\(WizardOSName.text) is not installed"
+        case .stopped: text = "\(WizardOSName.text) is stopped"
+        case .starting: text = "\(WizardOSName.text) is starting…"
         case .running: text = vm.bootSeconds.map { String(format: "Wizard is running (woke in %.1fs)", $0) } ?? "Wizard is running"
-        case .stopping: text = "Wizard OS is shutting down…"
-        case .error: text = "Wizard OS hit a problem — see logs"
+        case .stopping: text = "\(WizardOSName.text) is shutting down…"
+        case .error: text = "\(WizardOSName.text) hit a problem — see logs"
         }
         statusLine.title = text
         item?.button?.toolTip = text
