@@ -88,17 +88,51 @@ enum WizardShared {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Wizard MVP", isDirectory: true)
     }
+    // MARK: files-share-decision begin (extracted verbatim by Tests/run_onboarding_privacy_checks.py)
+    /// Raw saved choice. For display and removal protection ONLY: never mount or touch it from here.
     static var filesFolder: URL? {
+        guard let p = savedFilesFolder?.path else { return nil }
+        return URL(fileURLWithPath: p, isDirectory: true)
+    }
+    /// True only when an explicit user sharing action wrote the choice (it carries `"explicit": true`).
+    /// Builds before 312 wrote no marker, including the folder they auto-selected at startup.
+    static var filesFolderIsExplicit: Bool { savedFilesFolder?.explicit ?? false }
+    private static var savedFilesFolder: (path: String, explicit: Bool)? {
         guard let d = try? Data(contentsOf: filesFolderFile),
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let p = o["path"] as? String, !p.isEmpty else { return nil }
-        return URL(fileURLWithPath: p, isDirectory: true)
+        return (p, o["explicit"] as? Bool == true)
     }
+    /// String-only comparison (no stat, no symlink resolution) so deciding can never touch ~/Documents.
+    static func normalizedSharePath(_ path: String) -> String {
+        var parts: [Substring] = []
+        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
+            if part == "." { continue }
+            if part == ".." { if !parts.isEmpty { parts.removeLast() }; continue }
+            parts.append(part)
+        }
+        return "/" + parts.joined(separator: "/")
+    }
+    /// A saved share equal to the legacy auto default with no explicit-consent marker is a non-explicit
+    /// leftover of the old startup auto-selection. It is neither created, opened, statted nor mounted.
+    static func isLegacyAutoShare(path: String, explicit: Bool, legacyDefaultPath: String) -> Bool {
+        !explicit && normalizedSharePath(path).lowercased() == normalizedSharePath(legacyDefaultPath).lowercased()
+    }
+    /// The ONE folder the VM may mount at boot and Finder may open: the saved share minus a
+    /// non-explicit legacy default. nil = the guest uses its own disk. files-folder.json is never rewritten.
+    static var activeSharedFolder: URL? {
+        guard let saved = savedFilesFolder else { return nil }
+        guard !isLegacyAutoShare(path: saved.path, explicit: saved.explicit, legacyDefaultPath: defaultFilesFolder.path) else { return nil }
+        return URL(fileURLWithPath: saved.path, isDirectory: true)
+    }
+    /// A legacy auto share is saved but deliberately not connected (for explanation in the sharing prompt).
+    static var legacyAutoShareIgnored: Bool { filesFolder != nil && activeSharedFolder == nil }
     static func setFilesFolder(_ url: URL) throws {
         try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        let d = try JSONSerialization.data(withJSONObject: ["path": url.path], options: [.prettyPrinted])
+        let d = try JSONSerialization.data(withJSONObject: ["path": url.path, "explicit": true], options: [.prettyPrinted, .sortedKeys])
         try d.write(to: filesFolderFile, options: .atomic)
     }
+    // MARK: files-share-decision end
 
     static var localSetupURL: URL { URL(string: "http://127.0.0.1:\(setupPort)/")! }
     static var localHealthURL: URL { URL(string: "http://127.0.0.1:\(setupPort)/healthz")! }

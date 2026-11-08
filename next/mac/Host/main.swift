@@ -509,15 +509,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
         c.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
 
-        // Optional, explicitly chosen Mac folder. Nil deliberately adds no device:
-        // wizard-media uses the guest disk. Preserve saved shares on normal boots.
-        if let folder = WizardShared.filesFolder {
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let fs = VZVirtioFileSystemDeviceConfiguration(tag: WizardShared.filesShareTag)
-            fs.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: folder, readOnly: false))
-            c.directorySharingDevices = [fs]
-            log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
-        }
+        addFilesShare(to: c)
         if let payload = WizardShared.guestUpdatePayload {
             let share = VZVirtioFileSystemDeviceConfiguration(tag: "wizard-update")
             share.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: payload, readOnly: true))
@@ -536,6 +528,21 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.serialPorts = [serial]
         try c.validate()
         return c
+    }
+
+    /// Optional, explicitly chosen Mac folder. Nil adds no device: wizard-media uses the guest disk.
+    /// Only `activeSharedFolder` is ever created or mounted at boot. A saved auto-default share left by the
+    /// old build (no explicit marker) is skipped here without any create/stat, so startup never asks for Documents.
+    func addFilesShare(to c: VZVirtualMachineConfiguration) {
+        if let folder = WizardShared.activeSharedFolder {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let fs = VZVirtioFileSystemDeviceConfiguration(tag: WizardShared.filesShareTag)
+            fs.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: folder, readOnly: false))
+            c.directorySharingDevices = [fs]
+            log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
+        } else if WizardShared.legacyAutoShareIgnored {
+            log("saved Files folder is the old automatic default (no explicit consent); not connected")
+        }
     }
 
     private func stableMAC() -> VZMACAddress {

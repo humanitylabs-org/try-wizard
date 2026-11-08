@@ -3,6 +3,21 @@ import Foundation
 // exposes the C geometry type, but not CoreGraphics' Swift initializer.
 import CoreGraphics
 
+// Access-detection spy: shadows Foundation.FileManager for the extracted production code, so ANY
+// create/stat/exists/list of a path is recorded. Real calls still run (against disposable fixture dirs).
+final class FileManager {
+    static let `default` = FileManager()
+    var touched: [String] = []
+    private var real: Foundation.FileManager { Foundation.FileManager.default }
+    func createDirectory(at url: URL, withIntermediateDirectories flag: Bool) throws {
+        touched.append(url.path); try real.createDirectory(at: url, withIntermediateDirectories: flag)
+    }
+    func fileExists(atPath path: String) -> Bool { touched.append(path); return real.fileExists(atPath: path) }
+    var homeDirectoryForCurrentUser: URL { real.homeDirectoryForCurrentUser }
+    func contentsOfDirectory(atPath path: String) throws -> [String] { touched.append(path); return try real.contentsOfDirectory(atPath: path) }
+    func attributesOfItem(atPath path: String) throws -> [Foundation.FileAttributeKey: Any] { touched.append(path); return try real.attributesOfItem(atPath: path) }
+}
+
 enum Response { case alertFirstButtonReturn, cancel, OK }
 final class NSAlert {
     static var response: Response = .cancel
@@ -49,7 +64,9 @@ enum WizardShared {
     static let filesShareTag = "wizard-files"
     static let localSetupURL = URL(string: "http://127.0.0.1:48030/")!
     static var defaultFilesFolder: URL { defaultReads += 1; return root.appendingPathComponent("Documents/Wizard MVP") }
-    static var filesFolder: URL? { shareReads += 1; return share }
+    static var usePersisted = false
+    static var filesFolder: URL? { shareReads += 1; return usePersisted ? PersistedShare.filesFolder : share }
+    // PRODUCTION_ACTIVE_MOCK
     static func setFilesFolder(_ url: URL) throws { writes += 1; share = url }
 }
 enum HostControl {
@@ -168,6 +185,10 @@ check("picker-cancel-preserves-share", WizardShared.writes == 0 && HostControl.c
 enum PersistedShare {
     static var supportDir: URL { WizardShared.root.appendingPathComponent("support") }
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
+    // Path accessor spy: the legacy default is only ever computed as a string (no disk access).
+    static var defaultFilesFolderReads = 0
+    static var defaultFilesFolder: URL { defaultFilesFolderReads += 1; return legacyDefault }
+    static var legacyDefault: URL { WizardShared.root.appendingPathComponent("Documents/Wizard MVP", isDirectory: true) }
     // PRODUCTION_PERSISTENCE
 }
 check("persisted-unset-is-supported", PersistedShare.filesFolder == nil)
@@ -177,14 +198,18 @@ let priorBytes = try Data(contentsOf: PersistedShare.filesFolderFile)
 _ = PersistedShare.filesFolder
 check("persisted-read-does-not-migrate", try Data(contentsOf: PersistedShare.filesFolderFile) == priorBytes)
 
-final class VZSharedDirectory { let url: URL; let readOnly: Bool; init(url: URL, readOnly: Bool) { self.url = url; self.readOnly = readOnly } }
+var sharedDirectoryInits: [URL] = []
+final class VZSharedDirectory { let url: URL; let readOnly: Bool; init(url: URL, readOnly: Bool) { self.url = url; self.readOnly = readOnly; sharedDirectoryInits.append(url) } }
 final class VZSingleDirectoryShare { let directory: VZSharedDirectory; init(directory: VZSharedDirectory) { self.directory = directory } }
 final class VZVirtioFileSystemDeviceConfiguration { let tag: String; var share: VZSingleDirectoryShare?; init(tag: String) { self.tag = tag } }
 final class Configuration { var directorySharingDevices: [VZVirtioFileSystemDeviceConfiguration] = [] }
-func log(_ text: String) {}
+typealias VZVirtualMachineConfiguration = Configuration
+var hostLog: [String] = []
+func log(_ text: String) { hostLog.append(text) }
+// PRODUCTION_HOST_SHARE
 func shareConfiguration() -> Configuration {
     let c = Configuration()
-    // PRODUCTION_HOST_SHARE
+    addFilesShare(to: c)
     return c
 }
 WizardShared.share = nil
@@ -194,5 +219,117 @@ let device = shareConfiguration().directorySharingDevices.first
 check("host-saved-share-exact-subtree", device?.tag == "wizard-files" && device?.share?.directory.url == saved && device?.share?.directory.readOnly == false)
 let finalSentinel = try String(contentsOf: sentinel)
 check("shared-files-never-moved-or-deleted", finalSentinel == "keep")
+
+// ---- Upgrade from the PRIOR build's persisted state (build 312) ----------------------------------------
+// The old build auto-saved ~/Documents/Wizard MVP into files-folder.json at startup (no consent marker).
+// These checks seed that file with the old build's own writer and drive the real Host boot decision.
+enum LegacyD22 {
+    static var supportDir: URL { PersistedShare.supportDir }
+    static var filesFolderFile: URL { PersistedShare.filesFolderFile }
+    // PRODUCTION_LEGACY_WRITER
+}
+func freshSupport() throws {
+    try? Foundation.FileManager.default.removeItem(at: PersistedShare.supportDir)
+    try Foundation.FileManager.default.createDirectory(at: PersistedShare.supportDir, withIntermediateDirectories: true)
+}
+func seedLegacyAutoShare(_ url: URL) throws -> Data {
+    try freshSupport(); try LegacyD22.setFilesFolder(url)
+    return try Data(contentsOf: PersistedShare.filesFolderFile)
+}
+func resetSpies() {
+    FileManager.default.touched = []; sharedDirectoryInits = []; hostLog = []
+    PersistedShare.defaultFilesFolderReads = 0; WizardShared.usePersisted = true
+}
+func touchedUnder(_ folder: URL) -> [String] {
+    let prefix = folder.path.lowercased(), documents = folder.deletingLastPathComponent().path.lowercased()
+    return FileManager.default.touched.filter { let p = $0.lowercased(); return p == prefix || p.hasPrefix(prefix + "/") || p == documents || p.hasPrefix(documents + "/") }
+}
+func exists(_ url: URL) -> Bool { Foundation.FileManager.default.fileExists(atPath: url.path) }
+let legacyDefault = PersistedShare.legacyDefault
+let escapedLegacy = legacyDefault.path.replacingOccurrences(of: "/", with: "\\/")
+
+// The seed must be byte-for-byte what the old build wrote: pretty JSON, escaped slashes, NO marker.
+let seedBytes = try seedLegacyAutoShare(legacyDefault)
+check("legacy_seed_is_exactly_what_the_old_build_wrote", String(data: seedBytes, encoding: .utf8) == "{\n  \"path\" : \"\(escapedLegacy)\"\n}")
+
+do {
+    precondition(!exists(legacyDefault) && !exists(legacyDefault.deletingLastPathComponent()))
+    let before = try seedLegacyAutoShare(legacyDefault); resetSpies()
+    let configuration = shareConfiguration()
+    let touched = touchedUnder(legacyDefault)
+    let after = try Data(contentsOf: PersistedShare.filesFolderFile)
+    if !touched.isEmpty { print("DETAIL touched: \(touched)") }
+    if !sharedDirectoryInits.isEmpty { print("DETAIL VZSharedDirectory: \(sharedDirectoryInits.map { $0.path })") }
+    if exists(legacyDefault.deletingLastPathComponent()) { print("DETAIL Documents-like parent was created") }
+    check("test_upgrade_with_legacy_default_share_does_not_touch_documents",
+          configuration.directorySharingDevices.isEmpty && sharedDirectoryInits.isEmpty && touched.isEmpty
+          && !exists(legacyDefault) && !exists(legacyDefault.deletingLastPathComponent()))
+    check("test_legacy_share_file_is_never_rewritten_by_boot", before == after)
+    try? Foundation.FileManager.default.removeItem(at: legacyDefault.deletingLastPathComponent())
+}
+do {
+    // Same decision when the legacy folder really exists with the owner's files: still not opened or listed.
+    let before = try seedLegacyAutoShare(legacyDefault)
+    try Foundation.FileManager.default.createDirectory(at: legacyDefault, withIntermediateDirectories: true)
+    let owner = legacyDefault.appendingPathComponent("owner-file.txt"); try "mine".write(to: owner, atomically: true, encoding: .utf8)
+    resetSpies(); let configuration = shareConfiguration()
+    let ownerText = try String(contentsOf: owner, encoding: .utf8), savedAfter = try Data(contentsOf: PersistedShare.filesFolderFile)
+    check("test_existing_legacy_folder_is_not_mounted_or_opened_but_left_intact",
+          configuration.directorySharingDevices.isEmpty && sharedDirectoryInits.isEmpty && touchedUnder(legacyDefault).isEmpty
+          && ownerText == "mine" && savedAfter == before)
+    try Foundation.FileManager.default.removeItem(at: legacyDefault.deletingLastPathComponent())
+}
+do {
+    // Spelling variants of the legacy default are still the same legacy default (string compare only).
+    var ok = true
+    for variant in [legacyDefault.path + "/", WizardShared.root.path + "/Documents/./Wizard MVP", WizardShared.root.path + "/Documents/x/../Wizard MVP",
+                    WizardShared.root.path + "/documents/wizard mvp", WizardShared.root.path + "//Documents//Wizard MVP"] {
+        try freshSupport()
+        let data = try JSONSerialization.data(withJSONObject: ["path": variant], options: [.prettyPrinted])
+        try data.write(to: PersistedShare.filesFolderFile)
+        resetSpies(); let configuration = shareConfiguration()
+        if !(configuration.directorySharingDevices.isEmpty && sharedDirectoryInits.isEmpty && touchedUnder(legacyDefault).isEmpty) { ok = false; print("DETAIL variant mounted/touched: \(variant)") }
+        if exists(legacyDefault.deletingLastPathComponent()) { ok = false; print("DETAIL variant created Documents: \(variant)") }
+        try? Foundation.FileManager.default.removeItem(at: legacyDefault.deletingLastPathComponent())
+    }
+    check("test_legacy_default_spelling_variants_are_not_touched", ok)
+}
+do {
+    let other = WizardShared.root.appendingPathComponent("Elsewhere/My Files", isDirectory: true)
+    try Foundation.FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+    _ = try seedLegacyAutoShare(other); resetSpies()
+    let device = shareConfiguration().directorySharingDevices.first
+    check("test_other_path_legacy_share_is_honored",
+          device?.tag == "wizard-files" && device?.share?.directory.url == other && device?.share?.directory.readOnly == false && touchedUnder(legacyDefault).isEmpty)
+}
+do {
+    let chosen = WizardShared.root.appendingPathComponent("Chosen Folder", isDirectory: true)
+    try freshSupport(); try PersistedShare.setFilesFolder(chosen)
+    let written = try String(contentsOf: PersistedShare.filesFolderFile, encoding: .utf8)
+    check("test_explicit_share_carries_explicit_marker", written.contains("\"explicit\" : true"))
+    resetSpies()   // "relaunch": a new boot decision from the saved file alone
+    let device = shareConfiguration().directorySharingDevices.first
+    check("test_explicit_share_is_honored_on_relaunch", device?.share?.directory.url == chosen && device?.tag == "wizard-files")
+    try freshSupport(); try PersistedShare.setFilesFolder(legacyDefault)
+    resetSpies()
+    let explicitAtDefault = shareConfiguration().directorySharingDevices.first
+    check("test_explicit_share_at_legacy_default_path_is_honored", explicitAtDefault?.share?.directory.url == legacyDefault)
+    try? Foundation.FileManager.default.removeItem(at: legacyDefault.deletingLastPathComponent())
+}
+do {
+    // Detector proof: the pre-312 boot rule applied to the same seed MUST be caught by the spy.
+    _ = try seedLegacyAutoShare(legacyDefault); resetSpies()
+    let c = Configuration()
+    if let folder = PersistedShare.filesFolder {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        c.directorySharingDevices = [VZVirtioFileSystemDeviceConfiguration(tag: "x")]
+        _ = VZSharedDirectory(url: folder, readOnly: false)
+    }
+    check("test_access_detector_catches_a_legacy_folder_create_and_mount",
+          !touchedUnder(legacyDefault).isEmpty && !sharedDirectoryInits.isEmpty && exists(legacyDefault))
+    try? Foundation.FileManager.default.removeItem(at: legacyDefault.deletingLastPathComponent())
+}
+// PRODUCTION_ACTIVE_CHECKS
+WizardShared.usePersisted = false
 print("RESULT \(checks) checks; \(failures) failed. Mocked UI/Host; no real TCC/VM.")
 exit(failures == 0 ? 0 : 1)

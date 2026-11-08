@@ -1195,7 +1195,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         showOverlay("Share a Mac folder with Wizard?",
                     "Wizard already keeps files on its own disk. You can upload selected files without sharing a folder.\n\n"
                     + "If you choose a folder, Wizard can read and change everything inside that folder, not the rest of your Mac. "
-                    + "Sharing a folder restarts Wizard OS and makes that folder its Files view. Existing files on Wizard's disk stay there; they are not moved or deleted.",
+                    + "Sharing a folder restarts Wizard OS and makes that folder its Files view. Existing files on Wizard's disk stay there; they are not moved or deleted."
+                    + (WizardShared.legacyAutoShareIgnored ? "\n\nAn earlier Wizard version picked a Mac folder for you automatically. It is no longer connected, and nothing in it was changed. Choose it below only if you want to share it again." : ""),
                     spinning: false,
                     actions: [("Choose Folder…", #selector(chooseFilesFolder)), ("Cancel", #selector(cancelFilesFolder))])
     }
@@ -1268,7 +1269,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// prompt) as an invalid directory-sharing configuration. macOS never asks twice, so Try Again alone can't help.
     static func isFolderBlocked(_ error: String) -> Bool { error.localizedCaseInsensitiveContains("directory sharing") }
     func showFolderBlocked() {
-        let folder = WizardShared.filesFolder ?? WizardShared.defaultFilesFolder
+        let folder = WizardShared.activeSharedFolder ?? WizardShared.defaultFilesFolder
         let path = (folder.path as NSString).abbreviatingWithTildeInPath
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].standardizedFileURL.path
         let item = folder.standardizedFileURL.path.hasPrefix(documents + "/") ? "Documents Folder" : "this folder"
@@ -2354,7 +2355,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func showFilesFolder() {
         guard Store.active?.kind == .thisMac else { openView("/files"); return }
-        if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
+        // Only an explicit share is opened; a legacy auto default is never touched, it offers sharing instead.
+        if let f = WizardShared.activeSharedFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
     }
 }
 
