@@ -1,0 +1,6 @@
+{
+  "scope": "production serial helper + source lifecycle assertions; no VM acceptance",
+  "hostSHA256": "0fb511a6936b8f48a895a50c6621bce2332a7a81b70549f5aeb360d2c03c788f",
+  "helperSHA256": "4cf6da429e6b7485060d0523a3ac59eaf011dfc118eb3cbefb9250344991e6af",
+  "stdout": "COLD_SERIAL_REGRESSIONS_PASS checks=21"
+}

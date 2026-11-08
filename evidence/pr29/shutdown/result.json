@@ -1,0 +1,7 @@
+{
+  "scope": "actual production stop + prepareUpdate + activation; fake VZ I/O, accelerated deadline, fixture bundle path",
+  "hostSHA256": "0fb511a6936b8f48a895a50c6621bce2332a7a81b70549f5aeb360d2c03c788f",
+  "activationSHA256": "65e5be30f0ac561426e5b7ed002a13831bb1f371459bcead621e18f7e985f3b3",
+  "fixtureSHA256": "350196c6446df17fb3bd316828ac8c0e287c924245cb6cc998a77451a593cc77",
+  "stdout": "STOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=false applyFailure=false concurrent=false\nSTOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=false applyFailure=true concurrent=false\nSTOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=true applyFailure=false concurrent=false\nSTOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=true applyFailure=true concurrent=false\nSTOP_FAILURE_PRESERVES_OWNERSHIP_BACKUP_NO_ACTIVATION_PASS cold=true applyFailure=false concurrent=true\nACTUAL_PREPARE_CLEAN_STOP_PASS cold=false\nACTUAL_PREPARE_CLEAN_STOP_PASS cold=true\nUPDATE_SHUTDOWN_SCENARIOS_PASS 7"
+}

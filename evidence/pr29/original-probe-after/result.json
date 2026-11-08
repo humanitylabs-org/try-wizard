@@ -1,0 +1,7 @@
+{
+  "scope": "actual waitColdBoot extracted unchanged; stand-in paths/status; no native consent/VM acceptance",
+  "production_sha256": "65e5be30f0ac561426e5b7ed002a13831bb1f371459bcead621e18f7e985f3b3",
+  "method_sha256": "3f9da8924895dceacc89112361802ac62cf6e424c8e69d010128625fc744dd5d",
+  "stdout": "DELAYED_BOOT_STAYS_WAITING_PASS\nFRESH_CONSOLE_STARTS_150S_BUDGET_PASS\nSTALE_VERDICT_STARTS_150S_BUDGET=false\n",
+  "stale_console_verdict_bypasses_new_boot_wait": false
+}

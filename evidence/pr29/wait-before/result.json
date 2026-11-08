@@ -1,0 +1,9 @@
+{
+  "scope": "unchanged production waitColdBoot; isolated file/status I/O and captured scheduling; no real permission dialog or VM",
+  "production_sha256": "e6da5b955f624589f0f9b2441bc40b9a6413aab74c9c66c243da813850bd2e53",
+  "method_sha256": "3924191415c19cb68448d0e7f5f35af2fe66ddd58536572e4498a69fc8239783",
+  "fixture_sha256": "6de9d8b8bf81dc6818880d87eb8f4032f46aeb5a595272f092479ef5c43188c8",
+  "exit_code": 0,
+  "stdout": "STALE_VERDICT_STARTS_150S_BUDGET=true\nFRESH_CONSOLE_AND_BOTH_VERDICTS_START_150S_BUDGET_PASS\nDELAYED_BOOT_STAYS_WAITING_PASS\nCURRENT_HOST_ERROR_FAILS_PROMPTLY_OLD_ERROR_IGNORED_PASS\nPREBOOT_15_MINUTE_BOUND_PASS\nCOLD_BOOT_WAIT_REGRESSIONS_PASS\n",
+  "stale_console_verdict_bypasses_new_boot_wait": true
+}

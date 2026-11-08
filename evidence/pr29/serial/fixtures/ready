@@ -1,0 +1,4 @@
+kernel init=/bin/sh
+# /bin/sh: 0: can't access tty; job control turned off
+# /bin/sh: 0: can't access tty; job control turned off
+# 

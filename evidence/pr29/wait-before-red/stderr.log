@@ -1,0 +1,1 @@
+probe/main.swift:81: Precondition failed: stale verdict must not start the new boot budget

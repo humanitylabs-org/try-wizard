@@ -1,0 +1,10 @@
+BRAND_ICON_OK 0a775ba954a8a1fafcc3fef901fd6cafb4a3ff1256ad07a6e9a1368269f340cf
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Library/LoginItems/Wizard Host.app: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app/Contents/Frameworks/Sparkle.framework: replacing existing signature
+/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app: replacing existing signature
+5.1M	/Volumes/ThalesMedia/Development/try-wizard-29/next/mac/dist/Wizard.app
+BUILD_OK
