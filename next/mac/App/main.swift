@@ -690,7 +690,7 @@ enum WizardTitleBarDoubleClick {
     /// `AppleActionOnDoubleClick` is "Fill", "Maximize" (Zoom), "Minimize" or "None"; older systems
     /// only set `AppleMiniaturizeOnDoubleClick`. Unset means the macOS default, which zooms.
     static func action(for value: String?, legacyMinimize: Bool) -> Action {
-        switch value {
+        switch value ?? "" {
         case "Minimize": return .minimize
         case "None": return .none
         case "Fill", "Maximize": return .zoom
