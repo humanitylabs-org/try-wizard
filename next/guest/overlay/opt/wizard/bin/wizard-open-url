@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open an https URL in the Mac's default browser through the Wizard OS vsock bridge."""
+"""Open an https URL in the Mac's default browser through the WizardOS vsock bridge."""
 import socket, sys
 from urllib.parse import urlparse
 HOST_CID, PORT = 2, 9101

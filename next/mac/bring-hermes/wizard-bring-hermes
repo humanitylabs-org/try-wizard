@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bring your Hermes into Wizard: back up the Hermes on this Mac with its own `hermes backup`, then hand the backup to
-Wizard OS, which makes it the agent inside Wizard (memory, skills, chats, settings and sign-ins).
+WizardOS, which makes it the agent inside Wizard (memory, skills, chats, settings and sign-ins).
 
     wizard-bring-hermes [--hermes PATH] [--hermes-home DIR] [--port 48030]
     wizard-bring-hermes --undo [--port 48030]
@@ -30,7 +30,7 @@ def find_hermes(arg: str | None) -> str:
 
 
 def talk(port: int, path: str, body: Path | None) -> dict:
-    """POST to Wizard OS's front door on this Mac (127.0.0.1:<port>, bridged into the VM)."""
+    """POST to WizardOS's front door on this Mac (127.0.0.1:<port>, bridged into the VM)."""
     import http.client
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3600)
     headers = {"X-Wizard-Import": "hermes-backup", "Content-Type": "application/zip" if body else "application/json"}
@@ -59,7 +59,7 @@ def main() -> int:
     ap.add_argument("--hermes")
     ap.add_argument("--hermes-home")
     ap.add_argument("--port", type=int, default=int(os.environ.get("WIZARD_IMPORT_PORT") or 48030),
-                    help="Wizard OS front door on this Mac (default 48030)")
+                    help="WizardOS front door on this Mac (default 48030)")
     ap.add_argument("--undo", action="store_true", help="put back the agent Wizard had before the last import")
     ns = ap.parse_args()
     if ns.undo:
@@ -82,7 +82,7 @@ def main() -> int:
         try:
             res = talk(ns.port, "/api/agent-import", zp)
         except OSError as e:
-            res = {"ok": False, "error": "wizard_not_running", "detail": f"Wizard OS isn't answering ({e})"}
+            res = {"ok": False, "error": "wizard_not_running", "detail": f"WizardOS isn't answering ({e})"}
         res["backup_bytes"] = size
     print(json.dumps(res))
     return 0 if res.get("ok") else 1

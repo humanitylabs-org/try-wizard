@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the Wizard OS image on an Apple Silicon Mac (Thales): Docker (colima) for the file system work,
+# Build the WizardOS image on an Apple Silicon Mac (Thales): Docker (colima) for the file system work,
 # Virtualization.framework (mac/tools/vmrun) for the install itself.
 #
 #   1. base:      Debian 13 arm64 + kernel + Wizard overlay, as an ext4 disk (Docker)
@@ -18,7 +18,7 @@ W=${W:-$HERE/../../out/wizard-os-build}   # must be inside Docker/colima's share
 BUILD_SOURCE_SHA=${BUILD_SOURCE_SHA:-$(git -C "$HERE" rev-parse HEAD)}
 COLIMA_PROFILE=${COLIMA_PROFILE:-wb}
 OUT=$W/out; WORK=$W/work; mkdir -p "$OUT" "$WORK"
-# Pins (Wizard OS release 0.2.0 + wizard-app-manager main).
+# Pins (WizardOS release 0.2.0 + wizard-app-manager main).
 WAM_COMMIT=${WAM_COMMIT:-1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a}
 WAM_IMAGE=${WAM_IMAGE:-ghcr.io/humanitylabs-org/wizard-app-manager@sha256:8afef790d701d8bdd6728187f943c5d4de50cd09da5dc29f245f636af32c1117}
 BUILD_DISK_GB=${BUILD_DISK_GB:-48}
@@ -51,7 +51,7 @@ for f in hostname hosts; do cp /w/g/overlay/etc/$f $R/etc/$f; done
 ln -sf /run/systemd/resolve/stub-resolv.conf $R/etc/resolv.conf
 mount --bind /dev $R/dev; mount -t proc proc $R/proc; mount -t sysfs sys $R/sys
 trap "umount $R/sys $R/proc $R/dev 2>/dev/null || true" EXIT
-# uid 1000 `wizard`: the user os.sh installs Wizard OS as, and the owner of the shared Mac folder.
+# uid 1000 `wizard`: the user os.sh installs WizardOS as, and the owner of the shared Mac folder.
 chroot $R /usr/sbin/useradd -m -u 1000 -U -G sudo -s /bin/bash -c Wizard wizard
 chroot $R /usr/bin/passwd -l wizard >/dev/null
 chroot $R /usr/bin/passwd -l root >/dev/null
@@ -146,7 +146,7 @@ def sha(p):
         for b in iter(lambda: f.read(1 << 20), b''): h.update(b)
     return h.hexdigest()
 files = ["boot/vmlinux", "boot/initrd", "rootfs.img"]
-m = {"name": "Wizard OS", "version": v, "stack": "wizard-os-0.2-runtipi",
+m = {"name": "WizardOS", "version": v, "stack": "wizard-os-0.2-runtipi",
      "sourceCommit": sys.argv[2],
      "kernel": "boot/vmlinux", "initrd": "boot/initrd", "rootfs": "rootfs.img",
      "cmdline": "console=hvc0 root=/dev/vda rw quiet loglevel=3 systemd.show_status=false",

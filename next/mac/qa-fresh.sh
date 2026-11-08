@@ -1,9 +1,9 @@
 #!/bin/bash
 : "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
-# Fresh-install acceptance on a real Mac (Thales), Wizard OS 0.2 stack:
-#   wipe Wizard OS + prefs -> install Wizard.app from the DMG -> "On this Mac" -> "Keep files in ~/Wizard?" ->
-#   download Wizard OS from a feed (local http server with the built image: the real download + SHA-256 path) ->
-#   Wizard OS boots -> onboarding page in the window -> name + free brain + wake-up check -> first chat (opened through
+# Fresh-install acceptance on a real Mac (Thales), WizardOS 0.2 stack:
+#   wipe WizardOS + prefs -> install Wizard.app from the DMG -> "On this Mac" -> "Keep files in ~/Wizard?" ->
+#   download WizardOS from a feed (local http server with the built image: the real download + SHA-256 path) ->
+#   WizardOS boots -> onboarding page in the window -> name + free brain + wake-up check -> first chat (opened through
 #   the wizard-shell app, as Wizard UX does) -> wait for the agent's reply. Prints every timing.
 #
 #   qa-fresh.sh <Wizard-x.dmg> <wizard-os-x.tar.xz> [evidence dir]     (env FEED_URL / FEED_DIR: see feed below)
@@ -20,7 +20,7 @@ bash "$HERE/qa.sh" state >/dev/null 2>&1
 # The app writes snapshots to /tmp (writing to an external volume would stop on a macOS privacy prompt).
 snap() { bash "$HERE/qa.sh" "snapshot /tmp/wq-$1.png"; sleep 2; mv -f "/tmp/wq-$1.png" "$EV/$1.png" 2>/dev/null; }
 
-echo "== stop Wizard; wipe Wizard OS, logs, prefs and the files-folder choice"
+echo "== stop Wizard; wipe WizardOS, logs, prefs and the files-folder choice"
 pkill -x Wizard; pkill -TERM -f "Wizard Host.app/Contents/MacOS"
 for i in $(seq 1 60); do pgrep -f "Wizard Host.app/Contents/MacOS" >/dev/null || break; sleep 1; done
 rm -rf "$AS/os" "$AS/os-staging" "$AS/logs" "$AS/host-status.json" "$AS/files-folder.json"
@@ -74,7 +74,7 @@ while :; do
   s=$(state); [ "$s" != "$seen" ] && { echo "$(since $T0)s $s"; seen="$s"; }
   case "$s" in *"Setting up"*) [ -f "$EV/2-download.png" ] || snap 2-download;; esac
   [ $(( ${PROG_N:=0} % 60 )) = 0 ] && python3 -c "import json;print('   progress:', json.load(open('/tmp/wizard-mvp-qa-state.json')).get('subtitle',''))" 2>/dev/null; PROG_N=$((PROG_N+1))
-  case "$s" in True*) break;; *"didn"*|*"Get Wizard OS"*|*"Couldn"*) echo "FAIL: $s"; exit 1;; esac
+  case "$s" in True*) break;; *"didn"*|*"Get WizardOS"*|*"Couldn"*) echo "FAIL: $s"; exit 1;; esac
   python3 -c "import time,sys;sys.exit(0 if time.time()-$T0<${QA_TIMEOUT:-900} else 1)" || { echo "FAIL: timeout"; exit 1; }
   sleep 0.5
 done

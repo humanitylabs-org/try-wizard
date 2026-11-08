@@ -424,7 +424,7 @@ private final class SearchRow: NSTableRowView {
 
 // MARK: - The one Wizard menu-bar icon
 
-/// Owned by Wizard.app so it exists whether Wizard OS runs on this Mac or elsewhere.
+/// Owned by Wizard.app so it exists whether WizardOS runs on this Mac or elsewhere.
 /// Wizard Host hides its own icon while Wizard.app is running and shows it again if the app quits.
 final class WizardStatusMenu: NSObject, NSMenuDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

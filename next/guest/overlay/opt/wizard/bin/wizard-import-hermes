@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Bring an existing Hermes into Wizard OS: its memory, skills, chats, settings and sign-ins become this box's agent.
+"""Bring an existing Hermes into WizardOS: its memory, skills, chats, settings and sign-ins become this box's agent.
 
     wizard-import-hermes file <zip>     import a zip already on this box (the Mac's "Bring My Hermes into Wizard"
                                         posts it to the front door, which streams it to a root-only folder)
     wizard-import-hermes undo           put back the agent this box had before the last import
     wizard-import-hermes status         the last import's record
 
-Runs as root on the Wizard OS VM. Prints exactly one JSON line. The zip is a stock `hermes backup` archive.
+Runs as root on the WizardOS VM. Prints exactly one JSON line. The zip is a stock `hermes backup` archive.
 
 What happens:
   1. The zip is checked (no absolute or parent paths, has config.yaml) and filtered: per-machine files (bin/, logs/,
@@ -298,7 +298,7 @@ def env_merge(wizard_lines: list[str], rec: dict | None = None) -> list[str]:
     replaced = [env_key(ln) for ln in lines if WIZARD_ENV.match(ln)]
     left_behind = [env_key(ln) for ln in lines if PROVIDER_ENV.match(ln) and not WIZARD_ENV.match(ln)]
     keep = [ln for ln in lines if not WIZARD_ENV.match(ln) and not PROVIDER_ENV.match(ln)]
-    text = "\n".join(keep + ["", "# Wizard OS (kept by wizard-import-hermes)"] + wizard_lines) + "\n"
+    text = "\n".join(keep + ["", "# WizardOS (kept by wizard-import-hermes)"] + wizard_lines) + "\n"
     write_private(envp, text.encode("utf-8"), ".env.wizard-import-")
     if rec is not None:
         rec["env_left_behind"] = sorted(set(left_behind))

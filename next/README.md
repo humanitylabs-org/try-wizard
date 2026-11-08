@@ -9,7 +9,7 @@ not implement it or change the App installation lane.
 - **Wizard.app**: a native AppKit/WebKit window, about 2 MB to download. It contains
   no Linux disk. The embedded **Wizard Host** login item runs the local VM and keeps
   it alive after the window closes.
-- **Wizard OS 0.2.0**: headless Debian 13 arm64, Docker/Runtipi and Wizard App Manager,
+- **WizardOS 0.2.0**: headless Debian 13 arm64, Docker/Runtipi and Wizard App Manager,
   with wizard-shell (currently both UX and Agent Service), Hermes Agent, Files,
   Browser, Transcriber, Secret Drop and AI Accounts. `os.sh` provisions these during
   the image build. WAM is pinned to `1eab0eb991e4031f3fd992c9745f0f9d9f4bfd7a`.
@@ -20,7 +20,7 @@ not implement it or change the App installation lane.
   databases, onboarding, credentials and chats stay on the guest disk.
 
 On first launch choose **On this Mac**, then the files folder. The app downloads
-and hashes the OS archive, or offers **Get Wizard OS → Choose Downloaded File…** if
+and hashes the OS archive, or offers **Get WizardOS → Choose Downloaded File…** if
 its feed cannot be reached. **On another computer** connects to an existing
 Wizard URL without installing a VM. Do not point acceptance tests at a production
 agent. Free onboarding uses an anonymous Nous starter identity and `nous/welcome`,

@@ -1,6 +1,6 @@
 # First-install download correction (candidate only)
 
-Outcome: choosing On this Mac downloads and installs the frozen Wizard OS 0.3.0 automatically after visible GitHub sign-in, with no CLI, manually downloaded archive or shipped credentials.
+Outcome: choosing On this Mac downloads and installs the frozen WizardOS 0.3.0 automatically after visible GitHub sign-in, with no CLI, manually downloaded archive or shipped credentials.
 
 Base: 8b79596349f36ce39724939f3cc3e33cbbe8a0ae, own branch fix/mac-mvp-first-install-download. Parent owns independent review and publication. Guest remains byte-identical.
 

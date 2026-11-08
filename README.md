@@ -5,7 +5,7 @@
 Try Wizard is a fork of [Try Omarchy](https://github.com/omacom/try-omarchy) (MIT). We keep its native Apple Silicon VM machinery (QEMU + Hypervisor.framework, VirGL graphics, clipboard, keyboard and display integration) and replace the Omarchy desktop with one window: the Wizard.
 
 
-> **New in 0.2: Wizard for Mac (next).** A 2 MB native app plus a Wizard OS back end on Apple's Virtualization framework that keeps running from the menu bar. Opens in 0.3 s and uses about 0.7 GB of memory. Source and numbers: [`next/`](next/README.md). The QEMU-based 0.1.x app below is kept for reference.
+> **New in 0.2: Wizard for Mac (next).** A 2 MB native app plus a WizardOS back end on Apple's Virtualization framework that keeps running from the menu bar. Opens in 0.3 s and uses about 0.7 GB of memory. Source and numbers: [`next/`](next/README.md). The QEMU-based 0.1.x app below is kept for reference.
 
 ## What you get
 

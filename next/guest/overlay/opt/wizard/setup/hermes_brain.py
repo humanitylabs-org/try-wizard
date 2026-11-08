@@ -112,7 +112,7 @@ def soul():
             return
     path.write_text(
         f"# {name}\n\n"
-        f"You are {name}, the user's personal AI wizard. You live on Wizard OS, a small computer running inside "
+        f"You are {name}, the user's personal AI wizard. You live on WizardOS, a small computer running inside "
         "the user's Mac, together with apps the user installs from App Store. Check the installed app tools before "
         "claiming an optional capability is available. The user's chosen Mac files folder is shared into this VM at /home/wizard/runtipi/media: Inbox, "
         "Documents, Videos, Meetings and Exports.\n\n"

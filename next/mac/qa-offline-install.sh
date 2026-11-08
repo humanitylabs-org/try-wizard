@@ -58,9 +58,9 @@ sleep 2; /tmp/wizard-mvp-qa-post "files-folder $AS/qa-media"
 # Wait for the feed-unavailable screen, not merely for an elapsed delay.
 for i in $(seq 1 60); do
   /tmp/wizard-mvp-qa-post state; sleep 1
-  python3 -c 'import json,sys; d=json.load(open("/tmp/wizard-mvp-qa-state.json"));sys.exit(0 if d["title"]=="Get Wizard OS" else 1)' && break
+  python3 -c 'import json,sys; d=json.load(open("/tmp/wizard-mvp-qa-state.json"));sys.exit(0 if d["title"]=="Get WizardOS" else 1)' && break
 done
-python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert d["title"]=="Get Wizard OS",d;print("FEED_UNAVAILABLE_OK",d["title"])'
+python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert d["title"]=="Get WizardOS",d;print("FEED_UNAVAILABLE_OK",d["title"])'
 cp /tmp/wizard-mvp-qa-state.json "$EV/feed-unavailable.json"
 python3 - "$AS" <<'PY'
 import json,pathlib,sys,tarfile
@@ -72,7 +72,7 @@ with tarfile.open(p/'wizard-os-bad.tar.xz','w:xz') as t:
 PY
 /tmp/wizard-mvp-qa-post "install-file $AS/wizard-os-bad.tar.xz"; sleep 4
 /tmp/wizard-mvp-qa-post state; sleep 1
-python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert "valid Wizard OS image" in d["subtitle"],d;print("CORRUPT_HASH_REJECTED_OK",d["subtitle"])'
+python3 -c 'import json;d=json.load(open("/tmp/wizard-mvp-qa-state.json"));assert "valid WizardOS image" in d["subtitle"],d;print("CORRUPT_HASH_REJECTED_OK",d["subtitle"])'
 [ ! -e "$AS/os/disk.img" ]
 cp /tmp/wizard-mvp-qa-state.json "$EV/corrupt-rejected.json"
 t0=$(python3 -c 'import time;print(time.time())')

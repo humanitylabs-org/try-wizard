@@ -1,6 +1,6 @@
 # Public downloads: downloads.aiwizards.com
 
-Wizard's Mac app, its in-app updates and the Wizard OS image are served publicly from Cloudflare R2:
+Wizard's Mac app, its in-app updates and the WizardOS image are served publicly from Cloudflare R2:
 
 - Bucket `aiwizards-downloads` (Humanity Labs Cloudflare account), custom domain `https://downloads.aiwizards.com`.
 - GitHub (`humanitylabs-org/try-wizard`) remains the home for source and release notes. Downloads no longer depend on
@@ -13,8 +13,8 @@ Wizard's Mac app, its in-app updates and the Wizard OS image are served publicly
 | `mac/appcast.xml` | Sparkle feed, signed (`SURequireSignedFeed`). Built-in default `SPARKLE_FEED` in `build.sh`. | never cached at the edge |
 | `mac/<build>/Wizard-<build>.zip` | Sparkle update archive named by the appcast | cached at the edge (30 days) |
 | `mac/<version>/Wizard-<version>.dmg` | First-install DMG | cached at the edge |
-| `os/latest.json` | Wizard OS feed the app reads on first install (`Store.osFeedURL`) | never cached at the edge |
-| `os/<version>/wizard-os-<version>.tar.xz.partNN` | Wizard OS image in parts, URLs relative to `latest.json`'s folder or absolute | cached at the edge |
+| `os/latest.json` | WizardOS feed the app reads on first install (`Store.osFeedURL`) | never cached at the edge |
+| `os/<version>/wizard-os-<version>.tar.xz.partNN` | WizardOS image in parts, URLs relative to `latest.json`'s folder or absolute | cached at the edge |
 | `index.html` | Plain landing page the app opens when the feed is unreachable | never cached at the edge |
 
 Rules: versioned paths are immutable (never overwrite a published file; publish a new version path). Only

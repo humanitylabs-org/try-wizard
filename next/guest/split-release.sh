@@ -1,10 +1,10 @@
 #!/bin/bash
-# Write the Wizard OS download feed (latest.json) the Mac app reads, plus the files it names.
+# Write the WizardOS download feed (latest.json) the Mac app reads, plus the files it names.
 #   - An archive no bigger than the part size ships as one file (`url`).
 #   - A bigger one is cut into ordered ….tar.xz.partNN files (`parts`). Default 240 MiB: Cloudflare caches files
 #     under 512 MB at its edge and the R2 upload API takes up to ~250 MiB per request; the app streams them in
 #     order into one tar, checks each part's SHA-256 as it ends and the whole archive's SHA-256 at the end.
-#   - `background` lists what Wizard OS fetches by itself after first launch (voice), so the app can say up front
+#   - `background` lists what WizardOS fetches by itself after first launch (voice), so the app can say up front
 #     how much space Wizard will take in total. Override with BACKGROUND_JSON='[...]'.
 #
 #   split-release.sh <wizard-os-x.tar.xz> <out dir> [part MiB, default 240] [url prefix, default relative]

@@ -1,5 +1,5 @@
 [Unit]
-Description=Grow Wizard OS filesystem to the disk size
+Description=Grow WizardOS filesystem to the disk size
 DefaultDependencies=no
 After=local-fs.target
 Before=wizard-firstboot.service

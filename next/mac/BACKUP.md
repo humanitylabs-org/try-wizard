@@ -10,7 +10,7 @@ per-machine wiring, and paused-until-activated state. This transport does not mo
 The Wizard app menu contains **Back Up This Wizard…**, **Restore a Wizard Backup…**,
 **Undo Last Restore**, and **Make This My Active Wizard…**. These apply only to the selected local
 Mac, never a connected remote backend. A capability probe disables the menu when either the new
-front door or `wam backup` is absent and shows **Backup needs Wizard OS update**.
+front door or `wam backup` is absent and shows **Backup needs WizardOS update**.
 
 Export uses a save panel, a recovery key shown once (Copy / I Saved It), or a confirmed passphrase.
 Optional Keychain storage is opt-in; entries are generic passwords under the `Wizard Backup` service
@@ -76,7 +76,7 @@ replacement at the chosen save path. HTTP redirects are refused so a body/key ca
 
 A guest with an installed WAM checkout can gain the engine **in place**: fetch an approved WAM revision
 containing `backup`, switch the existing checkout to that pinned revision, and confirm `wam backup --help`
-and `wam backup key show-id --json` as the Wizard OS service user. `~/.local/bin/wam` is a launcher into
+and `wam backup key show-id --json` as the WizardOS service user. `~/.local/bin/wam` is a launcher into
 that checkout (`python3 -m wam`), not a copied binary. There is no `wam self-update` command in this line.
 WAM's installer documents that rerunning its installation command updates the install; `os.sh` can also
 refresh the stack, but a full installer/stack rerun is unnecessary for these endpoint changes and has

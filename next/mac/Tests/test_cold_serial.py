@@ -24,7 +24,7 @@ def main():
     mac = Path(__file__).resolve().parents[1]
     host = (mac/'Host/main.swift').read_text()
     start = host.index('final class ColdBootstrapSerial {')
-    end = host.index('// MARK: - Wizard OS virtual machine', start)
+    end = host.index('// MARK: - WizardOS virtual machine', start)
     helper = host[start:end]
     (a.out/'Serial.swift').write_text('import Foundation\n'+helper)
     (a.out/'main.swift').write_bytes((mac/'Tests/ColdSerial/main.swift').read_bytes())

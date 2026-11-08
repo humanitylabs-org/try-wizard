@@ -1,6 +1,6 @@
 # Try Wizard slim candidate — guest 0.2.2 / Mac 0.2.4 build 8
 
-Staged, unmerged, unpublished. Owner: Archimedes, Wizard OS · Release status #2. Daily Wizard/Voxtral and other owners' source trees remain unchanged. Android code 37 / 0.9.13 stays reserved for the background-audio owner; these Mac versions are independent.
+Staged, unmerged, unpublished. Owner: Archimedes, WizardOS · Release status #2. Daily Wizard/Voxtral and other owners' source trees remain unchanged. Android code 37 / 0.9.13 stays reserved for the background-audio owner; these Mac versions are independent.
 
 ## Exact artifacts
 
@@ -53,4 +53,4 @@ These are guest `free`/filesystem measurements, not Mac host RSS or a cold facto
 3. **Human account/device acceptance:** complete ChatGPT and Claude subscription login → real reply → restart/update persistence, and real WebKit microphone permission/recording/reload recovery. CLI versions, synthetic uploads and auth cancellation do not close these gates. Guided Claude connection is not yet a proven Try Wizard onboarding path.
 4. **James:** Apple Developer enrollment for Developer ID/notarization, then separate merge/public-release/production-feed authority. Ad-hoc signatures are only candidate evidence. No release request is being inferred from the earlier slimming approval.
 
-Keep issue15 open and PR16 draft. The slim packaging result is verified; Wizard OS release is still integration plus acceptance, not QA-only.
+Keep issue15 open and PR16 draft. The slim packaging result is verified; WizardOS release is still integration plus acceptance, not QA-only.

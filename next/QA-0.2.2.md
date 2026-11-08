@@ -47,7 +47,7 @@ Evidence directory: `evidence/recovered/` (logs/state snapshots on Thales).
 | Shell syntax / whitespace | `bash -n` on modified scripts and `git diff --check` passed |
 | App replacement from DMG | `APP_REPLACEMENT_PRESERVES_DISK_AND_STATE_OK`; same disk device/inode/size and exact chats/apps/onboarding |
 | Corrected archive, same-stack install | `UPDATE_KEEPS_DISK_OK`; disk `16777231:30187977:68719476736` unchanged; exact session IDs/apps/onboarding compared |
-| Feed unavailable | `FEED_UNAVAILABLE_OK Get Wizard OS` |
+| Feed unavailable | `FEED_UNAVAILABLE_OK Get WizardOS` |
 | Corrupt per-file hash | `CORRUPT_HASH_REJECTED_OK`; no guest disk installed from bad archive |
 | Fresh file install of final archive | `QA_OFFLINE_FINAL_ARCHIVE_OK`; guest health passed and installed `wizard-media` exactly matched committed corrected source |
 | UID 1000 write | `FINAL_ARCHIVE_MEDIA_OK`; `recovered-uid1000.txt` bytes visible on Mac |

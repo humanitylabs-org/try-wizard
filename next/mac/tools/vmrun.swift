@@ -2,8 +2,8 @@ import Darwin
 import Foundation
 import Virtualization
 
-// vmrun: boot a Wizard OS disk headless on Virtualization.framework (no window, no app).
-// Used on the build Mac to install Wizard OS inside a real VM and to time boots.
+// vmrun: boot a WizardOS disk headless on Virtualization.framework (no window, no app).
+// Used on the build Mac to install WizardOS inside a real VM and to time boots.
 //
 //   vmrun --kernel K --initrd I --disk D [--cmdline S] [--cpus N] [--mem MiB]
 //         [--share tag=/path]... [--bridge hostPort:guestPort]... [--console FILE] [--timeout SECS]

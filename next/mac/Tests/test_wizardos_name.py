@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""The Mac app can spell the product name WizardOS, one word (wizard-os#436).
+"""The Mac app spells the product name WizardOS, one word, always (James, 8 Nov 2026; wizard-os#436).
 
-Behind the off-by-default `WizardOSName` user default: with it off, every string still says "Wizard OS".
-`defaults write org.humanitylabs.wizard.mvp WizardOSName -bool YES` turns it on for Wizard and Wizard Host.
 Only text people read changes; ids, paths, URLs and log lines keep their names.
 """
 import re
@@ -11,6 +9,7 @@ import unittest
 from pathlib import Path
 
 MAC = Path(__file__).resolve().parents[1]
+TWO = 'Wizard' + ' OS'  # the two-word spelling, built so this file never contains it
 LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"')
 
 # Files whose visible strings follow the switch. UpdateContract.swift and WizardGuestActivation.swift are also
@@ -35,13 +34,10 @@ class WizardOSNameTests(unittest.TestCase):
         self.brand = (MAC / 'Shared/Brand.swift').read_text()
         self.name = self.brand[self.brand.index('enum WizardOSName'):]
 
-    def test_switch_is_off_by_default_and_keeps_the_old_name(self):
-        self.assertIn('static let key = "WizardOSName"', self.name)
-        self.assertIn('defaults?.bool(forKey: key) ?? false', self.name)
-        self.assertIn('static var text: String { isOn ? "WizardOS" : "Wizard OS" }', self.name)
-
-    def test_host_reads_the_app_setting(self):
-        self.assertIn('UserDefaults(suiteName: WizardShared.appBundleID)', self.name)
+    def test_name_is_always_one_word(self):
+        self.assertIn('static var text: String { "WizardOS" }', self.name)
+        self.assertNotIn('isOn', self.name)
+        self.assertNotIn(TWO, self.brand)
 
     def test_both_targets_compile_the_name(self):
         build = (MAC / 'build.sh').read_text()
@@ -52,11 +48,11 @@ class WizardOSNameTests(unittest.TestCase):
 
     def test_visible_strings_follow_the_switch(self):
         for name in SWITCHED:
-            left = [(n, lit) for n, lit in visible_literals(MAC / name) if 'Wizard OS' in lit]
-            self.assertEqual(left, [], '%s still hard-codes "Wizard OS"' % name)
+            left = [(n, lit) for n, lit in visible_literals(MAC / name) if TWO in lit]
+            self.assertEqual(left, [], '%s still hard-codes the two-word name' % name)
         left = [(n, lit) for n, lit in visible_literals(MAC / 'Host/main.swift', '// MARK: - Menu bar')
-                if 'Wizard OS' in lit]
-        self.assertEqual(left, [], 'Wizard Host menu still hard-codes "Wizard OS"')
+                if TWO in lit]
+        self.assertEqual(left, [], 'Wizard Host menu still hard-codes the two-word name')
 
     def test_menus_and_install_screens_use_the_name(self):
         main = (MAC / 'App/main.swift').read_text()

@@ -1,6 +1,6 @@
 #!/bin/bash
 : "${WIZARD_WORK_ROOT:?set WIZARD_WORK_ROOT to a work disk}"
-# Read-only breakdown of a Wizard OS factory rootfs: per-image sizes, volumes, app data, models.
+# Read-only breakdown of a WizardOS factory rootfs: per-image sizes, volumes, app data, models.
 # usage (Thales): bash inspect-rootfs.sh <dir containing rootfs.img>
 set -u
 . "$WIZARD_WORK_ROOT/Projects/wizard-desktop/env.sh" >/dev/null 2>&1

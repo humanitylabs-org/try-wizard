@@ -2,7 +2,7 @@
 """Thales acceptance for "Bring My Hermes into Wizard". Runs under the shared worker lock; writes evidence to $E.
 
 Stand-in for Jan: a stock Hermes on this Mac (jan-hermes-home) with a planted memory (LIGHTHOUSE-7Q), one chat,
-a scheduled job and a (fake) Telegram token. Target: a clone of an onboarded Wizard OS disk (qa-user-v3).
+a scheduled job and a (fake) Telegram token. Target: a clone of an onboarded WizardOS disk (qa-user-v3).
 """
 import hashlib, json, os, socket, subprocess as sp, sys, time
 from pathlib import Path

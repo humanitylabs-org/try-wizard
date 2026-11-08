@@ -107,18 +107,18 @@ enum WizardUpdate {
         let status = json(WizardShared.statusFile)
         guard let pid = status["pid"] as? Int32, kill(pid, 0) == 0 else { done(nil); return }
         if ["stopped", "notInstalled"].contains(status["state"] as? String ?? "") { done(nil); return }
-        // A local Wizard OS that failed ("error") has nothing running to protect, so it must not block an update:
+        // A local WizardOS that failed ("error") has nothing running to protect, so it must not block an update:
         // the Host stops whatever is left. Only a real start or stop in progress waits.
         switch status["state"] as? String ?? "" {
         case "running": break
         case "error": done(nil); return
-        case "starting": done("Wizard OS on this Mac is still starting. Try again when it's ready."); return
-        case "stopping": done("Wizard OS on this Mac is stopping. Try again in a moment."); return
-        default: done("Wizard OS on this Mac is busy. Try again in a moment."); return
+        case "starting": done("WizardOS on this Mac is still starting. Try again when it's ready."); return
+        case "stopping": done("WizardOS on this Mac is stopping. Try again in a moment."); return
+        default: done("WizardOS on this Mac is busy. Try again in a moment."); return
         }
         var req = URLRequest(url: WizardShared.localUXHealthURL); req.timeoutInterval = 4; req.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.dataTask(with: req) { data, response, _ in
-            var reason: String? = "Cannot verify local agent activity — retry when Wizard OS is ready"
+            var reason: String? = "Cannot verify local agent activity — retry when WizardOS is ready"
             if (response as? HTTPURLResponse)?.statusCode == 200, let data,
                let health = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                health["upstream_reachable"] as? Bool == true, let q = health["queue"] as? [String: Any],
