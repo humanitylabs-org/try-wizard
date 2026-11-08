@@ -50,6 +50,19 @@ EXCLUDE_RE = re.compile(r"(\.lock$|\.pid$|-wal$|-shm$|\.bak$|^state\.db\.|^\.upd
                         r"|^\.skills_prompt_snapshot\.json$|^gateway_state\.json$|/\.DS_Store$|^\.DS_Store$)")
 # .env lines Wizard owns: the API server the Agent Service talks to, Wizard tokens, the dashboard login.
 WIZARD_ENV = re.compile(r"^\s*(export\s+)?(API_SERVER_[A-Z_]*|WIZARD_[A-Z0-9_]*|HERMES_DASHBOARD[A-Z_]*)\s*=")
+# .env lines that choose or sign in to a model provider (Hermes' PROVIDER_REGISTRY api_key_env_vars/base_url_env_var,
+# plus the provider/model overrides). The AI runs through Wizard's own connections (James, 31 Oct, try-wizard#51), so
+# the imported ones stay behind and Wizard's own lines are kept. Tool keys (web search, voice, ...) still come along.
+PROVIDER_ENV = re.compile(
+    r"^\s*(export\s+)?("
+    r"(ANTHROPIC|OPENAI|OPENROUTER|CLAUDE_CODE|AZURE_OPENAI|AZURE_FOUNDRY|BEDROCK|GEMINI|XAI|DEEPSEEK|MINIMAX|KIMI|GLM|ZAI"
+    r"|Z_AI|DASHSCOPE|ALIBABA_CODING_PLAN|ALIBABA_TOKEN_PLAN|NOUS|COPILOT|GITHUB_COPILOT|OLLAMA|LM|NVIDIA|AI_GATEWAY"
+    r"|KILOCODE|OPENCODE_GO|OPENCODE_ZEN|STEPFUN|TOKENHUB|TOKENPLAN|XIAOMI|GMI|ARCEEAI|ARCEE|ACTUAL|COMMANDCODE"
+    r"|COMMANDCODE_ANTHROPIC|DEEPINFRA|FIREWORKS|META|META_MODEL|NEBIUS|NEBIUS_TOKEN_FACTORY|NOVITA|RAMP_ROUTER|ROUTER"
+    r"|UPSTAGE|HF|MODEL|KIMI_CN|KIMI_CODING|MINIMAX_CN|DASHSCOPE_CN|ALIBABA_CODING_PLAN_CN|ALIBABA_TOKEN_PLAN_CN)"
+    r"_(API_KEY|BASE_URL|TOKEN|OAUTH_TOKEN|AUTH_TOKEN|API_BASE|ORG_ID|ORGANIZATION|PROJECT)"
+    r"|GOOGLE_API_KEY|HF_TOKEN|HERMES_INFERENCE_PROVIDER|HERMES_MODEL|LLM_MODEL|LLM_PROVIDER"
+    r")\s*=")
 WIZARD_PLUGINS = ("wizard-os", "wizard-product")
 RESERVATION = None
 
@@ -265,20 +278,69 @@ def wizard_wiring() -> dict:
             "api_server": (cfg.get("platforms") or {}).get("api_server")}
 
 
-def env_merge(wizard_lines: list[str]) -> list[str]:
-    """Imported .env without Wizard-owned keys, then Wizard's lines. Returns the imported keys we replaced."""
+def env_key(line: str) -> str:
+    return re.sub(r"^\s*export\s+", "", line.split("=", 1)[0]).strip()
+
+
+def wizard_env_lines() -> list[str]:
+    """The box's own .env lines to put back after the import: Wizard's wiring and its own model-provider lines."""
+    raw = read_private(DATA / ".env")
+    lines = raw.decode("utf-8", "replace").splitlines() if raw is not None else []
+    return [ln for ln in lines if WIZARD_ENV.match(ln) or PROVIDER_ENV.match(ln)]
+
+
+def env_merge(wizard_lines: list[str], rec: dict | None = None) -> list[str]:
+    """Imported .env without Wizard-owned keys or model-provider keys, then Wizard's lines.
+    Returns the imported Wizard keys we replaced; the names (never values) of provider keys left behind go to rec."""
     envp = DATA / ".env"
-    lines = envp.read_text().splitlines() if envp.is_file() else []
-    replaced = [ln.split("=", 1)[0].strip() for ln in lines if WIZARD_ENV.match(ln)]
-    keep = [ln for ln in lines if not WIZARD_ENV.match(ln)]
+    raw = read_private(envp)
+    lines = raw.decode("utf-8", "replace").splitlines() if raw is not None else []
+    replaced = [env_key(ln) for ln in lines if WIZARD_ENV.match(ln)]
+    left_behind = [env_key(ln) for ln in lines if PROVIDER_ENV.match(ln) and not WIZARD_ENV.match(ln)]
+    keep = [ln for ln in lines if not WIZARD_ENV.match(ln) and not PROVIDER_ENV.match(ln)]
     text = "\n".join(keep + ["", "# Wizard OS (kept by wizard-import-hermes)"] + wizard_lines) + "\n"
-    tmp = envp.with_name(".env.wizard-import")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.chown(tmp, UID, GID)
-    os.replace(tmp, envp)
+    write_private(envp, text.encode("utf-8"), ".env.wizard-import-")
+    if rec is not None:
+        rec["env_left_behind"] = sorted(set(left_behind))
     return sorted(set(replaced))
+
+
+def read_private(path: Path) -> bytes | None:
+    """Read an ordinary file as root without following a planted final-component link (None when absent)."""
+    import stat
+
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path.name} must be a regular file")
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def write_private(path: Path, data: bytes, prefix: str) -> None:
+    """Replace path atomically with a fresh 0600 file owned by the agent user (unique temp name, never followed)."""
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(prefix=prefix, dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            fd = None  # the file object now owns the descriptor, including on failure
+            os.fchmod(f.fileno(), 0o600)
+            f.write(data)
+            f.flush()
+            os.fchown(f.fileno(), UID, GID)
+        os.replace(tmp, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        Path(tmp).unlink(missing_ok=True)
 
 
 def read_wizard_auth() -> bytes | None:
@@ -302,7 +364,7 @@ def read_wizard_auth() -> bytes | None:
 
 def keep_wizard_auth(wizard_auth: bytes | None) -> bool:
     """Restore Wizard's stock auth.json sign-ins instead of the imported auth.json.
-    Provider API keys held separately in .env are not changed by this helper."""
+    Provider API keys held separately in .env are handled by env_merge."""
     auth = DATA / "auth.json"
     if wizard_auth is None:
         auth.unlink(missing_ok=True)
@@ -400,8 +462,7 @@ def do_import(zip_path: Path) -> dict:
         wiring = wizard_wiring()
         if ":/opt/agent-ssh:ro" in (AGENT_OVERLAY.read_text() if AGENT_OVERLAY.is_file() else "") and wiring.get("terminal"):
             wiring["terminal"] = {**wiring["terminal"], "ssh_key": "/opt/agent-ssh/id_ed25519"}   # key outside app-data
-        envp = DATA / ".env"
-        wizard_env = [ln for ln in (envp.read_text().splitlines() if envp.is_file() else []) if WIZARD_ENV.match(ln)]
+        wizard_env = wizard_env_lines()
         sessions_before = session_count()
         log("stopping the agent")
         lifecycle("stop")
@@ -436,7 +497,7 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     log("restoring the backup with stock hermes import")
     in_engine(image, ["/opt/hermes/.venv/bin/hermes", "import", "--force", "/import/import.zip"],
               mounts=[f"{work}:/import:ro"])
-    rec["env_replaced"] = env_merge(wizard_env)
+    rec["env_replaced"] = env_merge(wizard_env, rec)
     rec["kept_wizard_ai"] = keep_wizard_auth(wizard_auth)
     report = json.loads(in_engine(image, ["/opt/hermes/.venv/bin/python", "-c", POST_IMPORT],
                                   stdin=json.dumps(wiring)).strip().splitlines()[-1])
@@ -463,6 +524,7 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     return {"ok": ok, **{k: rec[k] for k in ("stamp", "archive", "sessions_before", "sessions_after",
                                              "disabled_messaging", "paused_jobs", "env_replaced", "agent", "api",
                                              "gateway")},
+            "env_left_behind": rec.get("env_left_behind", []),
             "gateway_detail": None if gw.get("ok") else gw}
 
 
