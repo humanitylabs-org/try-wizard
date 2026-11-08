@@ -232,7 +232,7 @@ final class NoticeBarView: NSView {
                 if !self.stoppedHost { self.install(); return }
                 guard WizardUpdate.json(WizardShared.statusFile)["hostProtocol"] as? Int == WizardRelease.peer else { throw WizardUpdate.error("Installed Host needs the updater bootstrap first") }
                 HostControl.send("prepare-update")
-                self.show("stopping", "Stopping local Wizard OS safely before restarting…")
+                self.show("stopping", "Stopping local \(WizardOSName.text) safely before restarting…")
                 self.waitForHost(nonce: nonce, deadline: Date().addingTimeInterval(105))
             } catch { self.fail(error.localizedDescription) }
         }

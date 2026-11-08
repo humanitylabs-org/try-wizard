@@ -463,13 +463,13 @@ final class WizardStatusMenu: NSObject, NSMenuDelegate {
         voice.state = VoiceKeys.enabled ? .on : .off
         if actions.isLocal() {
             menu.addItem(.separator())
-            add(menu, "Restart Wizard OS", #selector(WizardStatusActions.restartOS))
-            add(menu, "Stop Wizard OS", #selector(WizardStatusActions.stopOS))
-            add(menu, "Start Wizard OS", #selector(WizardStatusActions.startOS))
+            add(menu, "Restart \(WizardOSName.text)", #selector(WizardStatusActions.restartOS))
+            add(menu, "Stop \(WizardOSName.text)", #selector(WizardStatusActions.stopOS))
+            add(menu, "Start \(WizardOSName.text)", #selector(WizardStatusActions.startOS))
             add(menu, "Show Logs", #selector(WizardStatusActions.showLogs))
         }
         menu.addItem(.separator())
-        add(menu, actions.isLocal() ? "Quit Wizard (stops Wizard OS)" : "Quit Wizard", #selector(WizardStatusActions.quitAll))
+        add(menu, actions.isLocal() ? "Quit Wizard (stops \(WizardOSName.text))" : "Quit Wizard", #selector(WizardStatusActions.quitAll))
     }
 
     @discardableResult

@@ -76,7 +76,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
 
     /// "Wizard OS will use about 6.4 GB on this Mac: 1.1 GB to download now, then 1.3 GB for voice in the background."
     static func sizeNote(_ f: Feed) -> String {
-        var s = "Wizard OS will use about \(gb(f.totalInstallBytes)) on this Mac"
+        var s = "\(WizardOSName.text) will use about \(gb(f.totalInstallBytes)) on this Mac"
         if let b = f.bytes { s += ": \(gb(b)) to download now" }
         let extra = (f.background ?? []).filter { ($0.bytes ?? 0) > 0 }
         if !extra.isEmpty {
@@ -112,10 +112,10 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let values = try probe
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let free = values.volumeAvailableCapacityForImportantUsage else {
-            throw error("Couldn't check free disk space for Wizard OS. Try again before installing.")
+            throw error("Couldn't check free disk space for \(WizardOSName.text). Try again before installing.")
         }
         guard free < need else { return }
-        throw error(String(format: "Wizard OS needs about %.0f GB of free space on this Mac (%.0f GB free now). Free up some space and try again.",
+        throw error(String(format: "\(WizardOSName.text) needs about %.0f GB of free space on this Mac (%.0f GB free now). Free up some space and try again.",
                            Double(need) / 1e9, Double(free) / 1e9))
     }
 
@@ -127,11 +127,11 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
 
     func install(from files: [URL]) {
         // One install at a time: the download and file paths share tar and the staging folder.
-        guard !busy else { onProgress?("Wizard OS is already being set up…", nil); return }
+        guard !busy else { onProgress?("\(WizardOSName.text) is already being set up…", nil); return }
         let files = files.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         guard let first = files.first else { return }
         if let problem = Self.partsProblem(files) { onDone?(Self.error(problem)); return }
-        onProgress?("Setting up Wizard OS from \(files.count == 1 ? first.lastPathComponent : "\(files.count) files")…", nil)
+        onProgress?("Setting up \(WizardOSName.text) from \(files.count == 1 ? first.lastPathComponent : "\(files.count) files")…", nil)
         do {
             // Reject insufficient capacity before creating staging or touching the current OS.
             try Self.checkFreeSpace(install: 0)
@@ -178,7 +178,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                             last = Date()
                             let frac = Double(done) / Double(total), mb = Double(done) / 1_048_576, all = Double(total) / 1_048_576
                             DispatchQueue.main.async {
-                                self.onProgress?(String(format: "Unpacking Wizard OS… %.0f of %.0f MB", mb, all), frac)
+                                self.onProgress?(String(format: "Unpacking \(WizardOSName.text)… %.0f of %.0f MB", mb, all), frac)
                             }
                         }
                     }
@@ -205,7 +205,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
             }
             let base = String(name[..<r.lowerBound]), num = Int(name[r].dropFirst(5)) ?? -1
             if prefix == nil { prefix = base }
-            guard base == prefix else { return "Those parts come from different Wizard OS downloads. Choose the parts of one download." }
+            guard base == prefix else { return "Those parts come from different \(WizardOSName.text) downloads. Choose the parts of one download." }
             guard num == i else { return "Part \(String(format: "%02d", i)) is missing. Choose every part of the download." }
         }
         return nil
@@ -237,9 +237,9 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     }
 
     func install() {
-        guard !busy else { onProgress?("Wizard OS is already being set up…", nil); return }
+        guard !busy else { onProgress?("\(WizardOSName.text) is already being set up…", nil); return }
         busy = true   // held from here: the feed request can take seconds and must not race a file install
-        onProgress?("Finding the latest Wizard OS…", nil)
+        onProgress?("Finding the latest \(WizardOSName.text)…", nil)
         var req = URLRequest(url: Store.osFeedURL); req.timeoutInterval = 8
         session.dataTask(with: req) { data, resp, err in
             DispatchQueue.main.async {
@@ -247,7 +247,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                       let feed = try? JSONDecoder().decode(Feed.self, from: data),
                       let list = Self.downloadList(feed) else {
                     self.busy = false
-                    self.onDone?(err ?? Self.error("Couldn't reach the Wizard OS download. Check your connection and try again.")); return
+                    self.onDone?(err ?? Self.error("Couldn't reach the \(WizardOSName.text) download. Check your connection and try again.")); return
                 }
                 self.expectedSHA = feed.sha256.lowercased(); self.version = feed.version
                 do {
@@ -257,7 +257,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
                 self.partURLs = list; self.partIndex = 0; self.partHasher = SHA256()
                 let partSum = (feed.parts ?? []).reduce(Int64(0)) { $0 + ($1.bytes ?? 0) }
                 self.feedBytes = feed.bytes ?? partSum; self.expected = self.feedBytes
-                self.onProgress?("Downloading Wizard OS \(feed.version)… \(Self.sizeNote(feed))", 0)
+                self.onProgress?("Downloading \(WizardOSName.text) \(feed.version)… \(Self.sizeNote(feed))", 0)
                 self.session.dataTask(with: list[0].url).resume()
             }
         }.resume()
@@ -300,7 +300,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         hasher.update(data: data); partHasher.update(data: data)
         do { try tarIn?.write(contentsOf: data) } catch {
-            failure = Self.error("Unpacking Wizard OS failed. Please try again."); dataTask.cancel(); return
+            failure = Self.error("Unpacking \(WizardOSName.text) failed. Please try again."); dataTask.cancel(); return
         }
         received += Int64(data.count)
         guard expected > 0, Date().timeIntervalSince(lastProgress) > 0.25 else { return }
@@ -308,7 +308,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         let mb = Double(received) / 1_048_576, total = Double(expected) / 1_048_576, v = version
         let frac = Double(received) / Double(expected)
         DispatchQueue.main.async {
-            self.onProgress?(String(format: "Downloading and unpacking Wizard OS %@… %.0f of %.0f MB", v, mb, total), frac)
+            self.onProgress?(String(format: "Downloading and unpacking \(WizardOSName.text) %@… %.0f of %.0f MB", v, mb, total), frac)
         }
     }
 
@@ -317,7 +317,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         if failure == nil, error == nil, partURLs.count > 1 {
             let want = partURLs[partIndex].sha
             let got = partHasher.finalize().map { String(format: "%02x", $0) }.joined()
-            if got != want { failure = Self.error("Part \(partIndex + 1) of the Wizard OS download was corrupted. Please try again.") }
+            if got != want { failure = Self.error("Part \(partIndex + 1) of the \(WizardOSName.text) download was corrupted. Please try again.") }
             else if partIndex + 1 < partURLs.count {
                 partIndex += 1; partHasher = SHA256()
                 session.dataTask(with: partURLs[partIndex].url).resume()
@@ -336,15 +336,15 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
         var result: Error? = error
         if result == nil, let want = expectedDigest {
             let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-            if digest != want { result = Self.error("The Wizard OS download was corrupted. Please try again.") }
+            if digest != want { result = Self.error("The \(WizardOSName.text) download was corrupted. Please try again.") }
         }
-        if result == nil && p.terminationStatus != 0 { result = Self.error("Unpacking Wizard OS failed: \(tarText.suffix(200))") }
+        if result == nil && p.terminationStatus != 0 { result = Self.error("Unpacking \(WizardOSName.text) failed: \(tarText.suffix(200))") }
         if let result {
             try? FileManager.default.removeItem(at: Self.staging)
             DispatchQueue.main.async { self.busy = false; self.onDone?(result) }
             return
         }
-        DispatchQueue.main.async { self.onProgress?("Setting up Wizard OS on this Mac…", nil) }
+        DispatchQueue.main.async { self.onProgress?("Setting up \(WizardOSName.text) on this Mac…", nil) }
         DispatchQueue.global(qos: .userInitiated).async {
             let r = Result { try Self.finish(Self.staging) }
             DispatchQueue.main.async {
@@ -379,7 +379,7 @@ final class OSInstaller: NSObject, URLSessionDataDelegate {
     }
 
     static func verifyManifest(in dir: URL) throws {
-        let bad = error("This file isn't a valid Wizard OS image. Download it again from the release page.")
+        let bad = error("This file isn't a valid \(WizardOSName.text) image. Download it again from the release page.")
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let imageVersion = m["version"] as? String,
@@ -1259,7 +1259,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
 
     func installOnThisMac() {
-        showOverlay("Setting up Wizard on this Mac", "Downloading Wizard OS, a small Linux computer just for your Wizard. This happens once.", progress: nil)
+        showOverlay("Setting up Wizard on this Mac", "Downloading \(WizardOSName.text), a small Linux computer just for your Wizard. This happens once.", progress: nil)
         installer.onProgress = { [weak self] msg, p in
             self?.showOverlay("Setting up Wizard on this Mac", msg, progress: p)
         }
@@ -1268,11 +1268,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             if let err {
                 // A bad picked file says so; an unreachable feed just shows the manual download steps.
                 if err.localizedDescription.contains("free space") {
-                    self.showOverlay("Not enough space for Wizard OS", err.localizedDescription, spinning: false,
+                    self.showOverlay("Not enough space for \(WizardOSName.text)", err.localizedDescription, spinning: false,
                                      actions: [("Try Again", #selector(self.retryInstall)), ("Back", #selector(self.backToChooser))])
                     return
                 }
-                let bad = err.localizedDescription.contains("valid Wizard OS")
+                let bad = err.localizedDescription.contains("valid \(WizardOSName.text)")
                 self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
                 HostControl.send("start")
@@ -1284,10 +1284,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
-        showOverlay("Get Wizard OS",
+        showOverlay("Get \(WizardOSName.text)",
                     (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
                     spinning: false,
-                    actions: [("Download Wizard OS", #selector(openReleasePage)),
+                    actions: [("Download \(WizardOSName.text)", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
                               ("Back", #selector(backToChooser))])
     }
@@ -1335,13 +1335,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             if let error = Self.hostStartError(since: started) {
                 failed = true
                 if Self.isFolderBlocked(error) { self.showFolderBlocked(); return }
-                self.showOverlay("Wizard OS didn't start", error, spinning: false,
+                self.showOverlay("\(WizardOSName.text) didn't start", error, spinning: false,
                                  actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
                 return
             }
             if elapsed > 0.6 && !shown {
                 shown = true
-                self.showOverlay("Waking up your Wizard…", "Starting Wizard OS on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
+                self.showOverlay("Waking up your Wizard…", "Starting \(WizardOSName.text) on this Mac. If macOS asks whether Wizard may access a folder, click Allow.")
             }
         }, done: { [weak self] ok in
             guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
@@ -1349,7 +1349,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
                 self.load(WizardShared.localSetupURL)
             } else {
-                self.showOverlay("Wizard OS didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
+                self.showOverlay("\(WizardOSName.text) didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
                                  actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
             }
         })
@@ -1696,15 +1696,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if b.kind == .remote { return "Connected to \(b.name)" }
         guard let d = try? Data(contentsOf: WizardShared.statusFile),
               let s = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let state = s["state"] as? String else {
-            return "Wizard OS on this Mac"
+            return "\(WizardOSName.text) on this Mac"
         }
         switch state {
         case "running": return "Wizard is running on this Mac"
-        case "starting": return "Wizard OS is starting…"
-        case "stopped": return "Wizard OS is stopped"
-        case "notInstalled": return "Wizard OS is not installed"
-        case "stopping": return "Wizard OS is shutting down…"
-        default: return "Wizard OS hit a problem — see logs"
+        case "starting": return "\(WizardOSName.text) is starting…"
+        case "stopped": return "\(WizardOSName.text) is stopped"
+        case "notInstalled": return "\(WizardOSName.text) is not installed"
+        case "stopping": return "\(WizardOSName.text) is shutting down…"
+        default: return "\(WizardOSName.text) hit a problem — see logs"
         }
     }
 
@@ -1872,10 +1872,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !Store.backends.isEmpty { wizardsMenu.addItem(.separator()) }
         wizardsMenu.addItem(withTitle: "Run Wizard on This Mac", action: #selector(addThisMac), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Connect to Another Computer…", action: #selector(addRemote), keyEquivalent: "").target = self
-        wizardsMenu.addItem(withTitle: "Install Wizard OS from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
+        wizardsMenu.addItem(withTitle: "Install \(WizardOSName.text) from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
-        wizardsMenu.addItem(withTitle: "Restart Wizard OS on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
+        wizardsMenu.addItem(withTitle: "Restart \(WizardOSName.text) on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
         wizardsMenu.addItem(withTitle: "Bring My Hermes into Wizard…", action: #selector(bringHermes), keyEquivalent: "").target = self
     }
@@ -2240,7 +2240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let alert = NSAlert()
         alert.messageText = "Bring your Hermes into Wizard?"
         alert.informativeText = "Wizard copies your Hermes from this Mac: its memory, skills, chats, settings and " +
-            "sign-ins. From then on it is your agent in Wizard and works inside Wizard OS, away from your Mac's files.\n\n" +
+            "sign-ins. From then on it is your agent in Wizard and works inside \(WizardOSName.text), away from your Mac's files.\n\n" +
             "Your Hermes on this Mac isn't changed. In Wizard, its messaging (like Telegram) starts off and its " +
             "scheduled jobs start paused, so the two copies never double up. Wizard's current agent is saved, so you " +
             "can switch back."
