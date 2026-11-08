@@ -634,6 +634,11 @@ final class WizardDragView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard event.type == .leftMouseDown else { return }
         guard let window else { return }
+        // A double-click on blank bar space does what the owner chose in System Settings ›
+        // Desktop & Dock › "Double-click a window's title bar to", like a native title bar.
+        if event.clickCount == 2, WizardTitleBarDoubleClick.isOn {
+            WizardTitleBarDoubleClick.perform(on: window); return
+        }
         dragCount += 1
         window.makeKeyAndOrderFront(nil)
         let start = window.convertPoint(toScreen: event.locationInWindow)
@@ -672,6 +677,36 @@ final class WizardDragView: NSView {
       addEventListener('resize',schedule); addEventListener('scroll',schedule,true);
     })();
     """
+}
+
+/// Double-click on the blank top bar, read from the system title-bar setting (issue #19).
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp TitleBarDoubleClick -bool YES` turns it on.
+enum WizardTitleBarDoubleClick {
+    static let key = "TitleBarDoubleClick"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+
+    enum Action: Equatable { case zoom, minimize, none }
+
+    /// `AppleActionOnDoubleClick` is "Fill", "Maximize" (Zoom), "Minimize" or "None"; older systems
+    /// only set `AppleMiniaturizeOnDoubleClick`. Unset means the macOS default, which zooms.
+    static func action(for value: String?, legacyMinimize: Bool) -> Action {
+        switch value ?? "" {
+        case "Minimize": return .minimize
+        case "None": return .none
+        case "Fill", "Maximize": return .zoom
+        default: return legacyMinimize ? .minimize : .zoom
+        }
+    }
+
+    static func perform(on window: NSWindow) {
+        let defaults = UserDefaults.standard
+        switch action(for: defaults.string(forKey: "AppleActionOnDoubleClick"),
+                      legacyMinimize: defaults.bool(forKey: "AppleMiniaturizeOnDoubleClick")) {
+        case .zoom: window.performZoom(nil)
+        case .minimize: window.performMiniaturize(nil)
+        case .none: break
+        }
+    }
 }
 
 // MARK: - Zoom
