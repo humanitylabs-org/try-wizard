@@ -709,6 +709,22 @@ enum WizardTitleBarDoubleClick {
     }
 }
 
+/// How much room the window buttons take at the top left, told to the page (issue #19).
+/// Wizard UX reserves `--wz-titlebar-left` before the desktop bar's content (96px when unset). The native value
+/// follows page zoom (CSS px shrink and grow with it) and is 0 in full screen, where the buttons are hidden.
+/// Behind the same off-by-default `TitleBarDoubleClick` switch as the title-bar double-click.
+enum WizardTitleBarInset {
+    static let gap: CGFloat = 12
+    static func cssLeft(buttonsMaxX: CGFloat, pageZoom: CGFloat, fullScreen: Bool) -> Int {
+        if fullScreen || buttonsMaxX <= 0 { return 0 }
+        let zoom = pageZoom > 0 ? pageZoom : 1
+        return Int(((buttonsMaxX + gap) / zoom).rounded(.up))
+    }
+    static func script(left: Int) -> String {
+        "document.documentElement.style.setProperty('--wz-titlebar-left','\(left)px')"
+    }
+}
+
 // MARK: - Zoom
 
 /// Page zoom for the main window (View › Zoom In / Zoom Out / Actual Size), kept across launches.
@@ -1373,6 +1389,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
+        publishTitleBarInset()
         // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
         if isTrustedDocument, homeURL == nil, let u = webView.url, u.path == "/wizard" || u.path == "/wizard/", let h = u.host {
             let key = "\(u.scheme ?? "")://\(h):\(u.port ?? 0)"
@@ -1491,6 +1508,15 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     private func isWizardOrigin(_ url: URL) -> Bool {
         guard let origin = NativeOrigin(url), !origin.isInstalledApp else { return false }
         return selectedControlOrigins.contains(origin)
+    }
+    /// Tells Wizard UX where the window buttons end (see WizardTitleBarInset). Off unless TitleBarDoubleClick is on.
+    func publishTitleBarInset() {
+        guard WizardTitleBarDoubleClick.isOn, isTrustedDocument, let window else { return }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+        let maxX = buttons.filter { !$0.isHidden }.map { $0.convert($0.bounds, to: nil).maxX }.max() ?? 0
+        let left = WizardTitleBarInset.cssLeft(buttonsMaxX: maxX, pageZoom: web.pageZoom,
+                                               fullScreen: window.styleMask.contains(.fullScreen))
+        web.evaluateJavaScript(WizardTitleBarInset.script(left: left))
     }
     func updateDragRegions(_ params: [String: Any]) {
         func rect(_ values: [Double]) -> NSRect? {
@@ -1737,8 +1763,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.controller.isTrustedDocument else { return }
             self.controller.web.evaluateJavaScript("window.dispatchEvent(new Event('resize'))")
+            self.controller.publishTitleBarInset()
         }
     }
+    func windowDidEnterFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
+    func windowDidExitFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
     func windowWillClose(_ notification: Notification) {
         DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
     }
@@ -2224,6 +2253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func setWizardZoom(_ zoom: CGFloat) {
         controller.web.pageZoom = zoom
         WizardZoom.saved = zoom
+        controller.publishTitleBarInset()
     }
     @objc func switchBackend(_ sender: NSMenuItem) { Store.activeIndex = sender.tag; rebuildWizardMenu(); controller.begin() }
     @objc func installFromFile() {
