@@ -61,6 +61,26 @@ final class OSUpdates {
     }
     private func phase(_ p: String) { log("Wizard OS update: \(p)"); save(["phase": p]) }
 
+    /// Every device shows the update from the App Manager's `host_update` (wizard-ctl update-phase writes it in the
+    /// guest). Only possible while Wizard OS runs; the web keeps the last step it saw while it is away.
+    private func tellGuest(phase p: String, result: String = "-", reason: String? = nil) {
+        let j = Self.journal()
+        guard let id = (j["id"] as? String)?.prefix(36), let target = j["target"] as? String,
+              target.range(of: #"^[0-9A-Za-z][0-9A-Za-z.+-]{0,40}$"#, options: .regularExpression) != nil else { return }
+        vm.control("update-phase \(id) \(p) \(target) \(result) \(Self.reasonCode(reason))") { _ in }
+    }
+    /// A short code for the reason (the web words it); the full text stays in host.log.
+    static func reasonCode(_ r: String?) -> String {
+        guard let r = r?.lowercased() else { return "-" }
+        let map: [(String, String)] = [("installer said", "installer"), ("installer stopped", "interrupted"),
+            ("part of the update", "drift"), ("reports", "version"), ("window didn", "window"), ("still running after", "timeout"),
+            ("stopped during", "stopped"), ("stopped answering", "noanswer"), ("shut down cleanly", "shutdown"),
+            ("free space", "space"), ("couldn't copy", "copy"), ("already up to date", "current"),
+            ("already running", "running"), ("didn't answer", "noanswer"), ("didn't start", "notstarted"),
+            ("did not start", "notstarted"), ("quit", "quit")]
+        return map.first { r.contains($0.0) }?.1 ?? "other"
+    }
+
     /// One line for the menu bar while an update runs.
     var statusText: String? {
         let j = Self.journal()
@@ -88,6 +108,7 @@ final class OSUpdates {
     }
 
     func start() {
+        if Self.qaAnyTime { log("Wizard OS update: TEST MODE qaAutoUpdateAnyTime is on (Automatic at any hour, no idle wait)") }
         resume()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.tick() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.tick() }
@@ -151,8 +172,14 @@ final class OSUpdates {
     /// Automatic updates start between 01:00 and 05:00 Mac time (the heads-up and the update both inside it).
     static let nightStart = 1, nightEnd = 5
     static let headsUpLead: TimeInterval = 5 * 60
-    static let autoEveryAtNight: TimeInterval = 10 * 60
+    static var autoEveryAtNight: TimeInterval { qaAnyTime ? 60 : 10 * 60 }
+    /// Internal testing only (never on an owner's Mac):
+    /// `defaults write org.humanitylabs.wizard.mvp.host qaAutoUpdateAnyTime -bool YES` lets Automatic start at any
+    /// hour without the 15 idle minutes, checking every minute, and the heads-up is not cancelled by someone using
+    /// the Mac (they answer it in the pop-up). Everything else (Automatic only, the heads-up, the copy) is unchanged.
+    static var qaAnyTime: Bool { UserDefaults.standard.bool(forKey: "qaAutoUpdateAnyTime") }
     static func atNight(_ d: Date) -> Bool {
+        if qaAnyTime { return true }
         let h = Calendar.current.component(.hour, from: d)
         return h >= nightStart && h < nightEnd
     }
@@ -213,7 +240,7 @@ final class OSUpdates {
     private func headsUpTick() {
         guard let h = headsUp else { return }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        if idle < Date().timeIntervalSince(h.since) || Self.appRecording || !Self.onACPower {
+        if (!Self.qaAnyTime && idle < Date().timeIntervalSince(h.since)) || Self.appRecording || !Self.onACPower {
             // Someone came to the Mac (or it started recording, or left power): not now; maybe later tonight.
             log("Wizard OS update: heads-up cancelled (the Mac is in use)")
             clearHeadsUp(); lastAutoCheck = Date(); return
@@ -236,7 +263,7 @@ final class OSUpdates {
     static func notNow() -> String? {
         if !onACPower { return "on battery" }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        if idle < idleNeeded { return "in use" }
+        if idle < idleNeeded && !qaAnyTime { return "in use" }
         if appRecording { return "recording" }
         return nil
     }
@@ -324,6 +351,7 @@ final class OSUpdates {
                 return
             }
             self.phase("stopping")
+            self.tellGuest(phase: "stopping")
             self.vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
                 // Wizard OS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
                 self?.abandon("Wizard OS didn't shut down cleanly, so nothing was updated.")
@@ -369,6 +397,7 @@ final class OSUpdates {
                     return
                 }
                 if let quick = res["quick"] as? Bool { self.save(["quick": quick]) }
+                self.tellGuest(phase: "updating")
                 self.monitor(started: Date())
             }
         }
@@ -406,6 +435,7 @@ final class OSUpdates {
 
     private func verify(_ st: [String: Any]) {
         phase("verifying")
+        tellGuest(phase: "verifying")
         let target = Self.journal()["target"] as? String
         let installed = st["installed"] as? String
         if st["failed"] as? Bool == true || st["interrupted"] as? Bool == true || installed == nil || installed != target {
@@ -413,6 +443,12 @@ final class OSUpdates {
                 ?? (st["interrupted"] as? Bool == true ? "The installer stopped before it finished." : nil)
                 ?? "Wizard OS reports \(installed ?? "no installed release") instead of \(target ?? "the new release")."
             restore(why); return
+        }
+        // On a Mac the install must be exactly the release: a "drift" read-back (e.g. an image that couldn't be pulled,
+        // so the old one kept running) is a half-applied update, not a success. Older App Managers send no receipt.
+        if let receipt = st["receipt"] as? String, receipt != "pinned" {
+            restore("Part of the update didn't install (the install read back as \(receipt)).")
+            return
         }
         // The window must answer on the new release, not only the installer's read-back.
         let deadline = Date().addingTimeInterval(5 * 60)
@@ -463,6 +499,7 @@ final class OSUpdates {
             })
         }
         guard vm.state == .running else { putBack(); return }
+        tellGuest(phase: "restoring")
         vm.control("update-log", timeout: 30) { data in
             if let data {
                 let f = WizardShared.logsDir.appendingPathComponent("wizard-os-update-failed.log")
@@ -493,6 +530,10 @@ final class OSUpdates {
         changes["reason"] = reason ?? NSNull()
         save(changes)
         log("Wizard OS update finished: \(result)\(reason.map { " — \($0)" } ?? "")")
+        // Tell every device how it ended, once Wizard OS runs again (after a restore: on the copy).
+        whenRunning(limit: Self.windowLimit) { [weak self] ok in
+            if ok { self?.tellGuest(phase: "done", result: result, reason: reason) }
+        }
         busy = false
         end()
         onChange()

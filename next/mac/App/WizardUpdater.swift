@@ -187,30 +187,15 @@ final class NoticeBarView: NSView {
             try? d.write(to: osUpdatesDir.appendingPathComponent("app-activity.json"), options: .atomic)
         }
     }
-    private func osUpdateTick() {
-        guard !preparing, ready == nil, !activatingGuest else { return }
-        let j = WizardUpdate.json(osUpdatesDir.appendingPathComponent("journal.json"))
-        guard let id = j["id"] as? String, let phase = j["phase"] as? String else { return }
-        let to = j["target"] as? String ?? "the new release"
-        let key = id + ":" + phase
-        guard key != osUpdateSeen else { return }
-        osUpdateSeen = key
-        if phase != "done" {
-            show("os-updating", phase == "restoring"
-                 ? "The Wizard OS update didn't finish. Putting back the copy saved before it…"
-                 : "Updating Wizard OS to \(to). Wizard OS restarts once; your chats and files stay as they are.")
-            return
-        }
-        guard let at = j["finishedAt"] as? Double, Date().timeIntervalSince1970 - at < 3600 else { return }
-        let reason = j["reason"] as? String ?? ""
-        switch j["result"] as? String {
-        case "ok": show("installed", "Wizard OS updated to \(to)")
-        case "restored": show("os-restored", "The Wizard OS update to \(to) didn't finish, so Wizard went back to the copy saved before it. \(reason)")
-        case "failed": show("os-failed", "Wizard OS wasn't updated. \(reason)")
-        case "skipped" where j["kind"] as? String == "manual": show("os-failed", "Wizard OS wasn't updated. \(reason)")
-        default: if phase == "done", self.phase == "os-updating" { hideNotice() }
-        }
+    /// Wizard OS is updating (Host/OSUpdates.swift journal): the page shows it on every device, so the window adds
+    /// no notice of its own, and expected outages (voice status) stay quiet.
+    nonisolated static var osUpdating: Bool {
+        let j = WizardUpdate.json(WizardShared.supportDir.appendingPathComponent("os-updates/journal.json"))
+        return ["stopping", "copying", "booting", "updating", "verifying", "restoring"].contains(j["phase"] as? String ?? "")
     }
+    /// The web (core/os-update-flow.js) shows Wizard OS update progress and the result on every device, the Mac
+    /// window included; the window adds no notice of its own.
+    private func osUpdateTick() {}
     private var noticeToken = UUID()
     private func show(_ state: String, _ text: String, retry: Bool = false) {
         phase = state; message = text; label.stringValue = text
