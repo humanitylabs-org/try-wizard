@@ -329,7 +329,10 @@ final class ProcessTapSource: CaptureSource {
         guard let outUID = CoreAudioUtil.string(out, kAudioDevicePropertyDeviceUID) else { throw MeetingRecorder.err("No audio output device.") }
         let me = CoreAudioUtil.processObject(for: getpid()).map { [$0] } ?? []
         // Only what the Mac plays on the current output device (the call), never virtual devices the mic path might use.
-        let desc = CATapDescription(excludingProcesses: me, deviceUID: outUID, stream: 0)
+        // The Objective-C initializer on purpose: the Swift `CATapDescription(excludingProcesses:deviceUID:stream:)`
+        // lives in libswiftCoreAudio only from macOS 15 (the SDK labels it 14.0), so linking it stops the whole app
+        // from launching on macOS 14. `check-launch-symbols.py` guards this at build time.
+        let desc = CATapDescription(__excludingProcesses: me.map { NSNumber(value: $0) }, andDeviceUID: outUID, withStream: 0)
         desc.name = "Wizard meeting audio"
         desc.isPrivate = true
         desc.muteBehavior = .unmuted
