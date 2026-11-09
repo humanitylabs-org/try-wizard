@@ -679,6 +679,37 @@ final class WizardDragView: NSView {
     """
 }
 
+/// After Bring My Hermes, the AI runs only through Wizard's own Claude/ChatGPT connections (James, 31 Oct,
+/// try-wizard#51). When the importer says neither is connected (`ai_connected: false`), the result dialog asks the
+/// owner to connect one and opens that app. An older guest sends no `ai_connected`, so nothing new shows.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp ImportConnectPrompt -bool YES` turns it on.
+enum WizardImportConnectPrompt {
+    static let key = "ImportConnectPrompt"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    static let title = "Your Hermes is in"
+    static let line = "Connect Claude or ChatGPT so it can answer."
+    static let choices: [(String, String)] = [("Connect Claude", "wizard-claude"), ("Connect ChatGPT", "wizard-chatgpt")]
+
+    static func needed(_ result: [String: Any]?) -> Bool {
+        guard isOn, let connected = result?["ai_connected"] as? Bool else { return false }
+        return connected == false
+    }
+
+    /// The app behind the button the owner pressed; "Later" (the last button) opens nothing.
+    static func appId(for response: NSApplication.ModalResponse) -> String? {
+        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard index >= 0, index < choices.count else { return nil }
+        return choices[index].1
+    }
+
+    /// Opens the installed connection app, else its App Store page (wizard-ux `window.WizOpenApp`).
+    static func openScript(_ appId: String) -> String {
+        guard choices.contains(where: { $0.1 == appId }) else { return "false" }
+        return "(() => { const o = window.WizOpenApp; if (typeof o !== 'function') return false; " +
+            "return o('\(appId)') || o('app-store', '/wizard-os-home/store/index.html?app=\(appId)'); })()"
+    }
+}
+
 /// Double-click on the blank top bar, read from the system title-bar setting (issue #19).
 /// Off by default: `defaults write org.humanitylabs.wizard.mvp TitleBarDoubleClick -bool YES` turns it on.
 enum WizardTitleBarDoubleClick {
@@ -2289,6 +2320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
             DispatchQueue.main.async {
                 let done = NSAlert()
+                var askedToConnect = false
                 if proc.terminationStatus == 0, obj?["ok"] as? Bool == true {
                     let paused = (obj?["paused_jobs"] as? [Any])?.count ?? 0
                     let off = (obj?["disabled_messaging"] as? [String]) ?? []
@@ -2296,16 +2328,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     var notes = ["It remembers what it knew and can search its past chats."]
                     if !off.isEmpty { notes.append("Messaging is off here (\(off.joined(separator: ", "))).") }
                     if paused > 0 { notes.append("\(paused) scheduled job\(paused == 1 ? " is" : "s are") paused here.") }
+                    if WizardImportConnectPrompt.needed(obj) {
+                        askedToConnect = true
+                        done.messageText = WizardImportConnectPrompt.title
+                        notes.insert(WizardImportConnectPrompt.line, at: 0)
+                        for (label, _) in WizardImportConnectPrompt.choices { done.addButton(withTitle: label) }
+                        done.addButton(withTitle: "Later")
+                    }
                     done.informativeText = notes.joined(separator: " ")
                 } else {
                     done.messageText = "Wizard couldn't bring your Hermes in"
                     done.informativeText = (obj?["detail"] as? String) ?? (obj?["error"] as? String) ?? String(text.suffix(300))
                 }
-                done.runModal()
+                let response = done.runModal()
+                let choice = askedToConnect ? WizardImportConnectPrompt.appId(for: response) : nil
                 self.controller.begin()
+                if let appId = choice { self.openWizardAppWhenReady(appId) }
             }
         }
         do { try p.run() } catch { NSLog("Wizard: wizard-bring-hermes failed to start: \(error)") }
+    }
+
+    /// Opens an app in Wizard UX once the reloaded window has the shell again (begin() reloads it after an import).
+    func openWizardAppWhenReady(_ appId: String, tries: Int = 30) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            self.controller.uxState { ux in
+                if ux == nil {
+                    if tries > 0 { self.openWizardAppWhenReady(appId, tries: tries - 1) }
+                    return
+                }
+                self.controller.web.evaluateJavaScript(WizardImportConnectPrompt.openScript(appId))
+            }
+        }
     }
 
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
