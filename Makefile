@@ -79,6 +79,7 @@ test-backup:
 
 test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-backup-test-dependencies.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/tests/test-self-update-qa.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_cold_boot_wait.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_import_auth.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_import_env.py"
