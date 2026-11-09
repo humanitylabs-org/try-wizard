@@ -1704,6 +1704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                              ("Quit Wizard", #selector(WizardWindowController.quitWizard))])
         }
         WizardUpdater.shared.start()
+        WizardUpdater.shared.watchOSUpdates()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
     }
 

@@ -1,8 +1,31 @@
 #!/bin/bash
-# One-line control channel from the Mac (vsock 9100): poweroff | ping
+# One-line control channel from the Mac (vsock 9100). Fixed commands only; nothing the Mac sends reaches a shell.
+#   poweroff | ping
+#   update-check  would Automatic install the channel's release now? (wam updates --apply-if-auto --check; JSON,
+#                 `due: true` when it would). The Mac asks before it stops Wizard OS to copy the disk.
+#   update-auto   install it, under the same rules (wam updates --apply-if-auto); sent only after the disk copy
+#   update-now    install the channel's release now (wam updates --apply): the Mac's "Update Wizard OS Now"
+#   update-status the App Manager's update status (installing, failed, installed, ...), read-only
+# Updates run as the owner (wizard), like the App Manager's own timer did; /etc/wizard/updates-by-host keeps that
+# timer off on a Mac (Host/OSUpdates.swift copies the disk first).
 read -r cmd || exit 0
+owner_wam() {
+  local out
+  out=$(sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+    wam updates "$@" </dev/null 2>/dev/null)   # stdin is the vsock: a detached installer must not hold it open
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo '{"error": "the App Manager did not answer"}'; fi
+}
 case "$cmd" in
   poweroff) echo ok; systemctl poweroff ;;
   ping) echo pong ;;
+  update-check) owner_wam --apply-if-auto --check ;;
+  update-auto) owner_wam --apply-if-auto ;;
+  update-now) owner_wam --apply ;;
+  update-status) owner_wam ;;
+  # Update now from Settings on any of the owner's devices: the App Manager's request for the Mac (read-only here).
+  update-request) cat /home/wizard/.wizard-os/host-update-request.json 2>/dev/null || echo '{}' ;;
+  update-request-clear) rm -f /home/wizard/.wizard-os/host-update-request.json; echo '{}' ;;
+  # The installer's log, kept on the Mac before a failed update's disk is replaced by the copy.
+  update-log) tail -n 400 /home/wizard/.wizard-os/install.log 2>/dev/null ;;
   *) echo unknown ;;
 esac

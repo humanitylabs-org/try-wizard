@@ -164,6 +164,53 @@ final class NoticeBarView: NSView {
         if updater.canCheckForUpdates { updater.checkForUpdates() }
     }
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
+
+    // MARK: Wizard OS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
+
+    private var osUpdatesDir: URL { WizardShared.supportDir.appendingPathComponent("os-updates", isDirectory: true) }
+    private var osUpdateSeen = ""
+    func watchOSUpdates() {
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { WizardUpdater.shared.osUpdateTick() }
+        }
+        Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
+            MainActor.assumeIsolated { WizardUpdater.shared.writeActivity() }
+        }
+        writeActivity()
+    }
+    /// The Host's Automatic update waits while Wizard records (a meeting or a voice take).
+    private func writeActivity() {
+        try? FileManager.default.createDirectory(at: osUpdatesDir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let a: [String: Any] = ["pid": getpid(), "at": Date().timeIntervalSince1970, "recording": isRecording()]
+        if let d = try? JSONSerialization.data(withJSONObject: a) {
+            try? d.write(to: osUpdatesDir.appendingPathComponent("app-activity.json"), options: .atomic)
+        }
+    }
+    private func osUpdateTick() {
+        guard !preparing, ready == nil, !activatingGuest else { return }
+        let j = WizardUpdate.json(osUpdatesDir.appendingPathComponent("journal.json"))
+        guard let id = j["id"] as? String, let phase = j["phase"] as? String else { return }
+        let to = j["target"] as? String ?? "the new release"
+        let key = id + ":" + phase
+        guard key != osUpdateSeen else { return }
+        osUpdateSeen = key
+        if phase != "done" {
+            show("os-updating", phase == "restoring"
+                 ? "The Wizard OS update didn't finish. Putting back the copy saved before it…"
+                 : "Updating Wizard OS to \(to). Wizard OS restarts once; your chats and files stay as they are.")
+            return
+        }
+        guard let at = j["finishedAt"] as? Double, Date().timeIntervalSince1970 - at < 3600 else { return }
+        let reason = j["reason"] as? String ?? ""
+        switch j["result"] as? String {
+        case "ok": show("installed", "Wizard OS updated to \(to)")
+        case "restored": show("os-restored", "The Wizard OS update to \(to) didn't finish, so Wizard went back to the copy saved before it. \(reason)")
+        case "failed": show("os-failed", "Wizard OS wasn't updated. \(reason)")
+        case "skipped" where j["kind"] as? String == "manual": show("os-failed", "Wizard OS wasn't updated. \(reason)")
+        default: if phase == "done", self.phase == "os-updating" { hideNotice() }
+        }
+    }
     private var noticeToken = UUID()
     private func show(_ state: String, _ text: String, retry: Bool = false) {
         phase = state; message = text; label.stringValue = text
