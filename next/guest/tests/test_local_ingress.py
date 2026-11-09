@@ -12,7 +12,7 @@ def load_routes():
 class Upstream(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.end_headers()
-  self.wfile.write(json.dumps({'port':self.server.server_port,'path':self.path,'login':self.headers.get('Tailscale-User-Login',''),'fwd':self.headers.get('X-Forwarded-For','')}).encode())
+  self.wfile.write(json.dumps({'port':self.server.server_port,'path':self.path,'login':self.headers.get('Tailscale-User-Login',''),'fwd':self.headers.get('X-Forwarded-For',''),'origin':self.headers.get('Origin','')}).encode())
  def log_message(self,*args):pass
 def serve():
  s=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream);threading.Thread(target=s.serve_forever,daemon=True).start();return s
@@ -53,7 +53,7 @@ class Ingress(unittest.TestCase):
     '/wizard-os-home/store-install':{'Proxy':f'http://127.0.0.1:{store.server_port}'},'/files/':{'Proxy':f'http://127.0.0.1:{files.server_port}/files/'}}}}},8796)
    (run/'routes.conf').write_text(''.join(m.location(a,b) for a,b in rows).replace('/opt/wizard/local-proxy-owner.inc',str(root/'owner.inc')))
    (run/'owner.conf').write_text('proxy_set_header Tailscale-User-Login "owner@example.com";\n')
-   (run/'shell.conf').write_text(f'set $wz_shell http://127.0.0.1:{shell.server_port};\n')
+   (run/'shell.conf').write_text(f'set $wz_shell http://127.0.0.1:{shell.server_port};\nset $wz_served_origin "https://box.example-tailnet.ts.net:8796";\n')
    (root/'owner.inc').write_text(OWNER_INC.read_text().replace('/run/wizard-local-proxy/',f'{run}/'))
    text=(CONFIG.read_text().replace('/run/wizard-local-proxy.pid',str(root/'nginx.pid')).replace('user root root;','')
     .replace('/run/wizard-local-proxy/',f'{run}/').replace('/opt/wizard/local-proxy-owner.inc',str(root/'owner.inc'))
@@ -81,6 +81,20 @@ class Ingress(unittest.TestCase):
     self.assertEqual(request('localhost:48023')[0],404)
     st,body=request('localhost:48023','/apps/test/')
     self.assertEqual((st,body['login']),(200,'owner@example.com'))
+    # Guest loopback is never the owner's device: no hop for the App Manager, Origin untouched.
+    st,body=request('127.0.0.1:48023','/wizard-os-home/store-install/_updates',{'Origin':'http://127.0.0.1:48023'})
+    self.assertEqual((body['fwd'],body['origin']),('','http://127.0.0.1:48023'))
+    # The Mac window's root-only socket is: named hop, and a same-origin write gets Serve's origin on Serve's routes.
+    class UnixHTTP(http.client.HTTPConnection):
+     def connect(self):
+      self.sock=socket.socket(socket.AF_UNIX);self.sock.connect(str(run/'window.sock'))
+    def window(path,headers):
+     c=UnixHTTP('localhost',timeout=2);c.request('GET',path,headers={'Host':'127.0.0.1:48023',**headers});r=c.getresponse();out=json.loads(r.read());c.close();return out
+    body=window('/wizard-os-home/store-install/_updates',{'Origin':'http://127.0.0.1:48023','X-Forwarded-For':'203.0.113.9'})
+    self.assertEqual((body['port'],body['fwd'],body['origin']),(store.server_port,'wizard-mac-window','https://box.example-tailnet.ts.net:8796'))
+    self.assertEqual(window('/wizard-os-home/store-install/_updates',{'Origin':'https://attacker.test'})['origin'],'https://attacker.test')
+    body=window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})
+    self.assertEqual((body['port'],body['fwd'],body['origin']),(shell.server_port,'wizard-mac-window','http://127.0.0.1:48023'))
    finally:
     process.terminate();process.communicate(timeout=5)
     for s in (shell,store,files):s.shutdown();s.server_close()
