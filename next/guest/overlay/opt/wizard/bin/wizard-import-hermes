@@ -387,6 +387,88 @@ def keep_wizard_auth(wizard_auth: bytes | None) -> bool:
         Path(tmp).unlink(missing_ok=True)
 
 
+# After an import the AI runs only through Wizard's own Claude/ChatGPT connections (James, 31 Oct, try-wizard#51), so
+# the result says whether one is connected and the Mac can ask the owner to connect one. Read-only: the same
+# discovery the Agent Service uses (wizard-os spec/AI_CONNECTIONS.md): running apps in apps.json that provide
+# `ai-connection`, asked on their loopback address for `GET /api/connection`, which never returns a token.
+APPS_JSON = Path("/home/wizard/.wizard-os/apps.json")
+AI_PROVIDERS = ("claude", "chatgpt")
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def connection_url(app: dict) -> str:
+    from urllib.parse import urlsplit
+
+    for candidate in ((app.get("view") or {}).get("local") if isinstance(app.get("view"), dict) else None,
+                      app.get("health")):
+        if not isinstance(candidate, str):
+            continue
+        try:
+            u = urlsplit(candidate)
+            port = u.port
+        except ValueError:
+            continue
+        if u.scheme in ("http", "https") and u.hostname in LOOPBACK:
+            host = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
+            return f"{u.scheme}://{host}{':%d' % port if port else ''}/api/connection"
+    return ""
+
+
+def fetch_connection(url: str, timeout: float = 8) -> dict | None:
+    """One bounded GET; redirects are refused, like the Agent Service's reader."""
+    import urllib.request
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    try:
+        with urllib.request.build_opener(NoRedirect).open(url, timeout=timeout) as r:
+            doc = json.loads(r.read(65536))
+    except Exception:  # noqa: BLE001 - unreachable or not JSON: unknown, never an import failure
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def ai_connections(wizard_auth: bytes | None, fetch=fetch_connection, registry_path: Path | None = None) -> dict:
+    """{"ai_connected": True|False|None, "ai_connections": {provider: status}}. None means it couldn't tell."""
+    status: dict[str, str] = {}
+    try:   # Wizard's own ChatGPT sign-in made during onboarding lives in its auth.json (kept by keep_wizard_auth)
+        auth = json.loads(wizard_auth or b"{}")
+        pool = auth.get("credential_pool") if isinstance(auth.get("credential_pool"), dict) else {}
+        providers = auth.get("providers") if isinstance(auth.get("providers"), dict) else {}
+        if providers.get("openai-codex") or pool.get("openai-codex"):
+            status["chatgpt"] = "connected"
+    except (ValueError, AttributeError):
+        pass
+    try:
+        registry = json.loads((registry_path or APPS_JSON).read_text())
+        apps = registry.get("apps") if isinstance(registry, dict) else None
+        if not isinstance(apps, list):
+            raise ValueError("apps.json has no apps")
+    except (OSError, ValueError):
+        apps = None
+    for app in sorted((a for a in apps or [] if isinstance(a, dict)), key=lambda a: str(a.get("id"))):
+        provides = [p for p in app.get("provides") or [] if isinstance(p, str)]
+        if app.get("status") != "running" or "ai-connection" not in provides:
+            continue
+        named = [p.rsplit("-", 1)[0] for p in provides if p.endswith(("-subscription", "-key"))]
+        provider = next((p.removesuffix("-api") for p in named if p.removesuffix("-api") in AI_PROVIDERS), None)
+        if provider is None or status.get(provider) == "connected":
+            continue
+        url = connection_url(app)
+        doc = fetch(url) if url else None
+        ok = doc is not None and str(doc.get("contract", "")).startswith("wizard.ai-connection/")
+        status[provider] = str(doc.get("status")) if ok else "unknown"
+    if any(s == "connected" for s in status.values()):
+        connected: bool | None = True
+    elif apps is None or "unknown" in status.values():
+        connected = None
+    else:
+        connected = False
+    return {"ai_connected": connected, "ai_connections": status}
+
+
 def tighten_vm_key() -> None:
     """Runtipi runs `chmod -R a+rwx` on an app's data folder at every start/stop (stock app-files-manager), and ssh
     then refuses the agent's VM key. Put 0700/0600 back once the start has happened."""
@@ -517,6 +599,11 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
     if rec["agent"] != "running" or rec["api"] is not True or rec["gateway"] is not True:
         raise RuntimeError("import readiness failed: agent/api/gateway")
     set_setup({"done": True, "verified": True, "brain": {"kind": "imported", "label": "Your Hermes"}})
+    try:   # read-only; tells the Mac whether to ask for a Claude/ChatGPT connection, never fails the import
+        rec.update(ai_connections(wizard_auth))
+    except Exception as e:  # noqa: BLE001
+        log("checking the AI connections failed:", e)
+        rec.update({"ai_connected": None, "ai_connections": {}})
     rec["complete"] = True
     (ROOT / "last.json").write_text(json.dumps(rec, indent=2))
     os.chmod(ROOT / "last.json", 0o600)
@@ -525,6 +612,7 @@ def _import_into(work: Path, image: str, wiring: dict, wizard_env: list[str], re
                                              "disabled_messaging", "paused_jobs", "env_replaced", "agent", "api",
                                              "gateway")},
             "env_left_behind": rec.get("env_left_behind", []),
+            "ai_connected": rec.get("ai_connected"), "ai_connections": rec.get("ai_connections", {}),
             "gateway_detail": None if gw.get("ok") else gw}
 
 
