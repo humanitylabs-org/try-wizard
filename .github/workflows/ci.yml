@@ -5,32 +5,65 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# Do not use a concurrency group: it can discard pending runs on a single Mac.
+# GitHub-hosted Apple Silicon runners (free and unlimited once the repository is
+# public). Fork PRs are safe here: read-only token, no secrets, ephemeral VM.
+# The previous self-hosted Mac job now lives in ci-self-hosted.yml (manual
+# dispatch only) so PR code can never reach that machine once public.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
-    name: ${{ matrix.target == 'test' && 'Tests' || 'Build' }} (macOS 26.7.1, ARM64)
-    # Only trusted branches in this private repository may use the runner.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: ${{ matrix.target == 'test' && 'Tests' || 'Build' }} (macos-15, ARM64)
     strategy:
       fail-fast: false
       matrix:
         target: [test, runtime]
-    runs-on: [self-hosted, macOS, ARM64, try-wizard]
-    # Allow up to 15 minutes for the shared worker, then the original 30-minute job budget.
+    runs-on: macos-15
     timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # app_version.py derives the build version from tags.
+          fetch-depth: 0
+
+      - name: Describe toolchain (cache key)
+        id: toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcrun swift --version
+          key=$(printf '%s|%s|%s|%s' "${ImageOS:-macos}" "${ImageVersion:-local}" \
+            "$(sw_vers -productVersion)" "$(xcrun clang --version | head -1)" | shasum -a 256 | cut -c1-16)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
 
       - name: Verify runner scheduling contracts
         run: python3 tests/test-ci-worker-lock.py
+
+      # ---- Tests -------------------------------------------------------------
+      - name: Cache SwiftPM build directories
+        if: matrix.target == 'test'
+        uses: actions/cache@v4
+        with:
+          path: |
+            macos/.build
+            next/mac/.build
+          key: swiftpm-${{ steps.toolchain.outputs.key }}-${{ hashFiles('macos/Package.swift', 'next/mac/Package.swift', 'macos/Sources/**', 'next/mac/Shared/**') }}
+          restore-keys: |
+            swiftpm-${{ steps.toolchain.outputs.key }}-
 
       - name: Install guest HTTP test dependencies in an isolated environment
         if: matrix.target == 'test'
@@ -39,19 +72,38 @@ jobs:
           "$RUNNER_TEMP/backup-tests-${GITHUB_RUN_ID}/bin/python" -m pip install -r next/guest/tests/requirements.txt
           printf '%s\n' "$RUNNER_TEMP/backup-tests-${GITHUB_RUN_ID}/bin" >> "$GITHUB_PATH"
 
-      # This compiles the Swift product and runs the native, shell, and guest
-      # contract suites. It does not build a guest image. The runner supplies
-      # WIZARD_CI_WORKER_LOCK to serialize with other heavy work on this Mac.
+      # Compiles the Swift product and runs the native, shell, and guest contract
+      # suites. It does not build a guest image (that needs Docker on Linux).
       - name: Run test suite
         if: matrix.target == 'test'
-        run: python3 scripts/ci-with-worker-lock.py make test
+        run: make test
+
+      # ---- Build -------------------------------------------------------------
+      - name: Cache Homebrew downloads
+        if: matrix.target == 'runtime'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: brew-${{ runner.os }}-${{ runner.arch }}-pkg-config-v1
 
       - name: Install runtime build tool
         if: matrix.target == 'runtime'
         run: command -v pkg-config || brew install pkg-config
 
-      # Build the actual graphics stack and QEMU on the available Mac OS version.
-      # Includes VirGL shader regressions and the complete binary compatibility audit.
+      # scripts/build-cache.py fingerprints every runtime input plus the macOS,
+      # clang and pkg-config versions; a restored runtime is reused only when that
+      # fingerprint matches, otherwise it is rebuilt from checksum-pinned sources.
+      - name: Cache native runtime build
+        if: matrix.target == 'runtime'
+        uses: actions/cache@v4
+        with:
+          path: |
+            macos/.build/qemu-gpu-runtime
+            .build/state/runtime.json
+          key: runtime-${{ steps.toolchain.outputs.key }}-${{ hashFiles('macos/build-qemu-gpu-runtime.sh', 'macos/bundle-macho-dependencies.sh', 'macos/pinned-runtime-bottles.sh', 'macos/prepare-qemu-gpu-runtime.sh', 'macos/qemu-hvf.entitlements', 'macos/runtime-files.txt', 'macos/verify-macos-compatibility.sh', 'macos/patches/**', 'macos/Tests/virgl/**', 'scripts/build-cache.py') }}
+
+      # Build the actual graphics stack and QEMU. Includes VirGL shader
+      # regressions and the complete binary compatibility audit.
       - name: Build and verify native runtime
         if: matrix.target == 'runtime'
-        run: python3 scripts/ci-with-worker-lock.py make runtime
+        run: make runtime
