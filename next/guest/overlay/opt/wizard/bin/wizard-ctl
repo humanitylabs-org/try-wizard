@@ -7,7 +7,8 @@
 #   update-auto   install it, under the same rules (wam updates --apply-if-auto); sent only after the disk copy
 #   update-now    install the channel's release now (wam updates --apply): the owner's confirmed Update now
 #   update-status the App Manager's update status (installing, failed, installed, ...), read-only
-#   update-inbox  what the owner said from any device: {"request": Update now, "postponed": Not tonight}
+#   update-inbox  what the owner said from any device: {"request": Update now, "postponed": Not tonight}; a request
+#                 with "when_idle" waits until update-status has nothing in waiting_for (Update when they finish)
 #   update-request-clear | update-postpone-clear   the Mac took it
 #   update-headsup <epoch> <version>   Automatic installs <version> at <epoch>; every device shows it with Not tonight
 #   update-headsup-clear
@@ -23,13 +24,16 @@ owner_wam() {
     wam updates "$@" </dev/null 2>/dev/null)   # stdin is the vsock: a detached installer must not hold it open
   if [ -n "$out" ]; then printf '%s\n' "$out"; else echo '{"error": "the App Manager did not answer"}'; fi
 }
+# The decision was made before the Mac's disk copy (update-check / the owner's Update now); after the copy's restart,
+# work Hermes resumes must not stop the update the owner already chose. Older App Managers don't know --anyway.
+anyway() { sudo -iu wizard wam updates --help </dev/null 2>/dev/null | grep -q -- '--anyway' && echo --anyway; }
 json_or_null() { if [ -s "$1" ]; then cat "$1"; else echo null; fi; }
 case "$cmd" in
   poweroff) echo ok; systemctl poweroff ;;
   ping) echo pong ;;
   update-check) owner_wam --apply-if-auto --check ;;
-  update-auto) owner_wam --apply-if-auto ;;
-  update-now) owner_wam --apply ;;
+  update-auto) owner_wam --apply-if-auto $(anyway) ;;
+  update-now) owner_wam --apply $(anyway) ;;
   update-status) owner_wam ;;
   update-inbox)
     printf '{"request": %s, "postponed": %s}\n' "$(json_or_null $W/host-update-request.json)" \

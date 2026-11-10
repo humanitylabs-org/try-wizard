@@ -153,6 +153,24 @@ final class OSUpdates {
             guard let self, self.blocked == nil else { return }
             let inbox = Self.object(data) ?? [:]
             if let req = inbox["request"] as? [String: Any], let target = req["target"] as? String {
+                if req["when_idle"] as? Bool == true {
+                    // Update when they finish: start once nothing the update would stop is running (WAM waiting_for,
+                    // which on a Mac counts everything: the disk copy restarts Wizard OS).
+                    self.vm.control("update-status", timeout: 120) { [weak self] data in
+                        guard let self, self.blocked == nil, let st = Self.object(data), st["error"] == nil else { return }
+                        let waiting = (st["waiting_for"] as? [[String: Any]]) ?? []
+                        if !waiting.isEmpty {
+                            let names = waiting.compactMap { $0["name"] as? String }.joined(separator: ", ")
+                            if names != self.lastWaitingLog { log("Wizard OS update: waiting for \(names)"); self.lastWaitingLog = names }
+                            return
+                        }
+                        self.lastWaitingLog = nil
+                        log("Wizard OS update: Wizard finished; updating to \(target) as asked")
+                        self.clearHeadsUp()
+                        self.run(kind: "manual", target: target)
+                    }
+                    return
+                }
                 log("Wizard OS update: Update now requested for \(target)")
                 self.clearHeadsUp()
                 self.run(kind: "manual", target: target)
@@ -193,6 +211,7 @@ final class OSUpdates {
         set { save(["postponedNight": newValue ?? NSNull()]) }
     }
     private var headsUp: (target: String, at: Date, since: Date)?
+    private var lastWaitingLog: String?
 
     private func autoTick() {
         let now = Date()
