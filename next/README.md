@@ -28,6 +28,19 @@ not the owner's subscription; no API key is embedded in the image.
 
 ## Requirements and measurements
 
+Native web downloads (Save/⤓ on file cards, attachment responses) land in
+~/Downloads. On macOS 15.2 and later WebKit verifies the actual user gesture and
+originating frame before a destination is allocated. On macOS 14 to 15.1 WebKit
+has no gesture metadata, so the window asks "Save … to Downloads?" first and only
+allocates after Save. Selected remote shell user saves remain allowed;
+installed-app frames are download-only under the trusted local shell, not granted
+script or media authority. In-flight names compare canonical Unicode and folded
+case while preserving filename spelling and suffix style. This is not an atomic
+reservation against unrelated processes creating filesystem entries later.
+Successful completions within a fixed 300 ms window share one Finder reveal;
+subsequent completions do not postpone that window. Real Finder/timer behavior
+and the macOS 14-15.1 Save question remain native acceptance work.
+
 Apple Silicon, macOS **14 or later**. Build tools: Xcode command-line tools, Docker
 (via Colima), Python 3 and `xz`. Use a Docker-shared build directory. A 16 GB Mac is
 recommended for the complete local stack, especially alongside other applications.
