@@ -3,11 +3,11 @@ import CoreGraphics
 import Darwin
 import IOKit.ps
 
-/// Wizard OS updates on a Mac. The App Manager in the VM keeps the owner's choice (Automatic / Ask me, channel) but
+/// WizardOS updates on a Mac. The App Manager in the VM keeps the owner's choice (Automatic / Ask me, channel) but
 /// starts nothing by itself here (the guest's /etc/wizard/updates-by-host). The Mac starts every update, and only
 /// after a copy of the VM disk:
 ///
-///   check -> stop Wizard OS -> clone disk.img (APFS, instant) -> start -> `wam updates --apply[-if-auto]`
+///   check -> stop WizardOS -> clone disk.img (APFS, instant) -> start -> `wam updates --apply[-if-auto]`
 ///   -> wait for the installer -> installed == target and the window answers -> keep the copy a day, then delete it
 ///   anything else -> stop -> put the copy back -> start, and say so in one line.
 ///
@@ -59,10 +59,10 @@ final class OSUpdates {
         }
         onChange()
     }
-    private func phase(_ p: String) { log("Wizard OS update: \(p)"); save(["phase": p]) }
+    private func phase(_ p: String) { log("WizardOS update: \(p)"); save(["phase": p]) }
 
     /// Every device shows the update from the App Manager's `host_update` (wizard-ctl update-phase writes it in the
-    /// guest). Only possible while Wizard OS runs; the web keeps the last step it saw while it is away.
+    /// guest). Only possible while WizardOS runs; the web keeps the last step it saw while it is away.
     private func tellGuest(phase p: String, result: String = "-", reason: String? = nil) {
         let j = Self.journal()
         guard let id = (j["id"] as? String)?.prefix(36), let target = j["target"] as? String,
@@ -86,7 +86,7 @@ final class OSUpdates {
         let j = Self.journal()
         guard busy, let p = j["phase"] as? String, Self.active.contains(p) else { return nil }
         let to = (j["target"] as? String).map { " to \($0)" } ?? ""
-        return p == "restoring" ? "Wizard OS update didn't finish — restoring the copy…" : "Updating Wizard OS\(to)…"
+        return p == "restoring" ? "\(WizardOSName.text) update didn't finish — restoring the copy…" : "Updating \(WizardOSName.text)\(to)…"
     }
 
     // MARK: start-up
@@ -97,10 +97,10 @@ final class OSUpdates {
         guard j["phase"] as? String == "restoring" else { return }
         if FileManager.default.fileExists(atPath: Self.copyURL.path) {
             if rename(Self.copyURL.path, Self.diskURL.path) == 0 {
-                log("Wizard OS update: put the copy back after a restart")
+                log("WizardOS update: put the copy back after a restart")
                 finish(result: "restored", reason: (j["reason"] as? String) ?? "The update did not finish.")
             } else {
-                log("Wizard OS update: could not put the copy back (\(String(cString: strerror(errno))))")
+                log("WizardOS update: could not put the copy back (\(String(cString: strerror(errno))))")
             }
         } else {
             finish(result: "restored", reason: (j["reason"] as? String) ?? "The update did not finish.")
@@ -108,7 +108,7 @@ final class OSUpdates {
     }
 
     func start() {
-        if Self.qaAnyTime { log("Wizard OS update: TEST MODE qaAutoUpdateAnyTime is on (Automatic at any hour, no idle wait)") }
+        if Self.qaAnyTime { log("WizardOS update: TEST MODE qaAutoUpdateAnyTime is on (Automatic at any hour, no idle wait)") }
         resume()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.tick() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.tick() }
@@ -123,10 +123,10 @@ final class OSUpdates {
             finish(result: "skipped", reason: "Wizard stopped before the update started; nothing changed.")
         case "updating", "verifying":
             busy = true; begin()
-            log("Wizard OS update: resuming after a Host restart")
+            log("WizardOS update: resuming after a Host restart")
             whenRunning(limit: Self.windowLimit) { [weak self] ok in
                 guard let self else { return }
-                guard ok else { self.restore("Wizard OS did not start again during the update."); return }
+                guard ok else { self.restore("\(WizardOSName.text) did not start again during the update."); return }
                 self.monitor(started: (j["updateStartedAt"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date())
             }
         default: break
@@ -138,7 +138,7 @@ final class OSUpdates {
     private var blocked: String? {
         if busy { return "an update is running" }
         if otherWork() { return "Wizard is updating itself" }
-        if vm.state != .running { return "Wizard OS is not running" }
+        if vm.state != .running { return "\(WizardOSName.text) is not running" }
         if WizardShared.coldBootstrapToken != nil || WizardShared.guestUpdatePayload != nil { return "an upgrade is open" }
         let done: Set<String> = ["guest-activated", "guest-rolled-back", "install-failed", "native-activated"]
         if let p = WizardUpdate.json(WizardUpdate.journal)["phase"] as? String, !done.contains(p) { return "an upgrade is open" }
@@ -155,23 +155,23 @@ final class OSUpdates {
             if let req = inbox["request"] as? [String: Any], let target = req["target"] as? String {
                 if req["when_idle"] as? Bool == true {
                     // Update when they finish: start once nothing the update would stop is running (WAM waiting_for,
-                    // which on a Mac counts everything: the disk copy restarts Wizard OS).
+                    // which on a Mac counts everything: the disk copy restarts WizardOS).
                     self.vm.control("update-status", timeout: 120) { [weak self] data in
                         guard let self, self.blocked == nil, let st = Self.object(data), st["error"] == nil else { return }
                         let waiting = (st["waiting_for"] as? [[String: Any]]) ?? []
                         if !waiting.isEmpty {
                             let names = waiting.compactMap { $0["name"] as? String }.joined(separator: ", ")
-                            if names != self.lastWaitingLog { log("Wizard OS update: waiting for \(names)"); self.lastWaitingLog = names }
+                            if names != self.lastWaitingLog { log("WizardOS update: waiting for \(names)"); self.lastWaitingLog = names }
                             return
                         }
                         self.lastWaitingLog = nil
-                        log("Wizard OS update: Wizard finished; updating to \(target) as asked")
+                        log("WizardOS update: Wizard finished; updating to \(target) as asked")
                         self.clearHeadsUp()
                         self.run(kind: "manual", target: target)
                     }
                     return
                 }
-                log("Wizard OS update: Update now requested for \(target)")
+                log("WizardOS update: Update now requested for \(target)")
                 self.clearHeadsUp()
                 self.run(kind: "manual", target: target)
                 return
@@ -179,7 +179,7 @@ final class OSUpdates {
             if inbox["postponed"] is [String: Any] {
                 self.vm.control("update-postpone-clear") { _ in }
                 self.postponedNight = Self.nightKey(Date())
-                if self.headsUp != nil { log("Wizard OS update: Not tonight"); self.clearHeadsUp() }
+                if self.headsUp != nil { log("WizardOS update: Not tonight"); self.clearHeadsUp() }
             }
             if self.headsUp != nil { self.headsUpTick() } else { self.autoTick() }
         }
@@ -219,17 +219,17 @@ final class OSUpdates {
               postponedNight != Self.nightKey(now),
               now.timeIntervalSince(lastAutoCheck) >= Self.autoEveryAtNight else { return }
         lastAutoCheck = now
-        if let why = Self.notNow() { log("Wizard OS update: not now (\(why))"); return }
+        if let why = Self.notNow() { log("WizardOS update: not now (\(why))"); return }
         vm.control("update-check", timeout: 120) { [weak self] data in
             guard let self, self.blocked == nil, self.headsUp == nil, let st = Self.object(data) else { return }
             // Ask me never updates by itself: only an owner who chose Automatic gets a night update.
             guard st["mode"] as? String == "auto", st["due"] as? Bool == true, let target = st["latest"] as? String,
                   target.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else {
-                if let skipped = st["skipped"] as? String { log("Wizard OS update: Automatic skipped (\(skipped))") }
+                if let skipped = st["skipped"] as? String { log("WizardOS update: Automatic skipped (\(skipped))") }
                 return
             }
             if let failed = Self.journal()["failedTarget"] as? String, failed == target { return }   // one try per release
-            if let why = Self.notNow() { log("Wizard OS update: not now (\(why))"); return }
+            if let why = Self.notNow() { log("WizardOS update: not now (\(why))"); return }
             self.startHeadsUp(target)
         }
     }
@@ -239,7 +239,7 @@ final class OSUpdates {
     private func startHeadsUp(_ target: String) {
         let at = Date().addingTimeInterval(Self.headsUpLead)
         headsUp = (target, at, Date())
-        log("Wizard OS update: heads-up, Automatic installs \(target) at \(at)")
+        log("WizardOS update: heads-up, Automatic installs \(target) at \(at)")
         vm.control("update-headsup \(Int(at.timeIntervalSince1970)) \(target)") { _ in }
         // Check every 15 s from here, not only on the minute.
         for i in 1...Int(Self.headsUpLead / 15) + 2 {
@@ -261,7 +261,7 @@ final class OSUpdates {
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
         if (!Self.qaAnyTime && idle < Date().timeIntervalSince(h.since)) || Self.appRecording || !Self.onACPower {
             // Someone came to the Mac (or it started recording, or left power): not now; maybe later tonight.
-            log("Wizard OS update: heads-up cancelled (the Mac is in use)")
+            log("WizardOS update: heads-up cancelled (the Mac is in use)")
             clearHeadsUp(); lastAutoCheck = Date(); return
         }
         guard Date() >= h.at else { return }
@@ -270,7 +270,7 @@ final class OSUpdates {
             let st = Self.object(data) ?? [:]
             guard self.blocked == nil, st["mode"] as? String == "auto", st["due"] as? Bool == true,
                   st["latest"] as? String == h.target else {
-                log("Wizard OS update: heads-up ended without an update (\(st["skipped"] as? String ?? "no longer due"))")
+                log("WizardOS update: heads-up ended without an update (\(st["skipped"] as? String ?? "no longer due"))")
                 self.clearHeadsUp(); return
             }
             self.headsUp = nil   // `wam updates --apply-if-auto` clears the guest's heads-up when it starts
@@ -309,23 +309,23 @@ final class OSUpdates {
     // MARK: Update now from the Host menu (shown while Wizard.app is closed)
 
     func updateNowFromMenu() {
-        if let why = blocked { alert("Wizard OS can't update right now", "\(why.prefix(1).uppercased())\(why.dropFirst()).") ; return }
+        if let why = blocked { alert("\(WizardOSName.text) can't update right now", "\(why.prefix(1).uppercased())\(why.dropFirst()).") ; return }
         vm.control("update-status", timeout: 120) { [weak self] data in
             guard let self else { return }
             guard let st = Self.object(data), st["error"] == nil else {
-                self.alert("Couldn't check for a Wizard OS update", "The App Manager in Wizard OS didn't answer. Try again in a minute.")
+                self.alert("Couldn't check for a \(WizardOSName.text) update", "The App Manager in \(WizardOSName.text) didn't answer. Try again in a minute.")
                 return
             }
             let installed = st["installed"] as? String ?? "unknown"
             guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true,
                   let target = st["latest"] as? String else {
-                self.alert("Wizard OS is up to date", "This Wizard runs \(installed).")
+                self.alert("\(WizardOSName.text) is up to date", "This Wizard runs \(installed).")
                 return
             }
             NSApp.activate(ignoringOtherApps: true)
             let a = NSAlert()
-            a.messageText = "Update Wizard OS to \(target)?"
-            a.informativeText = "Wizard saves a copy of Wizard OS first and puts it back if the update fails. Wizard OS restarts once and is away for 10–20 minutes. You can also update any time in Settings."
+            a.messageText = "Update \(WizardOSName.text) to \(target)?"
+            a.informativeText = "Wizard saves a copy of \(WizardOSName.text) first and puts it back if the update fails. \(WizardOSName.text) restarts once and is away for 10–20 minutes. You can also update any time in Settings."
             a.addButton(withTitle: "Update"); a.addButton(withTitle: "Cancel")
             if a.runModal() == .alertFirstButtonReturn { self.run(kind: "manual", target: target) }
         }
@@ -341,9 +341,9 @@ final class OSUpdates {
     private func run(kind: String, target: String) {
         guard blocked == nil else { return }
         if let free = VMController.freeBytes(), free < Self.freeNeeded {
-            let reason = String(format: "Not enough free space on this Mac to keep a copy of Wizard OS during the update (%.0f GB free, needs %.0f GB).",
+            let reason = String(format: "Not enough free space on this Mac to keep a copy of \(WizardOSName.text) during the update (%.0f GB free, needs %.0f GB).",
                                 Double(free) / 1e9, Double(Self.freeNeeded) / 1e9)
-            log("Wizard OS update: \(reason)")
+            log("WizardOS update: \(reason)")
             save(["id": UUID().uuidString, "kind": kind, "target": target, "phase": "done", "result": "skipped",
                   "reason": reason, "finishedAt": Date().timeIntervalSince1970])
             if kind == "manual" { vm.control("update-request-clear") { _ in } }
@@ -365,21 +365,21 @@ final class OSUpdates {
             if kind == "manual" { self.vm.control("update-request-clear") { _ in } }
             guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true else {
                 self.finish(result: "skipped", reason: st["installing"] as? Bool == true
-                            ? "An update is already running in Wizard OS."
-                            : st.isEmpty ? "The App Manager in Wizard OS didn't answer." : "Wizard OS is already up to date.")
+                            ? "An update is already running in \(WizardOSName.text)."
+                            : st.isEmpty ? "The App Manager in \(WizardOSName.text) didn't answer." : "\(WizardOSName.text) is already up to date.")
                 return
             }
             self.phase("stopping")
             self.tellGuest(phase: "stopping")
             self.vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
-                // Wizard OS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
-                self?.abandon("Wizard OS didn't shut down cleanly, so nothing was updated.")
+                // WizardOS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
+                self?.abandon("\(WizardOSName.text) didn't shut down cleanly, so nothing was updated.")
             }) { [weak self] in self?.copyAndBoot(kind: kind) }
         }
     }
 
     private func copyAndBoot(kind: String) {
-        if otherWork() {   // Wizard is quitting: leave Wizard OS stopped on its unchanged disk
+        if otherWork() {   // Wizard is quitting: leave WizardOS stopped on its unchanged disk
             finish(result: "skipped", reason: "Wizard quit before the update started; nothing changed.")
             return
         }
@@ -389,18 +389,18 @@ final class OSUpdates {
         guard clonefile(Self.diskURL.path, Self.copyURL.path, 0) == 0 else {
             let why = String(cString: strerror(errno))
             vm.start()
-            abandon("Couldn't copy Wizard OS before the update (\(why)), so nothing was updated.")
+            abandon("Couldn't copy \(WizardOSName.text) before the update (\(why)), so nothing was updated.")
             return
         }
-        log(String(format: "Wizard OS update: disk copied in %.1fs", Date().timeIntervalSince(started)))
+        log(String(format: "WizardOS update: disk copied in %.1fs", Date().timeIntervalSince(started)))
         phase("booting")
         vm.start()
         whenRunning(limit: Self.windowLimit) { [weak self] ok in
             guard let self else { return }
             guard ok else {
-                // The copy is the same disk; putting it back changes nothing. Leave Wizard OS as it is.
+                // The copy is the same disk; putting it back changes nothing. Leave WizardOS as it is.
                 try? FileManager.default.removeItem(at: Self.copyURL)
-                self.finish(result: "failed", reason: "Wizard OS did not start after the copy; nothing was updated.")
+                self.finish(result: "failed", reason: "\(WizardOSName.text) did not start after the copy; nothing was updated.")
                 return
             }
             self.phase("updating")
@@ -431,14 +431,14 @@ final class OSUpdates {
                 restore("The update was still running after \(Int(Self.installLimit / 60)) minutes."); return
             }
             if vm.state == .error || vm.state == .stopped || vm.state == .notInstalled {
-                restore("Wizard OS stopped during the update."); return
+                restore("\(WizardOSName.text) stopped during the update."); return
             }
             vm.control("update-status", timeout: 120) { [weak self] data in
                 guard let self else { return }
                 guard let st = Self.object(data), st["error"] == nil else {
                     misses += 1
                     if Date().timeIntervalSince(lastSeen) > Self.windowLimit {
-                        self.restore("Wizard OS stopped answering during the update."); return
+                        self.restore("\(WizardOSName.text) stopped answering during the update."); return
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: poll); return
                 }
@@ -460,7 +460,7 @@ final class OSUpdates {
         if st["failed"] as? Bool == true || st["interrupted"] as? Bool == true || installed == nil || installed != target {
             let why = (st["failure_reason"] as? String).map { "The installer said: \($0)" }
                 ?? (st["interrupted"] as? Bool == true ? "The installer stopped before it finished." : nil)
-                ?? "Wizard OS reports \(installed ?? "no installed release") instead of \(target ?? "the new release")."
+                ?? "\(WizardOSName.text) reports \(installed ?? "no installed release") instead of \(target ?? "the new release")."
             restore(why); return
         }
         // On a Mac the install must be exactly the release: a "drift" read-back (e.g. an image that couldn't be pulled,
@@ -478,7 +478,7 @@ final class OSUpdates {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     if (resp as? HTTPURLResponse)?.statusCode == 200 {
-                        log("Wizard OS update: \(installed ?? "?") installed and answering")
+                        log("WizardOS update: \(installed ?? "?") installed and answering")
                         self.save(["copyKeptUntil": Date().addingTimeInterval(Self.keepCopy).timeIntervalSince1970,
                                    "failedTarget": NSNull()])
                         self.finish(result: "ok", reason: nil)
@@ -495,10 +495,10 @@ final class OSUpdates {
 
     /// The update failed: keep the installer's log on the Mac, stop, put the copy back, start.
     private func restore(_ reason: String) {
-        log("Wizard OS update failed: \(reason)")
+        log("WizardOS update failed: \(reason)")
         save(["reason": reason, "failedTarget": Self.journal()["target"] ?? NSNull()])
         func putBack() {
-            // A stop already under way (Wizard OS shutting itself down) must finish first.
+            // A stop already under way (WizardOS shutting itself down) must finish first.
             if vm.state == .stopping || vm.state == .starting {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { putBack() }; return
             }
@@ -507,12 +507,12 @@ final class OSUpdates {
                 guard let self else { return }
                 guard rename(Self.copyURL.path, Self.diskURL.path) == 0 else {
                     let why = String(cString: strerror(errno))
-                    log("Wizard OS update: could not put the copy back (\(why)); copy kept at \(Self.copyURL.path)")
+                    log("WizardOS update: could not put the copy back (\(why)); copy kept at \(Self.copyURL.path)")
                     self.vm.start()
                     self.finish(result: "failed", reason: "\(reason) The copy could not be put back (\(why)); it is kept.")
                     return
                 }
-                log("Wizard OS update: copy put back")
+                log("WizardOS update: copy put back")
                 self.vm.start()
                 self.finish(result: "restored", reason: reason)
             })
@@ -530,7 +530,7 @@ final class OSUpdates {
 
     /// Nothing was installed (the run stopped before the copy or before the update started).
     private func abandon(_ reason: String) {
-        log("Wizard OS update: \(reason)")
+        log("WizardOS update: \(reason)")
         try? FileManager.default.removeItem(at: Self.copyURL)
         if vm.state == .stopped { vm.start() }
         else if vm.state == .stopping {
@@ -548,8 +548,8 @@ final class OSUpdates {
         var changes: [String: Any] = ["phase": "done", "result": result, "finishedAt": Date().timeIntervalSince1970]
         changes["reason"] = reason ?? NSNull()
         save(changes)
-        log("Wizard OS update finished: \(result)\(reason.map { " — \($0)" } ?? "")")
-        // Tell every device how it ended, once Wizard OS runs again (after a restore: on the copy).
+        log("WizardOS update finished: \(result)\(reason.map { " — \($0)" } ?? "")")
+        // Tell every device how it ended, once WizardOS runs again (after a restore: on the copy).
         whenRunning(limit: Self.windowLimit) { [weak self] ok in
             if ok { self?.tellGuest(phase: "done", result: result, reason: reason) }
         }
@@ -564,7 +564,7 @@ final class OSUpdates {
         let until = j["copyKeptUntil"] as? Double ?? 0
         if j["phase"] as? String == "done", Date().timeIntervalSince1970 > until {
             try? FileManager.default.removeItem(at: Self.copyURL)
-            log("Wizard OS update: dropped the copy from before the last update")
+            log("WizardOS update: dropped the copy from before the last update")
             save(["copyKeptUntil": NSNull()])
         }
     }
@@ -579,11 +579,11 @@ final class OSUpdates {
         check()
     }
 
-    /// Keep the Mac awake (not the display) while Wizard OS updates.
+    /// Keep the Mac awake (not the display) while WizardOS updates.
     private func begin() {
         guard activity == nil else { return }
         activity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .suddenTerminationDisabled],
-                                                         reason: "Updating Wizard OS")
+                                                         reason: "Updating \(WizardOSName.text)")
     }
     private func end() {
         if let a = activity { ProcessInfo.processInfo.endActivity(a); activity = nil }

@@ -25,18 +25,18 @@ final class Pipe2 {
     private let lock = NSLock()
     init(tcp: Int32, conn: VZVirtioSocketConnection) { self.tcp = tcp; self.conn = conn }
 
-    // Every live pump, so they can all be cut when Wizard OS stops. A vsock connection to a VM that stopped never
+    // Every live pump, so they can all be cut when WizardOS stops. A vsock connection to a VM that stopped never
     // reports EOF: its pump threads stayed blocked and the window's keep-alive TCP connection stayed open but dead,
     // so the window's requests hung with no answer and no error ("Can't reach Wizard" until the app restarted).
     private static var live: [ObjectIdentifier: Pipe2] = [:]
     private static let liveLock = NSLock()
     private var cut = false
 
-    /// Cut every bridged connection (Wizard OS is stopping or starting): the window sees a reset and reconnects.
+    /// Cut every bridged connection (WizardOS is stopping or starting): the window sees a reset and reconnects.
     static func dropAll() {
         liveLock.lock(); let pipes = Array(live.values); liveLock.unlock()
         for p in pipes { p.drop() }
-        if !pipes.isEmpty { log("bridge: closed \(pipes.count) window connection(s) to the stopped Wizard OS") }
+        if !pipes.isEmpty { log("bridge: closed \(pipes.count) window connection(s) to the stopped WizardOS") }
     }
 
     private func drop() {
@@ -380,7 +380,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     private var stopCompletion: (() -> Void)?
 
     /// One fixed command on the guest control channel (vsock 9100, wizard-ctl); the reply is everything the guest
-    /// writes before it closes the connection. nil when Wizard OS isn't running or didn't answer in time.
+    /// writes before it closes the connection. nil when WizardOS isn't running or didn't answer in time.
     func control(_ command: String, timeout: TimeInterval = 60, _ done: @escaping (Data?) -> Void) {
         guard state == .running, let device = socketDevice else { done(nil); return }
         device.connect(toPort: WizardShared.guestControlPort) { result in
@@ -625,7 +625,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var guestPatchBusy = false
     private let diskOwnership = WizardDiskOwnership()
     lazy var osUpdates = OSUpdates(vm: vm)
-    /// Any update on this Mac: a Wizard.app update, a guest patch or a Wizard OS update (OSUpdates).
+    /// Any update on this Mac: a Wizard.app update, a guest patch or a WizardOS update (OSUpdates).
     var anyUpdateBusy: Bool { preparingUpdate || guestPatchBusy || osUpdates.busy }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -738,9 +738,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !preparingUpdate else { return }
         let request = WizardUpdate.json(WizardUpdate.request)
         if osUpdates.busy {
-            // Wizard OS is updating (the VM may be stopped for its disk copy): the app update waits.
+            // WizardOS is updating (the VM may be stopped for its disk copy): the app update waits.
             if let nonce = request["nonce"] as? String {
-                try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": "Wizard OS is updating; try again when it finishes"], WizardUpdate.response)
+                try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": "\(WizardOSName.text) is updating; try again when it finishes"], WizardUpdate.response)
             }
             return
         }
@@ -815,7 +815,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         switch WizardHostTermination.decide(quitting: quitting,
                     canTerminateWithoutStopping: vm.canTerminateWithoutStopping,
-                    // A Wizard OS update doesn't hold the Mac's quit: its journal resumes it, or puts the
+                    // A WizardOS update doesn't hold the Mac's quit: its journal resumes it, or puts the
                     // disk copy back, on the next launch (OSUpdates.resume / prepareBoot).
                     updateBusy: preparingUpdate || guestPatchBusy) {
         case .terminate: return .terminateNow

@@ -165,7 +165,7 @@ final class NoticeBarView: NSView {
     }
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
 
-    // MARK: Wizard OS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
+    // MARK: WizardOS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
 
     private var osUpdatesDir: URL { WizardShared.supportDir.appendingPathComponent("os-updates", isDirectory: true) }
     private var osUpdateSeen = ""
@@ -187,13 +187,13 @@ final class NoticeBarView: NSView {
             try? d.write(to: osUpdatesDir.appendingPathComponent("app-activity.json"), options: .atomic)
         }
     }
-    /// Wizard OS is updating (Host/OSUpdates.swift journal): the page shows it on every device, so the window adds
+    /// WizardOS is updating (Host/OSUpdates.swift journal): the page shows it on every device, so the window adds
     /// no notice of its own, and expected outages (voice status) stay quiet.
     nonisolated static var osUpdating: Bool {
         let j = WizardUpdate.json(WizardShared.supportDir.appendingPathComponent("os-updates/journal.json"))
         return ["stopping", "copying", "booting", "updating", "verifying", "restoring"].contains(j["phase"] as? String ?? "")
     }
-    /// The web (core/os-update-flow.js) shows Wizard OS update progress and the result on every device, the Mac
+    /// The web (core/os-update-flow.js) shows WizardOS update progress and the result on every device, the Mac
     /// window included; the window adds no notice of its own.
     private func osUpdateTick() {}
     private var noticeToken = UUID()
