@@ -25,7 +25,29 @@ final class Pipe2 {
     private let lock = NSLock()
     init(tcp: Int32, conn: VZVirtioSocketConnection) { self.tcp = tcp; self.conn = conn }
 
+    // Every live pump, so they can all be cut when Wizard OS stops. A vsock connection to a VM that stopped never
+    // reports EOF: its pump threads stayed blocked and the window's keep-alive TCP connection stayed open but dead,
+    // so the window's requests hung with no answer and no error ("Can't reach Wizard" until the app restarted).
+    private static var live: [ObjectIdentifier: Pipe2] = [:]
+    private static let liveLock = NSLock()
+    private var cut = false
+
+    /// Cut every bridged connection (Wizard OS is stopping or starting): the window sees a reset and reconnects.
+    static func dropAll() {
+        liveLock.lock(); let pipes = Array(live.values); liveLock.unlock()
+        for p in pipes { p.drop() }
+        if !pipes.isEmpty { log("bridge: closed \(pipes.count) window connection(s) to the stopped Wizard OS") }
+    }
+
+    private func drop() {
+        lock.lock(); let first = !cut; cut = true; lock.unlock()
+        guard first else { return }
+        shutdown(tcp, SHUT_RDWR)                 // wakes both pump threads; finish() closes the descriptors
+        shutdown(conn.fileDescriptor, SHUT_RDWR)
+    }
+
     func run() {
+        Self.liveLock.lock(); Self.live[ObjectIdentifier(self)] = self; Self.liveLock.unlock()
         let v = conn.fileDescriptor
         spawn(from: tcp, to: v)
         spawn(from: v, to: tcp)
@@ -53,7 +75,10 @@ final class Pipe2 {
 
     private func finish() {
         lock.lock(); remaining -= 1; let done = remaining == 0; lock.unlock()
-        if done { close(tcp); conn.close() }
+        if done {
+            Self.liveLock.lock(); Self.live[ObjectIdentifier(self)] = nil; Self.liveLock.unlock()
+            close(tcp); conn.close()
+        }
     }
 }
 
@@ -202,6 +227,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     func start() {
         guard vm == nil || vm?.state == .stopped else { return }
         cleanupColdSerial()
+        Pipe2.dropAll()     // a forced stop doesn't call guestDidStop: never carry a connection into the new boot
         guard WizardShared.osInstalled else { state = .notInstalled; return }
         if let free = Self.freeBytes(), free < Self.minFreeToStart {
             fail(String(format: "Not enough free space on this Mac to run WizardOS safely (%.1f GB free, needs %.0f GB).",
@@ -280,6 +306,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
     func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
     func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
+        Pipe2.dropAll()
         guard let machine = vm else { completion?(); return }
         guard state == .running || state == .starting || state == .error else {
             // A concurrent shutdown is not evidence that the disk is stopped.
@@ -418,6 +445,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         DispatchQueue.main.async {
             guard self.vm === virtualMachine else { return }
             self.cleanupColdSerial()
+            Pipe2.dropAll()
             log("WizardOS powered off")
             if let c = self.stopCompletion { self.stopCompletion = nil; c() }
             else { self.vm = nil; self.socketDevice = nil; self.state = .stopped }
@@ -426,6 +454,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         DispatchQueue.main.async {
             guard self.vm === virtualMachine else { return }
+            Pipe2.dropAll()
             self.fail("WizardOS stopped: \(error.localizedDescription)")
         }
     }
