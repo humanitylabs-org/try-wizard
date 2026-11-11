@@ -296,6 +296,7 @@ final class NoticeBarView: NSView {
         }
         guard journal["phase"] as? String == "installing" else {
             if ["prepared", "install-failed", "guest-activated", "guest-rolled-back"].contains(journal["phase"] as? String ?? "") { releaseLease() }
+            if journal["phase"] as? String == "guest-activated" { WizardRollbackCleanup.start() }
             return
         }
         let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
@@ -311,6 +312,7 @@ final class NoticeBarView: NSView {
                     guard let self else { return }
                     self.activatingGuest = false; self.releaseLease(); self.onGuestFinished()
                     self.show(error == nil ? "installed" : "failed", error ?? "Wizard and local software updated — build \(current)")
+                    if error == nil { WizardRollbackCleanup.start() }
                 }
                 WizardGuestActivation.shared.activate()
                 return
