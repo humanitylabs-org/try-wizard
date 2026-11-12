@@ -4,6 +4,8 @@
 Only text people read changes; ids, paths, URLs and log lines keep their names.
 """
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -38,6 +40,16 @@ class WizardOSNameTests(unittest.TestCase):
         self.assertIn('static var text: String { "WizardOS" }', self.name)
         self.assertNotIn('isOn', self.name)
         self.assertNotIn(TWO, self.brand)
+        # Source contract only: the final name enum has no trailing declaration/brace.
+        self.assertRegex(self.name, r'\Aenum WizardOSName\s*\{\s*static var text: String \{ "WizardOS" \}\s*\}\s*\Z')
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('swiftc'),
+                         'Brand.swift syntax parse requires macOS and swiftc')
+    def test_brand_swift_syntax(self):
+        # Parse the real source, without compiling/linking the native app.
+        result = subprocess.run(['swiftc', '-frontend', '-parse', str(MAC / 'Shared/Brand.swift')],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_both_targets_compile_the_name(self):
         build = (MAC / 'build.sh').read_text()
