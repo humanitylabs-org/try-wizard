@@ -26,4 +26,3 @@ enum WizardBrand {
 enum WizardOSName {
     static var text: String { "WizardOS" }
 }
-}
