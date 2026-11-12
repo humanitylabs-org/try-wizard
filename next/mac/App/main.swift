@@ -1411,6 +1411,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     // MARK: WKNavigationDelegate
 
     var onNavigate: () -> Void = {}
+    /// The front door's "Start chatting" URL, while the window loads it itself (FrontDoorHandoff).
+    var nativeHandoff: URL?
     /// Origins already checked for Wizard UX this session (so a legacy-only back end isn't probed on every load).
     var resolvedOrigins: Set<String> = []
 
@@ -1419,6 +1421,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        nativeHandoff = nil
         if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
         publishTitleBarInset()
         // Landed on the legacy UX root (e.g. local onboarding redirects to /wizard/): switch to Wizard UX once if served.
@@ -1446,7 +1449,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     private var localRetries = 0
 
     private func loadFailed(_ error: Error) {
-        if (error as NSError).code == NSURLErrorCancelled { return }
+        let failure = error as NSError
+        // Cancelling the page's own hand-off (FrontDoorHandoff) is not a failure: the window loads it next.
+        if nativeHandoff != nil, failure.domain == "WebKitErrorDomain", failure.code == 102 { return }
+        nativeHandoff = nil
+        if failure.code == NSURLErrorCancelled { return }
         // WizardOS on this Mac may still be bringing a service up: retry quietly before showing an error.
         if Store.active?.kind == .thisMac, localRetries < 12 {
             localRetries += 1
@@ -1464,6 +1471,19 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // A Save/⤓ tap (<a download>, including blob: files) must land in ~/Downloads, not vanish.
         if action.shouldPerformDownload { decisionHandler(.download); return }
         guard let url = action.request.url else { decisionHandler(.allow); return }
+        // Onboarding's hand-off to Wizard is loaded by the window, not the page (FrontDoorHandoff).
+        if nativeHandoff == url {
+            // The window's own load of the hand-off: WebKit sends it as a direct load.
+        } else if Store.active?.kind == .thisMac,
+                  FrontDoorHandoff.needsNativeLoad(from: webView.url, to: url, method: action.request.httpMethod,
+                                                   mainFrame: action.targetFrame?.isMainFrame == true,
+                                                   setup: WizardShared.localSetupURL,
+                                                   ux: URL(string: "http://127.0.0.1:\(WizardShared.uxPort)/")!) {
+            nativeHandoff = url
+            decisionHandler(.cancel)
+            DispatchQueue.main.async { [weak self] in self?.load(url) }
+            return
+        }
         // App-origin iframe navigation is not native authority. Preserve Files /
         // installed-app links in their managed frame without whitelisting the
         // same origin for script controls or silent device permission.
