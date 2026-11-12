@@ -1489,9 +1489,33 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
         download.delegate = self
+        downloadSources[ObjectIdentifier(download)] = .frame(navigationAction.sourceFrame)
     }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
         download.delegate = self
+        // A response download names no frame before macOS 15.2, only whether it is the main frame's.
+        if navigationResponse.isForMainFrame { downloadSources[ObjectIdentifier(download)] = .mainFrameResponse }
+    }
+    /// Who started a download. macOS 15.2+ asks WebKit (`originatingFrame`); macOS 14 to 15.1 has no such
+    /// property, so the frame is recorded when the navigation becomes a download. Unknown = refused.
+    private enum DownloadSource { case frame(WKFrameInfo), mainFrameResponse }
+    private var downloadSources: [ObjectIdentifier: DownloadSource] = [:]
+    private func downloadSource(_ download: WKDownload) -> DownloadSource? {
+        let recorded = downloadSources.removeValue(forKey: ObjectIdentifier(download))
+        if #available(macOS 15.2, *) { return .frame(download.originatingFrame) }
+        return recorded
+    }
+    private func downloadAllowed(from source: DownloadSource) -> Bool {
+        switch source {
+        case .frame(let frame):
+            return allowsNative(frame) ||
+                (isTrustedDocument && Store.active?.kind == .thisMac &&
+                 NativeOrigin(frame.securityOrigin)?.isInstalledApp == true)
+        case .mainFrameResponse:
+            // The trusted shell's own main frame navigated to a file (same rule as allowsNative, without a frame).
+            guard isTrustedDocument, let actual = web.url.flatMap(NativeOrigin.init) else { return false }
+            return !actual.isInstalledApp && selectedControlOrigins.contains(actual)
+        }
     }
     private var downloadTargets = DownloadDestinations()
     // Keep the actual object alive for exactly the admitted reservation lifetime;
@@ -1501,9 +1525,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                   suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         // Only the trusted shell (or an installed app frame under the local shell) may save files.
         // Installed-app download scope does not grant those frames script or microphone powers.
-        guard allowsNative(download.originatingFrame) ||
-                (isTrustedDocument && Store.active?.kind == .thisMac &&
-                 NativeOrigin(download.originatingFrame.securityOrigin)?.isInstalledApp == true)
+        guard let source = downloadSource(download), downloadAllowed(from: source)
         else { completionHandler(nil); return }
         if #available(macOS 15.2, *) {
             // WebKit's actual user-gesture metadata is required before allocating a destination.
@@ -1546,11 +1568,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         }
     }
     func downloadDidFinish(_ download: WKDownload) {
+        downloadSources.removeValue(forKey: ObjectIdentifier(download))
         activeDownloads.removeValue(forKey: ObjectIdentifier(download))
         guard let target = downloadTargets.release(ObjectIdentifier(download)) else { return }
         queueDownloadReveal(target)
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadSources.removeValue(forKey: ObjectIdentifier(download))
         activeDownloads.removeValue(forKey: ObjectIdentifier(download))
         let target = downloadTargets.release(ObjectIdentifier(download))
         guard target != nil, (error as NSError).code != NSURLErrorCancelled, let window else { return }

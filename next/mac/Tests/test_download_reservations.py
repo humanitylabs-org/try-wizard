@@ -49,9 +49,15 @@ class DownloadReservationContract(unittest.TestCase):
 
     def test_frame_authority_then_user_metadata_precede_allocation(self):
         admission = self.admission()
-        self.before(admission, "guard allowsNative(download.originatingFrame) ||", "if #available(macOS 15.2, *)")
+        self.before(admission, "guard let source = downloadSource(download), downloadAllowed(from: source)",
+                    "if #available(macOS 15.2, *)")
         self.before(admission, "else { completionHandler(nil); return }", "if #available(macOS 15.2, *)")
-        modern = self.section("if #available(macOS 15.2, *) {", "// macOS 14 to 15.1")
+        # originatingFrame exists only on macOS 15.2+; older systems use the frame recorded at didBecome.
+        source = self.section("private func downloadSource(", "private func downloadAllowed(")
+        self.before(source, "if #available(macOS 15.2, *) { return .frame(download.originatingFrame) }", "return recorded")
+        self.contains(SOURCE, "downloadSources[ObjectIdentifier(download)] = .frame(navigationAction.sourceFrame)")
+        self.assertNotIn("download.originatingFrame", admission, "originatingFrame needs macOS 15.2")
+        modern = self.section("if #available(macOS 15.2, *) {\n            // WebKit's actual", "// macOS 14 to 15.1")
         self.before(modern, "guard download.isUserInitiated else { completionHandler(nil); return }",
                     "completionHandler(reserveDownload(")
         self.assertFalse(".linkActivated" in admission, "Navigation type is not gesture metadata")
@@ -70,7 +76,9 @@ class DownloadReservationContract(unittest.TestCase):
         self.contains(HELPER, "static func displayName(_ suggestedFilename: String) -> String")
 
     def test_installed_frame_download_scope_does_not_grant_other_native_powers(self):
-        self.contains(self.admission(), "(isTrustedDocument && Store.active?.kind == .thisMac &&\n                 NativeOrigin(download.originatingFrame.securityOrigin)?.isInstalledApp == true)")
+        allowed = self.section("private func downloadAllowed(", "func download(_ download: WKDownload, decideDestinationUsing")
+        self.contains(allowed, "(isTrustedDocument && Store.active?.kind == .thisMac &&\n                 NativeOrigin(frame.securityOrigin)?.isInstalledApp == true)")
+        self.contains(allowed, "return !actual.isInstalledApp && selectedControlOrigins.contains(actual)")
         authority = self.section("func allowsNative(_ frame: WKFrameInfo)", "private func isWizardOrigin")
         self.contains(authority, "guard frame.isMainFrame, isTrustedDocument")
         self.contains(authority, "!origin.isInstalledApp")
