@@ -544,8 +544,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         guard let web = message.webView, let body = message.body as? [String: Any],
               let method = body["method"] as? String else { return }
         let admitted = owner?.web === web && owner?.allowsNative(message.frameInfo) == true
+        // The committed main document that sent this message. A reply is delivered only while that same document is
+        // still the one on screen: a reload or same-origin navigation in between drops it (wizard-os issue 387).
+        let generation = owner?.documentGeneration
         if UserDefaults.standard.bool(forKey: "QAHooks") {
-            qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame,
+            qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame, "generation": generation ?? 0,
                                "origin": "\(message.frameInfo.securityOrigin.protocol)://\(message.frameInfo.securityOrigin.host):\(message.frameInfo.securityOrigin.port)",
                                "admitted": admitted])
             if qaMessages.count > 200 { qaMessages.removeFirst() }
@@ -572,6 +575,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             DispatchQueue.main.async {
                 // A navigation while work is in flight must not leak its result.
                 guard self?.owner?.web === web, self?.owner?.isTrustedDocument == true,
+                      generation != nil, self?.owner?.documentGeneration == generation,
                       web.url.flatMap(NativeOrigin.init) == caller else { return }
                 web.evaluateJavaScript("window.wizardNativeReply && window.wizardNativeReply(\(payload))")
             }
@@ -1418,6 +1422,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         dragView.header = .zero; dragView.controls = []
+    }
+
+    /// Bumped when a new main-frame document commits; NativeBridge binds every reply to the generation it was asked in.
+    private(set) var documentGeneration: UInt64 = 0
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === web else { return }
+        documentGeneration &+= 1
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
