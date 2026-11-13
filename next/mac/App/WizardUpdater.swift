@@ -164,6 +164,38 @@ final class NoticeBarView: NSView {
         if updater.canCheckForUpdates { updater.checkForUpdates() }
     }
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
+
+    // MARK: WizardOS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
+
+    private var osUpdatesDir: URL { WizardShared.supportDir.appendingPathComponent("os-updates", isDirectory: true) }
+    private var osUpdateSeen = ""
+    func watchOSUpdates() {
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { WizardUpdater.shared.osUpdateTick() }
+        }
+        Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
+            MainActor.assumeIsolated { WizardUpdater.shared.writeActivity() }
+        }
+        writeActivity()
+    }
+    /// The Host's Automatic update waits while Wizard records (a meeting or a voice take).
+    private func writeActivity() {
+        try? FileManager.default.createDirectory(at: osUpdatesDir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let a: [String: Any] = ["pid": getpid(), "at": Date().timeIntervalSince1970, "recording": isRecording()]
+        if let d = try? JSONSerialization.data(withJSONObject: a) {
+            try? d.write(to: osUpdatesDir.appendingPathComponent("app-activity.json"), options: .atomic)
+        }
+    }
+    /// WizardOS is updating (Host/OSUpdates.swift journal): the page shows it on every device, so the window adds
+    /// no notice of its own, and expected outages (voice status) stay quiet.
+    nonisolated static var osUpdating: Bool {
+        let j = WizardUpdate.json(WizardShared.supportDir.appendingPathComponent("os-updates/journal.json"))
+        return ["stopping", "copying", "booting", "updating", "verifying", "restoring"].contains(j["phase"] as? String ?? "")
+    }
+    /// The web (core/os-update-flow.js) shows WizardOS update progress and the result on every device, the Mac
+    /// window included; the window adds no notice of its own.
+    private func osUpdateTick() {}
     private var noticeToken = UUID()
     private func show(_ state: String, _ text: String, retry: Bool = false) {
         phase = state; message = text; label.stringValue = text

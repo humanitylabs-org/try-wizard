@@ -1,8 +1,63 @@
 #!/bin/bash
-# One-line control channel from the Mac (vsock 9100): poweroff | ping
-read -r cmd || exit 0
+# One-line control channel from the Mac (vsock 9100). Fixed commands only; nothing the Mac sends reaches a shell
+# (the one argument, update-headsup's, must match a fixed pattern).
+#   poweroff | ping
+#   update-check  would Automatic install the channel's release now? (wam updates --apply-if-auto --check; JSON,
+#                 `due: true` when it would). Only ever true on Automatic: Ask me never updates by itself.
+#   update-auto   install it, under the same rules (wam updates --apply-if-auto); sent only after the disk copy
+#   update-now    install the channel's release now (wam updates --apply): the owner's confirmed Update now
+#   update-status the App Manager's update status (installing, failed, installed, ...), read-only
+#   update-inbox  what the owner said from any device: {"request": Update now, "postponed": Not tonight}; a request
+#                 with "when_idle" waits until update-status has nothing in waiting_for (Update when they finish)
+#   update-request-clear | update-postpone-clear   the Mac took it
+#   update-headsup <epoch> <version>   Automatic installs <version> at <epoch>; every device shows it with Not tonight
+#   update-headsup-clear
+#   update-phase <id> <phase> <version> <result|-> <reason|->   the Mac's progress and result, for every device
+#   update-log    the installer's log, kept on the Mac before a failed update's disk is replaced by the copy
+# Updates run as the owner (wizard), like the App Manager's own timer did; /etc/wizard/updates-by-host keeps that
+# timer off on a Mac (Host/OSUpdates.swift copies the disk first).
+read -r cmd arg1 arg2 arg3 arg4 arg5 rest || exit 0
+W=/home/wizard/.wizard-os
+owner_wam() {
+  local out
+  out=$(sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+    wam updates "$@" </dev/null 2>/dev/null)   # stdin is the vsock: a detached installer must not hold it open
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo '{"error": "the App Manager did not answer"}'; fi
+}
+# The decision was made before the Mac's disk copy (update-check / the owner's Update now); after the copy's restart,
+# work Hermes resumes must not stop the update the owner already chose. Older App Managers don't know --anyway.
+anyway() { sudo -iu wizard wam updates --help </dev/null 2>/dev/null | grep -q -- '--anyway' && echo --anyway; }
+json_or_null() { if [ -s "$1" ]; then cat "$1"; else echo null; fi; }
 case "$cmd" in
   poweroff) echo ok; systemctl poweroff ;;
   ping) echo pong ;;
+  update-check) owner_wam --apply-if-auto --check ;;
+  update-auto) owner_wam --apply-if-auto $(anyway) ;;
+  update-now) owner_wam --apply $(anyway) ;;
+  update-status) owner_wam ;;
+  update-inbox)
+    printf '{"request": %s, "postponed": %s}\n' "$(json_or_null $W/host-update-request.json)" \
+      "$(json_or_null $W/host-update-postpone.json)" ;;
+  update-request-clear) rm -f $W/host-update-request.json; echo '{}' ;;
+  update-postpone-clear) rm -f $W/host-update-postpone.json; echo '{}' ;;
+  update-headsup)
+    if [[ "$arg1" =~ ^[0-9]{10}$ && "$arg2" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]{0,40}$ && -z "$arg3" ]]; then
+      printf '{"target": "%s", "at": %s}\n' "$arg2" "$arg1" > $W/.host-update-headsup.json.tmp
+      chown wizard:wizard $W/.host-update-headsup.json.tmp
+      mv $W/.host-update-headsup.json.tmp $W/host-update-headsup.json; echo '{}'
+    else echo '{"error": "update-headsup <epoch> <version>"}'; fi ;;
+  update-phase)   # <id> <phase> <version> <result|-> <reason-code|->: what every device shows (WAM host_update)
+    if [[ "$arg1" =~ ^[0-9A-Fa-f-]{8,36}$ && "$arg2" =~ ^(stopping|updating|verifying|restoring|done)$ \
+          && "$arg3" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]{0,40}$ && "$arg4" =~ ^(ok|restored|failed|skipped|-)$ \
+          && "$arg5" =~ ^([a-z]{1,20}|-)$ && -z "$rest" ]]; then
+      res=null; [ "$arg4" != - ] && res="\"$arg4\""
+      why=null; [ "$arg5" != - ] && why="\"$arg5\""
+      printf '{"id": "%s", "phase": "%s", "target": "%s", "result": %s, "reason": %s, "at": %s}\n' \
+        "$arg1" "$arg2" "$arg3" "$res" "$why" "$(date +%s)" > $W/.host-update-phase.json.tmp
+      chown wizard:wizard $W/.host-update-phase.json.tmp
+      mv $W/.host-update-phase.json.tmp $W/host-update-phase.json; echo '{}'
+    else echo '{"error": "update-phase <id> <phase> <version> <result|-> <reason|->"}'; fi ;;
+  update-headsup-clear) rm -f $W/host-update-headsup.json; echo '{}' ;;
+  update-log) tail -n 400 $W/install.log 2>/dev/null ;;
   *) echo unknown ;;
 esac

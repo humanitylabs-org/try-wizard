@@ -1035,7 +1035,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             DispatchQueue.main.async {
                 guard let self, self.voiceGeneration == generation, Store.active?.kind == .thisMac else { return }
                 self.voiceTask = nil
-                let ready = status?.isReady == true
+                // While WizardOS updates, local voice is down on purpose: no error bar for that.
+                let ready = status?.isReady == true || WizardUpdater.osUpdating
                 self.voiceBar.isHidden = ready; self.voiceHeight.constant = ready ? 0 : 64
                 self.voiceLabel.stringValue = ready ? "" : status?.summary ?? "Local voice status unavailable — Retry to request preparation."
                 self.voiceLabel.toolTip = self.voiceLabel.stringValue
@@ -1748,6 +1749,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                              ("Quit Wizard", #selector(WizardWindowController.quitWizard))])
         }
         WizardUpdater.shared.start()
+        WizardUpdater.shared.watchOSUpdates()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
     }
 
