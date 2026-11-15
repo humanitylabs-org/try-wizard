@@ -714,6 +714,22 @@ enum WizardImportConnectPrompt {
     }
 }
 
+/// The Mac app shows the PWA/phone app icon (dark Void tile, glowing hat) instead of the flat purple square
+/// (try-wizard#86). Only the running app's Dock icon changes; the bundle icon, name, bundle id and the
+/// `Wizard MVP` data folder stay as they are, so nothing about an install moves.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp PWAIcon -bool YES` turns it on (next launch).
+enum WizardPWAIcon {
+    static let key = "PWAIcon"
+    static let resource = "WizardPWA"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+
+    @MainActor static func apply() {
+        guard isOn, let path = Bundle.main.path(forResource: resource, ofType: "icns"),
+              let image = NSImage(contentsOfFile: path) else { return }
+        NSApp.applicationIconImage = image
+    }
+}
+
 /// Double-click on the blank top bar, read from the system title-bar setting (issue #19).
 /// Off by default: `defaults write org.humanitylabs.wizard.mvp TitleBarDoubleClick -bool YES` turns it on.
 enum WizardTitleBarDoubleClick {
@@ -1727,6 +1743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        WizardPWAIcon.apply()
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

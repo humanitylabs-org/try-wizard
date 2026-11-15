@@ -21,3 +21,7 @@ The DMG is a small native installer, not an embedded guest image. Existing immut
 No core Hermes, shortcuts, quit/back contracts, file sharing, guest pins, daily identity, public publication, main merges, teammate contact or OS installer feed/version changes. Remote work uses `$WIZARD_WORK_ROOT/Projects/wizard-desktop/branding-hat-20261014` and the shared `$WIZARD_WORK_ROOT/AndroidBuilds/worker.lock`.
 
 `next/mac/Tests/test-branding.py` binds original/derived hashes, exact ICNS representation bytes, mandatory native consumers, alternate packaging default, onboarding markup, and semantic provider-icon preservation. Real Swift builds, codesign/DMG contents and native AppKit runtime/readback are separately recorded in the delivery evidence directory.
+
+## PWA icon switch (try-wizard#86)
+
+`brand/pwa/` holds the Mac app icon in the PWA/phone app's look (dark Void tile, dot grid, UV glow, white-to-UV hat), rendered by `render-mac-icon.cjs` (from PR #56) and hashed in `brand/pwa/provenance.json`. `build.sh` packs it as `WizardPWA.icns` next to the default `Wizard.icns`. It is used only when the off-by-default `PWAIcon` user default is on (`defaults write org.humanitylabs.wizard.mvp PWAIcon -bool YES`, then relaunch): the running app's Dock icon becomes the PWA icon. The bundle icon, app name, bundle id and the `Wizard MVP` data folder do not change. Making it the icon for everyone later means packing `brand/pwa` as `Wizard.icns` and removing the switch.

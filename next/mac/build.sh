@@ -106,6 +106,9 @@ for bundle in "$APP" "$HOST"; do
   cp assets/brand/wizard-mark-{purple,white}.png "$bundle/Contents/Resources/"
   cp assets/brand/provenance.json "$bundle/Contents/Resources/WizardBrandProvenance.json"
 done
+# The PWA/phone-app icon (try-wizard#86), used for the Dock only when the off-by-default `PWAIcon` switch is on.
+python3 assets/build-icon.py assets/brand/pwa "$OUT/obj/WizardPWA.icns" --no-marks
+cp "$OUT/obj/WizardPWA.icns" "$APP/Contents/Resources/WizardPWA.icns"
 
 
 cat > "$OUT/obj/host.entitlements" <<EOF
