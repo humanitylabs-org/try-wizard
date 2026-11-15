@@ -723,7 +723,7 @@ enum WizardPWAIcon {
     static let resource = "WizardPWA"
     static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
 
-    static func apply() {
+    @MainActor static func apply() {
         guard isOn, let path = Bundle.main.path(forResource: resource, ofType: "icns"),
               let image = NSImage(contentsOfFile: path) else { return }
         NSApp.applicationIconImage = image
