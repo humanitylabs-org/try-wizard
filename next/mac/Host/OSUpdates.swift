@@ -17,6 +17,10 @@ import IOKit.ps
 /// Automatic would install now (channel, promotion, the agent not working), the Mac is on power, untouched for 15
 /// minutes and not recording; then a 5-minute heads-up on every device (Update now / Not tonight), cancelled if
 /// anyone comes to the Mac. Update now runs the same steps at once.
+/// For testers (the For testers channel, `latest`) on Automatic: the team's own Macs stay on the newest build, so the
+/// night, power and idle rules don't apply. A new release installs as soon as Wizard isn't working on anything the
+/// update would stop and nothing is recording, after the same heads-up (Update now / Not now; Not now waits 3 hours).
+/// The disk copy, the wait for running work and one Automatic try per release stay.
 /// The journal (os-updates/journal.json) survives a Host restart, so an interrupted update is finished or undone
 /// on the next launch. Wizard.app reads it to show progress and the result.
 final class OSUpdates {
@@ -178,8 +182,14 @@ final class OSUpdates {
             }
             if inbox["postponed"] is [String: Any] {
                 self.vm.control("update-postpone-clear") { _ in }
-                self.postponedNight = Self.nightKey(Date())
-                if self.headsUp != nil { log("WizardOS update: Not tonight"); self.clearHeadsUp() }
+                if self.tester {
+                    self.postponedUntil = Date().addingTimeInterval(Self.testerPostpone)
+                    if self.headsUp != nil { log("WizardOS update: Not now (For testers: next try in 3 hours)") }
+                } else {
+                    self.postponedNight = Self.nightKey(Date())
+                    if self.headsUp != nil { log("WizardOS update: Not tonight") }
+                }
+                self.clearHeadsUp()
             }
             if self.headsUp != nil { self.headsUpTick() } else { self.autoTick() }
         }
@@ -210,36 +220,79 @@ final class OSUpdates {
         get { Self.journal()["postponedNight"] as? String }
         set { save(["postponedNight": newValue ?? NSNull()]) }
     }
-    private var headsUp: (target: String, at: Date, since: Date)?
+    private var headsUp: (target: String, at: Date, since: Date, tester: Bool)?
     private var lastWaitingLog: String?
+    private var lastSkipLog: String?
+
+    // MARK: For testers: any hour, as soon as Wizard is free
+
+    /// For testers checks every 5 minutes (a new For testers release is cut at most every 30 minutes).
+    static let testerEvery: TimeInterval = 5 * 60
+    /// Not now on the heads-up waits this long (wizard-app-manager TESTER_POSTPONE_HOURS words it).
+    static let testerPostpone: TimeInterval = 3 * 3600
+    /// The box's channel as the App Manager last reported it (journal, so it survives a Host restart).
+    private var tester: Bool {
+        get { Self.journal()["channel"] as? String == "latest" }
+    }
+    private func noteChannel(_ st: [String: Any]) {
+        guard let c = st["channel"] as? String, c != Self.journal()["channel"] as? String else { return }
+        save(["channel": c])
+    }
+    private var postponedUntil: Date? {
+        get { (Self.journal()["postponedUntil"] as? Double).map { Date(timeIntervalSince1970: $0) } }
+        set { save(["postponedUntil": newValue.map { $0.timeIntervalSince1970 } ?? NSNull()]) }
+    }
+    /// A release version, or a private test build of one (`0.3.241-mac.1`); nothing else reaches wizard-ctl.
+    static func isVersion(_ v: String) -> Bool {
+        v.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]{1,24})?$"#, options: .regularExpression) != nil
+    }
+
+    /// When Automatic may look: For testers any hour unless they said Not now; everyone else only at night.
+    private func mayCheck(_ now: Date, tester: Bool) -> Bool {
+        if tester { return (postponedUntil.map { now >= $0 } ?? true) }
+        return Self.atNight(now) && Self.atNight(now.addingTimeInterval(Self.headsUpLead + 60))
+            && postponedNight != Self.nightKey(now)
+    }
+
+    private func skipLog(_ s: String) {
+        guard s != lastSkipLog else { return }
+        lastSkipLog = s; log("WizardOS update: \(s)")
+    }
 
     private func autoTick() {
         let now = Date()
-        guard Self.atNight(now), Self.atNight(now.addingTimeInterval(Self.headsUpLead + 60)),
-              postponedNight != Self.nightKey(now),
-              now.timeIntervalSince(lastAutoCheck) >= Self.autoEveryAtNight else { return }
+        // For testers looks every 5 minutes. Everyone else only matters at night, but the channel is only known from
+        // the App Manager, so a box outside the night still asks every 30 minutes (nothing starts; it notices a
+        // switch to For testers).
+        let every = Self.qaAnyTime ? 60 : (tester ? Self.testerEvery : Self.atNight(now) ? Self.autoEveryAtNight : 30 * 60)
+        guard now.timeIntervalSince(lastAutoCheck) >= every else { return }
         lastAutoCheck = now
-        if let why = Self.notNow() { log("WizardOS update: not now (\(why))"); return }
+        if tester, let until = postponedUntil, now < until { return }   // they said Not now
         vm.control("update-check", timeout: 120) { [weak self] data in
             guard let self, self.blocked == nil, self.headsUp == nil, let st = Self.object(data) else { return }
-            // Ask me never updates by itself: only an owner who chose Automatic gets a night update.
+            self.noteChannel(st)
+            let tester = self.tester
+            guard self.mayCheck(Date(), tester: tester) else { return }
+            if !tester, let why = Self.notNow() { self.skipLog("not now (\(why))"); return }
+            // Ask me never updates by itself: only an owner who chose Automatic gets an automatic update.
             guard st["mode"] as? String == "auto", st["due"] as? Bool == true, let target = st["latest"] as? String,
-                  target.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else {
-                if let skipped = st["skipped"] as? String { log("WizardOS update: Automatic skipped (\(skipped))") }
+                  Self.isVersion(target) else {
+                if let skipped = st["skipped"] as? String { self.skipLog("Automatic skipped (\(skipped))") }
                 return
             }
             if let failed = Self.journal()["failedTarget"] as? String, failed == target { return }   // one try per release
-            if let why = Self.notNow() { log("WizardOS update: not now (\(why))"); return }
-            self.startHeadsUp(target)
+            if let why = tester ? (Self.appRecording ? "recording" : nil) : Self.notNow() { self.skipLog("not now (\(why))"); return }
+            self.lastSkipLog = nil
+            self.startHeadsUp(target, tester: tester)
         }
     }
 
     /// Every device shows "WizardOS updates in 5 minutes · Update now · Not tonight" (the App Manager's
     /// host_headsup); the Mac starts the update when the time is up and nobody said no.
-    private func startHeadsUp(_ target: String) {
+    private func startHeadsUp(_ target: String, tester: Bool) {
         let at = Date().addingTimeInterval(Self.headsUpLead)
-        headsUp = (target, at, Date())
-        log("WizardOS update: heads-up, Automatic installs \(target) at \(at)")
+        headsUp = (target, at, Date(), tester)
+        log("WizardOS update: heads-up, Automatic installs \(target) at \(at)\(tester ? " (For testers)" : "")")
         vm.control("update-headsup \(Int(at.timeIntervalSince1970)) \(target)") { _ in }
         // Check every 15 s from here, not only on the minute.
         for i in 1...Int(Self.headsUpLead / 15) + 2 {
@@ -259,9 +312,11 @@ final class OSUpdates {
     private func headsUpTick() {
         guard let h = headsUp else { return }
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        if (!Self.qaAnyTime && idle < Date().timeIntervalSince(h.since)) || Self.appRecording || !Self.onACPower {
+        if h.tester ? Self.appRecording
+                    : ((!Self.qaAnyTime && idle < Date().timeIntervalSince(h.since)) || Self.appRecording || !Self.onACPower) {
             // Someone came to the Mac (or it started recording, or left power): not now; maybe later tonight.
-            log("WizardOS update: heads-up cancelled (the Mac is in use)")
+            // For testers only a recording stops it: they answer the heads-up themselves (Not now).
+            log("WizardOS update: heads-up cancelled (\(Self.appRecording ? "recording" : "the Mac is in use"))")
             clearHeadsUp(); lastAutoCheck = Date(); return
         }
         guard Date() >= h.at else { return }
@@ -354,6 +409,7 @@ final class OSUpdates {
         var fresh: [String: Any] = ["id": UUID().uuidString, "kind": kind, "target": target,
                                     "startedAt": Date().timeIntervalSince1970]
         if let f = old["failedTarget"] { fresh["failedTarget"] = f }
+        if let c = old["channel"] { fresh["channel"] = c }
         try? FileManager.default.removeItem(at: Self.journalURL)
         save(fresh)
         vm.control("update-status", timeout: 120) { [weak self] data in

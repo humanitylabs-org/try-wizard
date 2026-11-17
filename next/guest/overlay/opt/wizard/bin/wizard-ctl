@@ -10,7 +10,7 @@
 #   update-inbox  what the owner said from any device: {"request": Update now, "postponed": Not tonight}; a request
 #                 with "when_idle" waits until update-status has nothing in waiting_for (Update when they finish)
 #   update-request-clear | update-postpone-clear   the Mac took it
-#   update-headsup <epoch> <version>   Automatic installs <version> at <epoch>; every device shows it with Not tonight
+#   update-headsup <epoch> <version>   Automatic installs <version> at <epoch>; every device shows it with Not tonight (For testers: Not now)
 #   update-headsup-clear
 #   update-phase <id> <phase> <version> <result|-> <reason|->   the Mac's progress and result, for every device
 #   update-log    the installer's log, kept on the Mac before a failed update's disk is replaced by the copy
