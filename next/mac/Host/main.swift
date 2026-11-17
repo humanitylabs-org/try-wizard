@@ -379,6 +379,25 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
     }
     private var stopCompletion: (() -> Void)?
 
+    /// Pause / resume the running VM (VZ): the vCPUs stop, so nothing reaches disk.img while paused. Used around the
+    /// update's disk copy (OSUpdates.liveBackup); `state` stays `.running`.
+    func pause(_ done: @escaping (Bool) -> Void) {
+        guard state == .running, let machine = vm, machine.canPause else { done(false); return }
+        machine.pause { result in
+            DispatchQueue.main.async {
+                if case .failure(let e) = result { log("pause failed: \(e.localizedDescription)"); done(false) } else { done(true) }
+            }
+        }
+    }
+    func resume(_ done: @escaping (Bool) -> Void) {
+        guard let machine = vm, machine.canResume else { done(false); return }
+        machine.resume { result in
+            DispatchQueue.main.async {
+                if case .failure(let e) = result { log("resume failed: \(e.localizedDescription)"); done(false) } else { done(true) }
+            }
+        }
+    }
+
     /// One fixed command on the guest control channel (vsock 9100, wizard-ctl); the reply is everything the guest
     /// writes before it closes the connection. nil when WizardOS isn't running or didn't answer in time.
     func control(_ command: String, timeout: TimeInterval = 60, _ done: @escaping (Data?) -> Void) {

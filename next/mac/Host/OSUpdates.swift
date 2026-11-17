@@ -7,8 +7,9 @@ import IOKit.ps
 /// starts nothing by itself here (the guest's /etc/wizard/updates-by-host). The Mac starts every update, and only
 /// after a copy of the VM disk:
 ///
-///   check -> stop WizardOS -> clone disk.img (APFS, instant) -> start -> `wam updates --apply[-if-auto]`
-///   -> wait for the installer -> installed == target and the window answers -> keep the copy a day, then delete it
+///   check -> freeze the guest's disk + pause -> clone disk.img (APFS, instant) -> resume + thaw (about a second; an
+///   older guest: stop -> clone -> start) -> `wam updates --apply[-if-auto]` -> wait for the installer
+///   -> installed == target and the window answers -> keep the copy a day, then delete it
 ///   anything else -> stop -> put the copy back -> start, and say so in one line.
 ///
 /// Ask me (the default) never updates by itself: the owner sees "WizardOS x is ready" on every device and taps
@@ -448,28 +449,95 @@ final class OSUpdates {
             // clean-up must not start this again after it finishes). Wait until the guest confirms it is gone before
             // the VM stops for the copy: a request still on the copied disk comes back with a restore and starts the
             // same update again (wizard-app-manager#696 review 4c).
-            guard kind == "manual" else { self.stopAndCopy(kind: kind, st); return }
+            guard kind == "manual" else { self.backUp(kind: kind, st); return }
             self.vm.control("update-request-clear") { [weak self] data in
                 guard let self else { return }
                 guard let o = Self.object(data), o["error"] == nil else {
                     self.finish(result: "skipped", reason: "The update didn't start: Wizard couldn't take the request.")
                     return
                 }
-                self.stopAndCopy(kind: kind, st)
+                self.backUp(kind: kind, st)
             }
         }
     }
 
-    private func stopAndCopy(kind: String, _ st: [String: Any]) {
+    private func backUp(kind: String, _ st: [String: Any]) {
         guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true else {
             self.finish(result: "skipped", reason: st["installing"] as? Bool == true
                         ? "An update is already running in \(WizardOSName.text)."
                         : st.isEmpty ? "The App Manager in \(WizardOSName.text) didn't answer." : "\(WizardOSName.text) is already up to date.")
             return
         }
-        self.phase("stopping")
-        self.tellGuest(phase: "stopping")
-        self.vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
+        tellGuest(phase: "stopping")   // every device: "Backing up"
+        liveBackup(kind: kind)
+    }
+
+    // MARK: the copy
+
+    /// The copy without a shutdown (about a second; nothing restarts): the guest flushes and freezes its filesystem
+    /// (`wizard-ctl freeze`, with its own thaw watchdog), the VM pauses, disk.img is flushed and cloned, then the VM
+    /// resumes and the guest thaws. Measured on the dev VM: frozen 1.2 s without the pause (10 clones booted clean, intact
+    /// databases), 3.3 s with it on a real update. Anything unexpected (an older guest without `freeze`, a failed freeze or pause): resume, thaw, and
+    /// take the stop-based copy instead.
+    static let freezeWatchdog = 30
+    private func liveBackup(kind: String) {
+        if otherWork() { finish(result: "skipped", reason: "Wizard quit before the update started; nothing changed."); return }
+        phase("copying")
+        let started = Date()
+        let fallBack: (String) -> Void = { [weak self] why in
+            log("WizardOS update: backup without a shutdown didn't work (\(why)); stopping WizardOS for the copy")
+            self?.stopAndCopy(kind: kind)
+        }
+        vm.control("freeze \(Self.freezeWatchdog)", timeout: 30) { [weak self] data in
+            guard let self else { return }
+            guard Self.object(data)?["frozen"] as? Bool == true else {
+                // An older guest ("unknown"), a failed freeze or no answer: make sure nothing stays frozen.
+                let said = data.flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.vm.control("thaw", timeout: 15) { _ in fallBack(said.map { "the guest said \($0.prefix(80))" } ?? "no answer") }
+                return
+            }
+            let frozenAt = Date()
+            self.vm.pause { [weak self] paused in
+                guard let self else { return }
+                var copied = false, why = "the VM didn't pause"
+                if paused {
+                    try? FileManager.default.removeItem(at: Self.copyURL)   // the copy kept from the last update
+                    let fd = open(Self.diskURL.path, O_RDONLY)
+                    if fd >= 0 { _ = fcntl(fd, F_FULLFSYNC); close(fd) }
+                    if clonefile(Self.diskURL.path, Self.copyURL.path, 0) == 0 { copied = true }
+                    else { why = "couldn't copy the disk (\(String(cString: strerror(errno))))" }
+                }
+                let thawAndGo = { [weak self] in
+                    guard let self else { return }
+                    self.vm.control("thaw", timeout: 30) { [weak self] data in
+                        guard let self else { return }
+                        let thawed = Self.object(data)?["thawed"] as? Bool == true
+                        log(String(format: "WizardOS update: %@ in %.1fs (disk frozen %.1fs)%@",
+                                   copied ? "disk copied without a shutdown" : "no copy", Date().timeIntervalSince(started),
+                                   Date().timeIntervalSince(frozenAt), thawed ? "" : "; no answer to thaw, the guest's watchdog thaws it"))
+                        if copied { self.install(kind: kind) }
+                        else { try? FileManager.default.removeItem(at: Self.copyURL); fallBack(why) }
+                    }
+                }
+                guard paused else { thawAndGo(); return }
+                self.vm.resume { [weak self] ok in
+                    guard let self else { return }
+                    if ok { thawAndGo(); return }
+                    // A VM that won't resume can't be updated: restart it on the unchanged disk.
+                    try? FileManager.default.removeItem(at: Self.copyURL)
+                    self.vm.stop(forceOnTimeout: true, completion: { [weak self] in
+                        self?.vm.start()
+                        self?.finish(result: "failed", reason: "\(WizardOSName.text) didn't continue after the copy, so it was restarted; nothing was updated.")
+                    })
+                }
+            }
+        }
+    }
+
+    /// The stop-based copy (an older guest, or the live copy didn't work): clean stop, clone, start.
+    private func stopAndCopy(kind: String) {
+        phase("stopping")
+        vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
             // WizardOS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
             self?.abandon("\(WizardOSName.text) didn't shut down cleanly, so nothing was updated.")
         }) { [weak self] in self?.copyAndBoot(kind: kind) }
@@ -500,22 +568,27 @@ final class OSUpdates {
                 self.finish(result: "failed", reason: "\(WizardOSName.text) did not start after the copy; nothing was updated.")
                 return
             }
-            self.phase("updating")
-            self.save(["updateStartedAt": Date().timeIntervalSince1970])
-            self.vm.control(kind == "auto" ? "update-auto" : "update-now", timeout: 600) { [weak self] data in
-                guard let self else { return }
-                let res = Self.object(data) ?? [:]
-                guard res["started"] as? Bool == true else {
-                    try? FileManager.default.removeItem(at: Self.copyURL)
-                    let why = (res["error"] as? String) ?? (res["note"] as? String) ?? (res["skipped"] as? String)
-                        ?? (res["update_available"] as? Bool == false ? "already up to date" : "the App Manager didn't start it")
-                    self.finish(result: "skipped", reason: "The update didn't start: \(why).")
-                    return
-                }
-                if let quick = res["quick"] as? Bool { self.save(["quick": quick]) }
-                self.tellGuest(phase: "updating")
-                self.monitor(started: Date())
+            self.install(kind: kind)
+        }
+    }
+
+    /// The copy is taken and WizardOS runs: start the install the owner (or Automatic) chose before the copy.
+    private func install(kind: String) {
+        phase("updating")
+        save(["updateStartedAt": Date().timeIntervalSince1970])
+        vm.control(kind == "auto" ? "update-auto" : "update-now", timeout: 600) { [weak self] data in
+            guard let self else { return }
+            let res = Self.object(data) ?? [:]
+            guard res["started"] as? Bool == true else {
+                try? FileManager.default.removeItem(at: Self.copyURL)
+                let why = (res["error"] as? String) ?? (res["note"] as? String) ?? (res["skipped"] as? String)
+                    ?? (res["update_available"] as? Bool == false ? "already up to date" : "the App Manager didn't start it")
+                self.finish(result: "skipped", reason: "The update didn't start: \(why).")
+                return
             }
+            if let quick = res["quick"] as? Bool { self.save(["quick": quick]) }
+            self.tellGuest(phase: "updating")
+            self.monitor(started: Date())
         }
     }
 
