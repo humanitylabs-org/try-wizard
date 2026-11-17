@@ -156,7 +156,10 @@ final class OSUpdates {
         vm.control("update-inbox") { [weak self] data in
             guard let self, self.blocked == nil else { return }
             let inbox = Self.object(data) ?? [:]
-            if let req = inbox["request"] as? [String: Any], let target = req["target"] as? String {
+            if let req = inbox["request"] as? [String: Any], Self.expired(req) {
+                log("WizardOS update: an Update now request expired before it could start; dropped")
+                self.vm.control("update-request-clear") { _ in }
+            } else if let req = inbox["request"] as? [String: Any], let target = req["target"] as? String {
                 if req["when_idle"] as? Bool == true {
                     // Update when they finish: start once nothing the update would stop is running (WAM waiting_for,
                     // which on a Mac counts everything: the disk copy restarts WizardOS).
@@ -242,6 +245,29 @@ final class OSUpdates {
         get { (Self.journal()["postponedUntil"] as? Double).map { Date(timeIntervalSince1970: $0) } }
         set { save(["postponedUntil": newValue.map { $0.timeIntervalSince1970 } ?? NSNull()]) }
     }
+    /// `a` is a later release than `b` (major.minor.patch, numbers only; a test-build suffix doesn't count).
+    static func newer(_ a: String, than b: String) -> Bool {
+        func parts(_ v: String) -> [Int]? {
+            let core = v.split(separator: "-", maxSplits: 1).first.map(String.init) ?? ""
+            let n = core.split(separator: ".").map { Int($0) }
+            guard n.count == 3, !n.contains(where: { $0 == nil }) else { return nil }
+            return n.map { $0 ?? 0 }
+        }
+        guard let x = parts(a), let y = parts(b) else { return false }
+        for i in 0..<3 where x[i] != y[i] { return x[i] > y[i] }
+        return false
+    }
+
+    /// An Update now the Host couldn't act on for this long (a Wizard.app upgrade open, WizardOS stopped) has
+    /// expired: it is dropped instead of starting hours later, and the App Manager stops reporting it as pending
+    /// (wizard-app-manager updates.HOST_REQUEST_TTL; #696 review 4b). Update when they finish (when_idle) waits by design.
+    static let requestTTL: TimeInterval = 15 * 60
+    static func expired(_ req: [String: Any], now: Date = Date()) -> Bool {
+        guard req["when_idle"] as? Bool != true, let at = req["requested_at"] as? String,
+              let t = ISO8601DateFormatter().date(from: at) else { return false }
+        return now.timeIntervalSince(t) > requestTTL
+    }
+
     /// A release version, or a private test build of one (`0.3.241-mac.1`); nothing else reaches wizard-ctl.
     static func isVersion(_ v: String) -> Bool {
         v.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]{1,24})?$"#, options: .regularExpression) != nil
@@ -399,9 +425,11 @@ final class OSUpdates {
             let reason = String(format: "Not enough free space on this Mac to keep a copy of \(WizardOSName.text) during the update (%.0f GB free, needs %.0f GB).",
                                 Double(free) / 1e9, Double(Self.freeNeeded) / 1e9)
             log("WizardOS update: \(reason)")
-            save(["id": UUID().uuidString, "kind": kind, "target": target, "phase": "done", "result": "skipped",
-                  "reason": reason, "finishedAt": Date().timeIntervalSince1970])
+            save(["id": UUID().uuidString, "kind": kind, "target": target, "startedAt": Date().timeIntervalSince1970])
             if kind == "manual" { vm.control("update-request-clear") { _ in } }
+            // finish() tells every device how it ended (host_update done/skipped), so the device that tapped Update
+            // now stops waiting with its sends paused (wizard-app-manager#696 review 4a).
+            finish(result: "skipped", reason: reason)
             return
         }
         busy = true; begin()
@@ -417,8 +445,22 @@ final class OSUpdates {
             let st = Self.object(data) ?? [:]
             if let installed = st["installed"] as? String { self.save(["from": installed]) }
             // The request is taken now, whatever happens next (an App Manager without request_host_apply's
-            // clean-up must not start this again after it finishes).
-            if kind == "manual" { self.vm.control("update-request-clear") { _ in } }
+            // clean-up must not start this again after it finishes). Wait until the guest confirms it is gone before
+            // the VM stops for the copy: a request still on the copied disk comes back with a restore and starts the
+            // same update again (wizard-app-manager#696 review 4c).
+            guard kind == "manual" else { self.stopAndCopy(kind: kind, st); return }
+            self.vm.control("update-request-clear") { [weak self] data in
+                guard let self else { return }
+                guard let o = Self.object(data), o["error"] == nil else {
+                    self.finish(result: "skipped", reason: "The update didn't start: Wizard couldn't take the request.")
+                    return
+                }
+                self.stopAndCopy(kind: kind, st)
+            }
+        }
+    }
+
+    private func stopAndCopy(kind: String, _ st: [String: Any]) {
             guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true else {
                 self.finish(result: "skipped", reason: st["installing"] as? Bool == true
                             ? "An update is already running in \(WizardOSName.text)."
@@ -431,7 +473,6 @@ final class OSUpdates {
                 // WizardOS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
                 self?.abandon("\(WizardOSName.text) didn't shut down cleanly, so nothing was updated.")
             }) { [weak self] in self?.copyAndBoot(kind: kind) }
-        }
     }
 
     private func copyAndBoot(kind: String) {
@@ -513,7 +554,14 @@ final class OSUpdates {
         tellGuest(phase: "verifying")
         let target = Self.journal()["target"] as? String
         let installed = st["installed"] as? String
-        if st["failed"] as? Bool == true || st["interrupted"] as? Bool == true || installed == nil || installed != target {
+        // `wam updates --apply` installs the channel's newest release: one cut during the stop/copy/boot lands
+        // instead of `target`. That is a good update, not a reason to put the copy back (#696 review 4d).
+        // The journal keeps `target` (every device matches the result to the update it watched by id or target).
+        let landed = installed != nil && (installed == target || Self.newer(installed ?? "", than: target ?? ""))
+        if landed && installed != target {
+            log("WizardOS update: \(installed ?? "?") installed (newer than \(target ?? "?"), cut during the copy)")
+        }
+        if st["failed"] as? Bool == true || st["interrupted"] as? Bool == true || !landed {
             let why = (st["failure_reason"] as? String).map { "The installer said: \($0)" }
                 ?? (st["interrupted"] as? Bool == true ? "The installer stopped before it finished." : nil)
                 ?? "\(WizardOSName.text) reports \(installed ?? "no installed release") instead of \(target ?? "the new release")."
