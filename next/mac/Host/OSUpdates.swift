@@ -461,18 +461,18 @@ final class OSUpdates {
     }
 
     private func stopAndCopy(kind: String, _ st: [String: Any]) {
-            guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true else {
-                self.finish(result: "skipped", reason: st["installing"] as? Bool == true
-                            ? "An update is already running in \(WizardOSName.text)."
-                            : st.isEmpty ? "The App Manager in \(WizardOSName.text) didn't answer." : "\(WizardOSName.text) is already up to date.")
-                return
-            }
-            self.phase("stopping")
-            self.tellGuest(phase: "stopping")
-            self.vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
-                // WizardOS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
-                self?.abandon("\(WizardOSName.text) didn't shut down cleanly, so nothing was updated.")
-            }) { [weak self] in self?.copyAndBoot(kind: kind) }
+        guard st["update_available"] as? Bool == true, st["installing"] as? Bool != true else {
+            self.finish(result: "skipped", reason: st["installing"] as? Bool == true
+                        ? "An update is already running in \(WizardOSName.text)."
+                        : st.isEmpty ? "The App Manager in \(WizardOSName.text) didn't answer." : "\(WizardOSName.text) is already up to date.")
+            return
+        }
+        self.phase("stopping")
+        self.tellGuest(phase: "stopping")
+        self.vm.stop(forceOnTimeout: false, onTimeout: { [weak self] in
+            // WizardOS didn't shut down cleanly: no copy of a disk that may be mid-write, no update.
+            self?.abandon("\(WizardOSName.text) didn't shut down cleanly, so nothing was updated.")
+        }) { [weak self] in self?.copyAndBoot(kind: kind) }
     }
 
     private func copyAndBoot(kind: String) {
