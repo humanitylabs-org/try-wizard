@@ -1,3 +1,6 @@
 # Wizard for Mac starts this Wizard's WizardOS updates: it saves a copy of the VM disk first and puts it back if
 # the update fails (try-wizard next/mac/Host/OSUpdates.swift). The App Manager reads this file (wam/updates.py
 # HOST_UPDATES) and keeps no update timer of its own.
+# The copy is taken without a shutdown (wizard-ctl freeze + a VM pause, about a second), so an update stops only what
+# its release changes (wam/updates.py host_backup_stops_box):
+live-backup
