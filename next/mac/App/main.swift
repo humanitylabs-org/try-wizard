@@ -544,8 +544,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         guard let web = message.webView, let body = message.body as? [String: Any],
               let method = body["method"] as? String else { return }
         let admitted = owner?.web === web && owner?.allowsNative(message.frameInfo) == true
+        // The committed main document that sent this message. A reply is delivered only while that same document is
+        // still the one on screen: a reload or same-origin navigation in between drops it (wizard-os issue 387).
+        let generation = owner?.documentGeneration
         if UserDefaults.standard.bool(forKey: "QAHooks") {
-            qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame,
+            qaMessages.append(["method": method, "mainFrame": message.frameInfo.isMainFrame, "generation": generation ?? 0,
                                "origin": "\(message.frameInfo.securityOrigin.protocol)://\(message.frameInfo.securityOrigin.host):\(message.frameInfo.securityOrigin.port)",
                                "admitted": admitted])
             if qaMessages.count > 200 { qaMessages.removeFirst() }
@@ -572,6 +575,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             DispatchQueue.main.async {
                 // A navigation while work is in flight must not leak its result.
                 guard self?.owner?.web === web, self?.owner?.isTrustedDocument == true,
+                      generation != nil, self?.owner?.documentGeneration == generation,
                       web.url.flatMap(NativeOrigin.init) == caller else { return }
                 web.evaluateJavaScript("window.wizardNativeReply && window.wizardNativeReply(\(payload))")
             }
@@ -707,6 +711,22 @@ enum WizardImportConnectPrompt {
         guard choices.contains(where: { $0.1 == appId }) else { return "false" }
         return "(() => { const o = window.WizOpenApp; if (typeof o !== 'function') return false; " +
             "return o('\(appId)') || o('app-store', '/wizard-os-home/store/index.html?app=\(appId)'); })()"
+    }
+}
+
+/// The Mac app shows the PWA/phone app icon (dark Void tile, glowing hat) instead of the flat purple square
+/// (try-wizard#86). Only the running app's Dock icon changes; the bundle icon, name, bundle id and the
+/// `Wizard MVP` data folder stay as they are, so nothing about an install moves.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp PWAIcon -bool YES` turns it on (next launch).
+enum WizardPWAIcon {
+    static let key = "PWAIcon"
+    static let resource = "WizardPWA"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+
+    @MainActor static func apply() {
+        guard isOn, let path = Bundle.main.path(forResource: resource, ofType: "icns"),
+              let image = NSImage(contentsOfFile: path) else { return }
+        NSApp.applicationIconImage = image
     }
 }
 
@@ -1421,6 +1441,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         dragView.header = .zero; dragView.controls = []
     }
 
+    /// Bumped when a new main-frame document commits; NativeBridge binds every reply to the generation it was asked in.
+    private(set) var documentGeneration: UInt64 = 0
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === web else { return }
+        documentGeneration &+= 1
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         nativeHandoff = nil
         if isTrustedDocument { webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))") }
@@ -1717,6 +1744,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        WizardPWAIcon.apply()
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

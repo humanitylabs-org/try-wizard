@@ -10,7 +10,7 @@ REPRESENTATIONS = ((b'icp4',16),(b'ic11',32),(b'icp5',32),(b'ic12',64),
                    (b'ic07',128),(b'ic13',256),(b'ic08',256),(b'ic14',512),
                    (b'ic09',512),(b'ic10',1024))
 
-def pack(assets, output):
+def pack(assets, output, marks=True):
     manifest = json.loads((assets / 'provenance.json').read_text())['generated_sha256']
     chunks = []
     for kind, size in REPRESENTATIONS:
@@ -20,11 +20,12 @@ def pack(assets, output):
         assert data[:8] == b'\x89PNG\r\n\x1a\n', name
         assert struct.unpack('>II', data[16:24]) == (size, size), name
         chunks.append(kind + struct.pack('>I', len(data)+8) + data)
-    for name in ('wizard-mark-purple.png','wizard-mark-white.png'):
+    for name in ('wizard-mark-purple.png','wizard-mark-white.png') if marks else ():
         assert hashlib.sha256((assets/name).read_bytes()).hexdigest() == manifest[name], name
     body = b''.join(chunks)
     output.write_bytes(b'icns' + struct.pack('>I',len(body)+8) + body)
     print('BRAND_ICON_OK', hashlib.sha256(output.read_bytes()).hexdigest())
 
 if __name__ == '__main__':
-    pack(Path(sys.argv[1]), Path(sys.argv[2]))
+    # --no-marks: an alternate icon set (brand/pwa) that carries only the app icon PNGs.
+    pack(Path(sys.argv[1]), Path(sys.argv[2]), marks='--no-marks' not in sys.argv[3:])
