@@ -51,12 +51,51 @@ class ExpiredRequest(unittest.TestCase):
 class ClearBeforeStop(unittest.TestCase):
     def test_stop_waits_for_the_clear(self):
         run = body("run")
-        self.assertNotIn("vm.stop(", run)                                  # the stop moved to stopAndCopy
+        self.assertNotIn("vm.stop(", run)                                  # the copy (and any stop) is in backUp
+        self.assertNotIn("liveBackup(", run)
         clear = run.index('self.vm.control("update-request-clear") { [weak self] data in')
-        self.assertIn("self.stopAndCopy(kind: kind, st)", run[clear:])
+        self.assertIn("self.backUp(kind: kind, st)", run[clear:])
         self.assertIn('Self.object(data), o["error"] == nil', run[clear:])
         self.assertNotIn('vm.control("update-request-clear") { _ in }', run[run.index("busy = true; begin()"):])
+        self.assertIn("liveBackup(kind: kind)", body("backUp"))
         self.assertIn("vm.stop(", body("stopAndCopy"))
+
+
+class LiveBackup(unittest.TestCase):
+    """The copy without a shutdown: freeze -> pause -> flush + clone -> resume -> thaw; anything else falls back."""
+    def test_order(self):
+        b = body("liveBackup")
+        order = ['vm.control("freeze', "self.vm.pause", "F_FULLFSYNC", "clonefile(", "let thawAndGo", "self.vm.resume"]
+        at = [b.index(x) for x in order]
+        self.assertEqual(at, sorted(at), order)
+        go = b[b.index("let thawAndGo"): b.index("guard paused else")]
+        self.assertIn('vm.control("thaw"', go)
+        self.assertIn("self.install(kind: kind)", go)               # the install starts only after the thaw
+        self.assertIn("if ok { thawAndGo(); return }", b[b.index("self.vm.resume"):])   # thaw after resume
+
+    def test_not_frozen_thaws_then_falls_back(self):
+        b = body("liveBackup")
+        branch = b[b.index('["frozen"] as? Bool == true else {'): b.index("let frozenAt")]
+        self.assertIn('vm.control("thaw"', branch)
+        self.assertIn("fallBack(", branch)
+        self.assertIn("stopAndCopy(kind: kind)", b)                    # the fallback is the stop-based copy
+
+    def test_no_resume_restarts_on_the_unchanged_disk(self):
+        b = body("liveBackup")
+        branch = b[b.index("if ok { thawAndGo(); return }"):]
+        self.assertLess(branch.index("removeItem(at: Self.copyURL)"), branch.index("vm.stop(forceOnTimeout: true"))
+        self.assertIn('finish(result: "failed"', branch)
+
+    def test_guest_freeze_arms_its_watchdog_first(self):
+        ctl = (Path(__file__).resolve().parents[2] / "guest" / "overlay" / "opt" / "wizard" / "bin" / "wizard-ctl").read_text()
+        freeze = ctl[ctl.index("\n  freeze)"): ctl.index("\n  thaw)")]
+        self.assertLess(freeze.index("systemd-run"), freeze.index("fsfreeze -f /"))
+        self.assertIn('"$arg1" -le 120', freeze)
+        thaw = ctl[ctl.index("\n  thaw)"):]
+        self.assertIn("fsfreeze -u /", thaw)
+        self.assertIn("systemctl stop wizard-thaw-watchdog.timer", thaw)
+        marker = (Path(__file__).resolve().parents[2] / "guest" / "overlay" / "etc" / "wizard" / "updates-by-host").read_text()
+        self.assertIn("\nlive-backup", marker)   # wam/updates.py host_backup_stops_box
 
 
 class NewerIsSuccess(unittest.TestCase):

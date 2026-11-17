@@ -14,6 +14,10 @@
 #   update-headsup-clear
 #   update-phase <id> <phase> <version> <result|-> <reason|->   the Mac's progress and result, for every device
 #   update-log    the installer's log, kept on the Mac before a failed update's disk is replaced by the copy
+#   freeze <seconds>   the Mac's disk copy without a shutdown: flush and freeze / (everything written is on the disk,
+#                 nothing more is written); a watchdog thaws it after <seconds> whatever happens. Writes nothing to /
+#                 once frozen (only systemd's /run), so the next command can still run.
+#   thaw          unfreeze / and cancel the watchdog (also fine when not frozen)
 # Updates run as the owner (wizard), like the App Manager's own timer did; /etc/wizard/updates-by-host keeps that
 # timer off on a Mac (Host/OSUpdates.swift copies the disk first).
 read -r cmd arg1 arg2 arg3 arg4 arg5 rest || exit 0
@@ -59,5 +63,22 @@ case "$cmd" in
     else echo '{"error": "update-phase <id> <phase> <version> <result|-> <reason|->"}'; fi ;;
   update-headsup-clear) rm -f $W/host-update-headsup.json; echo '{}' ;;
   update-log) tail -n 400 $W/install.log 2>/dev/null ;;
+  freeze)
+    if [[ "$arg1" =~ ^[0-9]{1,3}$ && "$arg1" -ge 5 && "$arg1" -le 120 && -z "$arg2" ]]; then
+      sync
+      systemctl stop wizard-thaw-watchdog.timer wizard-thaw-watchdog.service >/dev/null 2>&1
+      systemctl reset-failed wizard-thaw-watchdog.timer wizard-thaw-watchdog.service >/dev/null 2>&1
+      if ! systemd-run -q --collect --unit=wizard-thaw-watchdog --on-active="${arg1}s" /usr/sbin/fsfreeze -u / >/dev/null 2>&1; then
+        echo '{"error": "no watchdog"}'
+      elif /usr/sbin/fsfreeze -f / 2>/dev/null; then
+        echo '{"frozen": true}'
+      else
+        systemctl stop wizard-thaw-watchdog.timer >/dev/null 2>&1; echo '{"error": "freeze failed"}'
+      fi
+    else echo '{"error": "freeze <seconds>"}'; fi ;;
+  thaw)
+    if /usr/sbin/fsfreeze -u / 2>/dev/null; then was=true; else was=false; fi
+    systemctl stop wizard-thaw-watchdog.timer >/dev/null 2>&1
+    printf '{"thawed": true, "was_frozen": %s}\n' "$was" ;;
   *) echo unknown ;;
 esac
