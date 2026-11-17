@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy Tailscale Serve's Wizard paths into the Mac window's local ingress
+After=tailscaled.service wizard-local-proxy.service
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'if [ "$(/opt/wizard/bin/wizard-local-routes)" = changed ]; then systemctl reload wizard-local-proxy; fi'

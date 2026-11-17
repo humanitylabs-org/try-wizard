@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep the Mac window's local paths in step with Tailscale Serve (apps installed or updated)
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=30s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

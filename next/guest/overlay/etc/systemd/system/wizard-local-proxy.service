@@ -1,8 +1,13 @@
 [Unit]
 Description=Wizard local VM owner ingress (loopback/vsock only)
-After=network.target docker.service
+After=network.target docker.service tailscaled.service
 [Service]
+# The shell port, the owner's tailnet login and Serve's path table (wizard-local-routes) before nginx reads them.
+ExecStartPre=/opt/wizard/bin/wizard-local-routes
+# The Mac window socket (window.sock) is root-only.
+UMask=0077
 ExecStart=/usr/sbin/nginx -c /opt/wizard/local-proxy.conf -g "daemon off;"
+ExecReload=/usr/sbin/nginx -c /opt/wizard/local-proxy.conf -s reload
 Restart=on-failure
 [Install]
 WantedBy=multi-user.target

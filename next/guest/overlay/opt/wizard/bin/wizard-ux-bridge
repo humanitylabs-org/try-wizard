@@ -1,9 +1,11 @@
 #!/bin/bash
-# The Mac's 127.0.0.1:47823 reaches vsock 8923; pass it to whichever port Runtipi gave the shell app.
+# The Mac window (127.0.0.1:48023 on the Mac) reaches vsock 8923; hand it to the local ingress.
 set -euo pipefail
-port=8924 # local owner ingress; the Service itself remains container-isolated
-echo "Wizard UX bridge: vsock 8923 -> 127.0.0.1:$port"
+# The Mac window's own door into the local ingress (local-proxy.conf): a root-only socket, so programs in the VM
+# can't pose as the window.
+sock=/run/wizard-local-proxy/window.sock
+echo "Wizard UX bridge: vsock 8923 -> $sock"
 # backlog: socat defaults to 5, and a vsock connect beyond the queue is refused at once (the Mac host then closes
 # the TCP side), so a phone over HTTP/2 + tailscale serve, which opens one upstream connection per request, lost
 # about half its first-load assets. Wizard for Mac (HTTP/1.1, 6 per host) never hit it.
-exec /usr/bin/socat VSOCK-LISTEN:8923,fork,reuseaddr,backlog=128 TCP:127.0.0.1:"$port"
+exec /usr/bin/socat VSOCK-LISTEN:8923,fork,reuseaddr,backlog=128 UNIX-CONNECT:"$sock"
