@@ -43,3 +43,32 @@ through the public URL with a unique query string before switching the feed.
 
 Verified 15 Oct 2026: a 300 MB two-part test image published, reassembled by the app's Swift URL resolution and matched
 its SHA-256; repeat downloads were edge HITs; feeds and 404s are never edge-cached.
+
+## Releasing from GitHub Actions (try-wizard#102)
+
+`.github/workflows/release.yml` ("Mac release") builds, signs and publishes the Mac app on GitHub-hosted runners only.
+Run it from `main` with **Run workflow**: `version` (e.g. `0.7.2`), `build` (new monotonic number; live needs more than
+the live feed and at least 310), `channel` and `guest_payload`.
+
+| Job | Runner | Environment | Secrets | Runs project code |
+|---|---|---|---|---|
+| build | macos-15 | none | none | yes: `next/mac/build.sh`, `tools/make-update-feed.py --unsigned`, `tools/fetch-guest-payload.py` |
+| sign | macos-15 | `mac-sign` (main only) | `SPARKLE_ED25519_KEY` | no: Sparkle `sign_update` from the checksum-pinned 2.10.0 release |
+| publish | ubuntu-24.04 | `mac-publish` (main only) | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | no: checksum-pinned rclone |
+
+- `SPARKLE_ED25519_KEY`: the base64 private EdDSA key exactly as `generate_keys -x <file>` exports it. It is passed to
+  `sign_update --ed-key-file -` on stdin and never written to disk.
+- `R2_*`: an R2 API token's S3 credentials (Object Read & Write on bucket `aiwizards-downloads` only, with an expiry), the
+  Cloudflare account ID, and the bucket name.
+- A missing secret skips that job cleanly; the build artifacts (`wizardos-mac-dmg-<build>`, `wizardos-mac-update-<build>`)
+  are always produced. `channel: none` builds only and works on any branch.
+- `channel: test` bakes `https://downloads.aiwizards.com/mac-test/appcast.xml` into the app and publishes under `mac-test/`.
+  Use it first with a throwaway Sparkle key: an app built for the live key must reject that feed.
+- `channel: live` publishes `mac/<build>/Wizard-<build>.zip` and `mac/<build>/Wizard-<version>.dmg` (immutable, never
+  overwritten), checks them byte-for-byte through the public URL, then replaces `mac/appcast.xml` last.
+- Builds are ad-hoc signed and not notarised until the Apple Developer ID exists; that signing will live in `mac-sign`.
+- Guest payload: the `GuestUpdate` payload (Service and Hermes images, WAM, guest overlay, cold bootstrap) is assembled
+  from a locally built base image and pinned Service/WAM sources, so it cannot yet be rebuilt on a clean runner.
+  `published-308` reuses the payload shipped in build 308 byte for byte: the archive is pinned by SHA-256 and every file
+  is checked against 308's `wizard-release.json`. `none` ships a native-only update (no guest migration; a legacy 0.6.1
+  disk cannot cold-upgrade from that DMG).

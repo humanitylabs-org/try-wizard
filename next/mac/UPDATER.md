@@ -11,9 +11,11 @@ This lane is not a release. Parent owns cohort integration, installation and pub
 - Local Host activity uses existing `/wizard/health` queue truth (`active`, `queued`, `liveness_available`). Unknown activity/starting VM/recording/dictation defers. No remote-server admin call or mutation. A remote connected backend continues running while this Mac updates.
 - Only an explicit restart choice acquires the local lease, retains the prior app, sends a nonce/expiry/peer/path-bound Host prepare request, waits for **clean** VM shutdown and actual Host exit, then releases Sparkle installation. This path does not force-stop a live VM on timeout. Ordinary Quit cancels a prepared installation before terminating, rather than silently installing on quit.
 
-## Build (Thales, inside worker.lock)
+## Build
 
-The verified upstream distribution archive is `Sparkle-2.10.0.tar.xz`, SHA256 `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c`. Framework and signing tools stay outside the repository on Thales.
+Releases are built by `.github/workflows/release.yml` on GitHub-hosted runners (see `DOWNLOADS.md`, "Releasing from GitHub Actions"). Local builds on any Apple Silicon Mac use the same script.
+
+The verified upstream distribution archive is `Sparkle-2.10.0.tar.xz`, SHA256 `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c`. Framework and signing tools stay outside the repository.
 
 Required build environment:
 

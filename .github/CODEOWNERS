@@ -1,0 +1,10 @@
+# Release pipeline owners (try-wizard#102, wizard-os#680). Any workflow on main can name the
+# mac-sign / mac-publish environments and read their keys, so changes to workflows, the release
+# and feed tools, and this file need a code owner's review. James only for now.
+/.github/**                             @jdefleur
+/.github/CODEOWNERS                     @jdefleur
+/next/mac/build.sh                      @jdefleur
+/next/mac/tools/make-update-feed.py     @jdefleur
+/next/mac/tools/fetch-guest-payload.py  @jdefleur
+/next/guest/publish-r2.py               @jdefleur
+/next/guest/split-release.sh            @jdefleur
