@@ -184,7 +184,7 @@ let codexQueue = Promise.resolve()
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) { const error = new Error(data.error || `Request failed (${res.status})`); error.status = res.status; throw error }
+  if (!res.ok) { const error = new Error(data.error || `Your Wizard could not do that (error ${res.status}). Try again.`); error.status = res.status; throw error }
   return data
 }
 
