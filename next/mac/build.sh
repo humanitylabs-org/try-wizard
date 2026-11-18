@@ -139,7 +139,12 @@ if [[ "${DMG:-1}" == 1 ]]; then
   STAGE=$OUT/obj/dmg; rm -rf "$STAGE"; mkdir -p "$STAGE"
   ditto "$APP" "$STAGE/WizardOS.app"; ln -s /Applications "$STAGE/Applications"
   rm -f "$OUT/Wizard-$VER.dmg"
-  hdiutil create -quiet -volname "WizardOS" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg"
+  # hdiutil create fails intermittently on busy machines (seen on GitHub-hosted macos-15); retry before giving up.
+  for attempt in 1 2 3; do
+    hdiutil create -volname "WizardOS" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$OUT/Wizard-$VER.dmg" && break
+    (( attempt < 3 )) || { echo "hdiutil create failed $attempt times" >&2; exit 1; }
+    echo "hdiutil create failed (attempt $attempt); retrying in 15s" >&2; rm -f "$OUT/Wizard-$VER.dmg"; sleep 15
+  done
   shasum -a 256 "$OUT/Wizard-$VER.dmg"; ls -la "$OUT/Wizard-$VER.dmg"
 fi
 echo BUILD_OK

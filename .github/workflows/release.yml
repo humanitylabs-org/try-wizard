@@ -127,6 +127,33 @@ jobs:
             --out "$RUNNER_TEMP/stage" --base-url "$DOWNLOADS/$CHANNEL" --version "$VER" --build "$BUILD"
           { echo '```'; cat "$RUNNER_TEMP/stage/release-stage.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify code signatures (app, DMG, update zip)
+        env:
+          VER: ${{ steps.settings.outputs.version }}
+          BUILD: ${{ steps.settings.outputs.build }}
+        run: |
+          set -euo pipefail
+          check() { # $1 app bundle: valid ad-hoc (or Developer ID) signature, expected version
+            codesign --verify --deep --strict --verbose=2 "$1"
+            codesign -dv "$1" 2>&1 | grep -E '^(Identifier|Signature|TeamIdentifier)='
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$1/Contents/Info.plist")" == "$BUILD" ]]
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist")" == "$VER" ]]
+          }
+          check next/mac/dist/Wizard.app
+          dmg=$(find "$RUNNER_TEMP/stage" -name "Wizard-$VER.dmg" -print -quit)
+          zip=$(find "$RUNNER_TEMP/stage" -name "Wizard-$BUILD.zip" -print -quit)
+          [[ -f "$dmg" && -f "$zip" ]] || { echo "::error::staged DMG or zip missing"; ls -R "$RUNNER_TEMP/stage"; exit 1; }
+          hdiutil verify "$dmg"
+          mnt=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$dmg" >/dev/null
+          app=$(find "$mnt" -maxdepth 1 -name '*.app' -print -quit)
+          check "$app"
+          hdiutil detach "$mnt" >/dev/null
+          unz=$(mktemp -d)
+          ditto -x -k "$zip" "$unz"
+          check "$(find "$unz" -maxdepth 1 -name '*.app' -print -quit)"
+          echo "codesign --verify passed for the app, the app inside the DMG and the app inside the update zip" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload staged release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
