@@ -80,11 +80,13 @@ enum WizardShared {
     /// nil = not chosen yet (the guest then keeps files on its own disk).
     static let filesShareTag = "wizard-files"
     static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }
-    // User-created files belong in a Finder-visible folder. Changing this suggestion
-    // never changes a persisted files-folder.json or moves an existing user's files.
+    // User-created files belong in a Finder-visible folder. The suggestion is ~/Wizard, in the home folder and
+    // outside macOS's protected folders (Documents, Desktop, Downloads), so sharing it into the VM shows no
+    // "access files in your Documents folder" prompt (try-wizard#103). Changing this suggestion never changes a
+    // persisted files-folder.json or moves an existing user's files.
     static var defaultFilesFolder: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Wizard MVP", isDirectory: true)
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Wizard", isDirectory: true)
     }
     static var filesFolder: URL? {
         guard let d = try? Data(contentsOf: filesFolderFile),
