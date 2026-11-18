@@ -66,12 +66,37 @@ class ReleaseWorkflow(unittest.TestCase):
     def test_publish_job_holds_only_the_r2_credentials_and_runs_no_project_code(self):
         publish = jobs()['publish']
         self.assertIn('environment: mac-publish', publish)
-        self.assertEqual(set(re.findall(r'secrets\.(\w+)', publish)), {'R2_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'})
+        self.assertEqual(set(re.findall(r'secrets\.(\w+)', publish)),
+                         {'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_SESSION_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'})
         self.assertNotIn('actions/checkout', publish)
         self.assertNotIn('next/', publish)
-        # Versioned files first, the feed and landing page last.
-        self.assertLess(publish.index('application/zip'), publish.index('signed/appcast.xml application/xml'))
-        self.assertLess(publish.index('application/x-apple-diskimage'), publish.index('put index.html'))
+        self.assertNotIn('uses:', publish.split('Upload versioned files', 1)[1])
+        # Versioned files first, then the landing page, the feed last.
+        self.assertLess(publish.index('application/zip'), publish.index('put mac/index.html'))
+        self.assertLess(publish.index('application/x-apple-diskimage'), publish.index('put mac/index.html'))
+        self.assertLess(publish.index('put mac/index.html'), publish.index('signed/appcast.xml application/xml'))
+
+    def test_publish_uses_bucket_scoped_temporary_credentials(self):
+        """try-wizard#115: S3 API with a session token, no account-wide API token, every guard kept."""
+        publish = jobs()['publish']
+        self.assertNotIn('R2_API_TOKEN', publish)
+        self.assertNotIn('api.cloudflare.com', publish)
+        self.assertIn('AWS_SESSION_TOKEN: ${{ secrets.R2_SESSION_TOKEN }}', publish)
+        self.assertIn('https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com', publish)
+        self.assertIn('AWS_DEFAULT_REGION: auto', publish)
+        self.assertIn('R2 temporary credentials in mac-publish expired', publish)
+        # Never overwrite a versioned key: HEAD first, then skip (same bytes) or fail.
+        self.assertIn('head-object', publish)
+        self.assertIn('versioned paths are never overwritten', publish)
+        # Read back through the public URL and its checksum.
+        self.assertIn('did not read back byte for byte', publish)
+        # A write outside mac/ and mac-dryrun/ must be refused before anything is uploaded.
+        self.assertIn('grep -q AccessDenied', publish)
+        self.assertLess(publish.index('publish-scope-check/'), publish.index('put "$CHANNEL/$BUILD/'))
+        # Every key written stays inside the credential's prefixes.
+        for key in re.findall(r'(?m)^\s+put (\S+) ', publish):
+            self.assertRegex(key, r'^"?(\$CHANNEL|mac)/')
+        self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun ]]', publish)
 
     def test_only_main_releases_and_tags_are_written_by_the_workflow(self):
         text = WORKFLOW.read_text()
