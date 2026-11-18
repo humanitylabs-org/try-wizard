@@ -88,15 +88,47 @@ enum WizardShared {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Wizard", isDirectory: true)
     }
+    /// The raw saved choice, for display and for knowing a choice was made. Never mount or open it from here:
+    /// use `activeSharedFolder`, which leaves out the old builds' automatic Documents share (try-wizard#109).
     static var filesFolder: URL? {
+        guard let saved = savedFilesFolder else { return nil }
+        return URL(fileURLWithPath: saved.path, isDirectory: true)
+    }
+    /// What files-folder.json says. Reads only that file in Wizard's own data folder, never the shared folder.
+    static var savedFilesFolder: (path: String, explicit: Bool)? {
         guard let d = try? Data(contentsOf: filesFolderFile),
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let p = o["path"] as? String, !p.isEmpty else { return nil }
-        return URL(fileURLWithPath: p, isDirectory: true)
+        return (p, o["explicit"] as? Bool == true)
     }
+    /// Older builds saved ~/Documents/Wizard MVP into files-folder.json by themselves at first run, without a
+    /// marker, and mounting it at every boot made macOS ask for Documents access (try-wizard#109). A saved share
+    /// that ends in Documents/Wizard MVP and has no `"explicit": true` marker is that automatic leftover. Decided
+    /// from the string alone (trailing slashes, `.`/`..`, letter case and a symlinked home spelling all match),
+    /// so the decision never creates, stats or opens anything under Documents.
+    static func isLegacyAutoShare(path: String, explicit: Bool) -> Bool {
+        guard !explicit else { return false }
+        var parts: [String] = []
+        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
+            if part == "." { continue }
+            if part == ".." { if !parts.isEmpty { parts.removeLast() }; continue }
+            parts.append(part.lowercased())
+        }
+        return parts.count >= 3 && Array(parts.suffix(2)) == ["documents", "wizard mvp"]
+    }
+    /// The ONE folder the VM may mount at boot, Show Wizard Files in Finder may open, and the blocked-folder
+    /// message may name: the saved share, minus an unmarked legacy automatic one. nil = the guest uses its own
+    /// disk. files-folder.json itself is never rewritten or removed.
+    static var activeSharedFolder: URL? {
+        guard let saved = savedFilesFolder, !isLegacyAutoShare(path: saved.path, explicit: saved.explicit) else { return nil }
+        return URL(fileURLWithPath: saved.path, isDirectory: true)
+    }
+    /// A share is saved but deliberately not connected (the old automatic Documents default).
+    static var legacyAutoShareIgnored: Bool { savedFilesFolder != nil && activeSharedFolder == nil }
+    /// Only an owner's own sharing action calls this, so the saved choice carries the explicit marker.
     static func setFilesFolder(_ url: URL) throws {
         try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        let d = try JSONSerialization.data(withJSONObject: ["path": url.path], options: [.prettyPrinted])
+        let d = try JSONSerialization.data(withJSONObject: ["path": url.path, "explicit": true], options: [.prettyPrinted, .sortedKeys])
         try d.write(to: filesFolderFile, options: .atomic)
     }
 

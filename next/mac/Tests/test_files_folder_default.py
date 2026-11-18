@@ -36,7 +36,7 @@ class FilesFolderDefaultTests(unittest.TestCase):
         src = (MAC / 'Shared/Shared.swift').read_text()
         self.assertIn('static var filesFolderFile: URL { supportDir.appendingPathComponent("files-folder.json") }', src)
         main = (MAC / 'App/main.swift').read_text()
-        self.assertIn('WizardShared.filesFolder ?? WizardShared.defaultFilesFolder', main)
+        self.assertIn('WizardShared.activeSharedFolder ?? WizardShared.defaultFilesFolder', main)
         # Only the first-run chooser and explicit actions write the default; launching never rewrites a saved folder.
         self.assertNotRegex(main, r'WizardShared\.setFilesFolder\(WizardShared\.defaultFilesFolder\)')
 
