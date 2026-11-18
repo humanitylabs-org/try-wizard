@@ -53,6 +53,29 @@ class BrandTests(unittest.TestCase):
         self.assertIn('min(18, 18 * ratio)',(MAC/'Shared/Brand.swift').read_text())
         self.assertIn('next/mac/assets/brand/wizard-icon-1024.png',(ROOT/'macos/build-app.sh').read_text())
 
+    def test_bundle_name_is_wizardos(self):
+        # try-wizard#100: Dock, Finder, Cmd-Tab and Privacy & Security show WizardOS. The bundle id, the
+        # Application Support data folder, the Host bundle and the update feed URL keep their names so
+        # existing installs update in place.
+        import plistlib, re
+        build = (MAC/'build.sh').read_text()
+        body = build[build.index('plist() {'):build.index('\nEOF\n}')]
+        body = body[body.index('<?xml'):]
+        xml = body.replace('$VER', '1').replace('$BUILD', '1').replace('$5', '').replace('$3', 'org.humanitylabs.wizard.mvp').replace('$4', 'Wizard')
+        call = re.search(r'plist "\$APP/Contents/Info.plist" "([^"]+)" (\S+) (\S+)', build)
+        self.assertIsNotNone(call)
+        info = plistlib.loads(xml.replace('$2', call.group(1)).encode())
+        self.assertEqual(info['CFBundleDisplayName'], 'WizardOS')
+        self.assertEqual(info['CFBundleName'], 'WizardOS')
+        self.assertEqual(call.group(2), 'org.humanitylabs.wizard.mvp')
+        self.assertIn('plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host', build)
+        self.assertIn('"$STAGE/WizardOS.app"', build)
+        self.assertNotIn('"Wizard MVP"', build)
+        self.assertIn("SPARKLE_FEED=${SPARKLE_FEED:-https://downloads.aiwizards.com/mac/appcast.xml}", build)
+        self.assertIn('return base.appendingPathComponent("Wizard MVP", isDirectory: true)', (MAC/'Shared/Shared.swift').read_text())
+        self.assertNotIn('under Wizard MVP', (MAC/'App/main.swift').read_text())
+        self.assertNotIn('Wizard MVP', (MAC/'tools/make-update-feed.py').read_text())
+
     def test_guest_onboarding_and_semantic_icon(self):
         static = ROOT/'next/guest/overlay/opt/wizard/setup/static'
         html = (static/'index.html').read_text()
