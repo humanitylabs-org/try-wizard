@@ -491,7 +491,7 @@ async def post_name(request: web.Request) -> web.Response:
     except OSError as error:
         log_failure("Saving the name")
         status = 507 if error.errno in (errno.ENOSPC, errno.EDQUOT) else 500
-        return json_error(f"{storage_problem(error)} Tap Continue to try again.", status)
+        return json_error(storage_problem(error) or "Your Wizard could not save the name. Try again.", status)
     try:  # best effort like SOUL.md below: the name is saved, finish applies the shell settings again
         await asyncio.to_thread(write_shell_settings, name)
     except Exception:
