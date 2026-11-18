@@ -17,6 +17,7 @@ Brains (applied inside the hermes-agent engine container with stock Hermes code,
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import secrets
@@ -26,6 +27,7 @@ import re
 import subprocess
 import threading
 import time
+import traceback
 import uuid
 from pathlib import Path
 from typing import Any
@@ -416,11 +418,42 @@ async def same_origin_mutations(request: web.Request, handler):
     return await handler(request)
 
 
+@web.middleware
+async def json_api_errors(request: web.Request, handler):
+    """Never answer an /api/ call with aiohttp's plain-text 500: the page would show "Request failed (500)"."""
+    try:
+        return await handler(request)
+    except web.HTTPException:
+        raise
+    except Exception as error:
+        if not request.path.startswith("/api/"):
+            raise
+        log_failure(f"{request.method} {request.path}")
+        return json_error(storage_problem(error) or "Something went wrong on your Wizard. Try again.", 500)
+
+
 # ── HTTP ───────────────────────────────────────────────────────────────────
 
 
 def json_error(message: str, status: int = 400) -> web.Response:
     return web.json_response({"error": message}, status=status)
+
+
+def log_failure(what: str) -> None:
+    """The traceback goes to the journal (and the Mac's console.log); the page only gets a plain reason."""
+    print(f"{what} failed:\n{traceback.format_exc()}", flush=True)
+
+
+def storage_problem(error: BaseException) -> str | None:
+    """A plain-words reason for a disk problem, or None when the error is something else."""
+    if not isinstance(error, OSError):
+        return None
+    if error.errno in (errno.ENOSPC, errno.EDQUOT):
+        return "Your Wizard's disk is full, so it could not save this. Free up space, then try again."
+    if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        return ("Your Wizard is not allowed to save its setup on its disk (permission denied). "
+                "Restart WizardOS and try again.")
+    return "Your Wizard could not save this to its disk. Try again."
 
 
 async def index(request: web.Request) -> web.StreamResponse:
@@ -444,12 +477,35 @@ async def get_state(_: web.Request) -> web.Response:
 
 
 async def post_name(request: web.Request) -> web.Response:
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return json_error("That name did not arrive. Tap Continue to try again.")
     name = " ".join(str(body.get("name", "")).split())[:40]
     if not name:
         return json_error("Give your Wizard a name.")
-    save_state(name=name)
-    await asyncio.to_thread(write_shell_settings, name)
+    try:
+        save_state(name=name)
+    except OSError as error:
+        log_failure("Saving the name")
+        status = 507 if error.errno in (errno.ENOSPC, errno.EDQUOT) else 500
+        return json_error(f"{storage_problem(error)} Tap Continue to try again.", status)
+    try:  # best effort like SOUL.md below: the name is saved, finish applies the shell settings again
+        await asyncio.to_thread(write_shell_settings, name)
+    except Exception:
+        log_failure("Writing the shell settings")
+        try:
+            save_state(shellSettingsPending=True)
+        except OSError:
+            log_failure("Marking the shell settings pending")
+    else:
+        if load_state().get("shellSettingsPending"):
+            try:
+                save_state(shellSettingsPending=False)
+            except OSError:
+                log_failure("Clearing the shell settings mark")
     try:
         await asyncio.to_thread(brain_exec, "soul", {"name": name})
     except Exception as error:  # Hermes still starting: the name is saved; SOUL.md is written again at finish
@@ -638,6 +694,12 @@ async def post_finish(_: web.Request) -> web.Response:
             save_state(soulPending=False)
         except Exception:
             pass
+    if state.get("shellSettingsPending"):
+        try:
+            await asyncio.to_thread(write_shell_settings, name)
+            save_state(shellSettingsPending=False)
+        except Exception:
+            log_failure("Writing the shell settings at finish")
     # Same shape as a new chat from Wizard UX (live.js/outbox.js): a `wizard_` id and source wizard-mobile, so the
     # Agent Service lists it in Chats.
     session_id = f"wizard_{int(time.time() * 1000)}_{uuid.uuid4().hex[:12]}"
@@ -807,7 +869,7 @@ async def post_phone_open(request: web.Request) -> web.Response:
 
 
 def build_app() -> web.Application:
-    app = web.Application(client_max_size=8 * 1024 * 1024, middlewares=[same_origin_mutations])
+    app = web.Application(client_max_size=8 * 1024 * 1024, middlewares=[json_api_errors, same_origin_mutations])
     app.add_routes([
         web.get("/api/voice/status", get_voice_status),
         web.post("/api/voice/retry", post_voice_retry),
