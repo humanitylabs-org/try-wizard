@@ -1,0 +1,58 @@
+name: TEMP sign self-test (remove before merge)
+on:
+  push:
+    branches: [ci/mac-release-github-hosted]
+    paths: [.github/workflows/tmp-sign-selftest.yml]
+permissions:
+  contents: read
+env:
+  SPARKLE_URL: https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+  SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
+  BUILD: '999'
+jobs:
+  selftest:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Fetch Sparkle 2.10.0 (checksum-pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" "$SPARKLE_URL"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+      - name: Throwaway key and fake update
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/sparkle/bin/generate_keys" --account selftest
+          "$RUNNER_TEMP/sparkle/bin/generate_keys" --account selftest -x "$RUNNER_TEMP/k"
+          { echo 'SPARKLE_ED25519_KEY<<EOF'; cat "$RUNNER_TEMP/k"; echo; echo EOF; } >> "$GITHUB_ENV"
+          rm "$RUNNER_TEMP/k"
+          mkdir -p update && head -c 100000 /dev/urandom > "update/Wizard-$BUILD.zip"
+          (cd update && shasum -a 256 "Wizard-$BUILD.zip" > "Wizard-$BUILD.zip.sha256")
+          cat > update/appcast-unsigned.xml <<'X'
+          <?xml version='1.0' encoding='utf-8'?>
+          <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>t</title><item><title>t</title><sparkle:version>999</sparkle:version><enclosure url="https://downloads.aiwizards.com/mac-test/999/Wizard-999.zip" type="application/octet-stream" length="100000" sparkle:edSignature="SPARKLE_ED_SIGNATURE_PLACEHOLDER" /></item></channel></rss>
+          X
+      - name: Sign archive and complete feed (same commands as release.yml)
+        run: |
+          set -euo pipefail
+          sign_update="$RUNNER_TEMP/sparkle/bin/sign_update"
+          key() { printf '%s' "$SPARKLE_ED25519_KEY"; }
+          zip="update/Wizard-$BUILD.zip"
+          (cd update && shasum -a 256 -c "Wizard-$BUILD.zip.sha256")
+          [[ $(grep -c SPARKLE_ED_SIGNATURE_PLACEHOLDER update/appcast-unsigned.xml) == 1 ]]
+          sig=$(key | "$sign_update" --ed-key-file - -p "$zip")
+          [[ "$sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::unexpected signature format"; exit 1; }
+          mkdir -p feed
+          sed "s|SPARKLE_ED_SIGNATURE_PLACEHOLDER|$sig|" update/appcast-unsigned.xml > feed/appcast.xml
+          key | "$sign_update" --ed-key-file - feed/appcast.xml
+          key | "$sign_update" --ed-key-file - --verify "$zip" "$sig"
+          key | "$sign_update" --ed-key-file - --verify feed/appcast.xml
+          grep -q 'sparkle-signatures' feed/appcast.xml
+          shasum -a 256 feed/appcast.xml | tee feed/appcast.xml.sha256
+          cat feed/appcast.xml
+          # Negative: tampered feed must fail verification.
+          sed 's/<title>t</<title>x</' feed/appcast.xml > feed/bad.xml
+          if key | "$sign_update" --ed-key-file - --verify feed/bad.xml; then echo "::error::tampered feed verified"; exit 1; fi
+          echo SIGN_SELFTEST_OK
