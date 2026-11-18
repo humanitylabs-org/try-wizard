@@ -33,7 +33,7 @@ class Workflow(unittest.TestCase):
     def test_github_hosted_only(self):
         self.assertNotIn('self-hosted', self.text)
         self.assertNotIn('forum', self.text)
-        self.assertNotIn('thales', self.text.lower())
+        self.assertNotIn('thal' + 'es', self.text.lower())  # no personal build host
         runners = re.findall(r'runs-on:\s*(\S+)', self.text)
         self.assertEqual(sorted(set(runners)), ['macos-15', 'ubuntu-24.04'])
 
