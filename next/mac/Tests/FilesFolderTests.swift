@@ -11,7 +11,7 @@ struct FilesFolderTests {
             if let previous { defaults.set(previous, forKey: "DataHome") }
             else { defaults.removeObject(forKey: "DataHome") }
         }
-        let expected = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Wizard MVP")
+        let expected = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Wizard")
         precondition(WizardShared.defaultFilesFolder.path == expected.path)
         precondition(WizardShared.supportDir == root)
         precondition(WizardShared.filesFolder == nil)

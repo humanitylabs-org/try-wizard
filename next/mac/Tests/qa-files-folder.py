@@ -38,7 +38,7 @@ try:
   assert 0<s['subtitleWidth']<=int(size.split('x')[0])-40,s
   assert 'Inbox' not in s['subtitle'] and 'Exports' not in s['subtitle']
   assert 'Documents, images, audio, videos and transcripts' in s['subtitle']
-  assert 'Documents/Wizard MVP' in s['defaultFilesFolder'] and '/Application Support/' not in s['defaultFilesFolder']
+  assert s['defaultFilesFolder'].endswith('/Wizard') and '/Documents/' not in s['defaultFilesFolder'] and '/Application Support/' not in s['defaultFilesFolder']
   assert s['selectedFilesFolder']=='',s
   assert [b['title'] for b in s['overlayButtons']]==['Use This Folder','Choose Folder…','Back'],s
   assert all(b['visible'] and b['withinDocument'] and b['height']>20 and b['width']>=300 for b in s['overlayButtons']),s
