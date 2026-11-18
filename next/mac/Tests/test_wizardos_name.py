@@ -81,7 +81,8 @@ class WizardOSNameTests(unittest.TestCase):
 
     def test_ids_and_bundle_names_unchanged(self):
         build = (MAC / 'build.sh').read_text()
-        self.assertIn('"Wizard MVP" org.humanitylabs.wizard.mvp Wizard', build)
+        # The visible bundle name is WizardOS (try-wizard#100); the bundle id stays so installs update in place.
+        self.assertIn('"WizardOS" org.humanitylabs.wizard.mvp Wizard', build)
         self.assertIn('"Wizard Host" org.humanitylabs.wizard.mvp.host', build)
 
 
