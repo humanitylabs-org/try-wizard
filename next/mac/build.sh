@@ -1,13 +1,14 @@
 #!/bin/bash
 # Build Wizard.app (front end) with Wizard Host.app (back-end runner) embedded as a login item.
-# Runs on Thales. Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
+# Runs on any Apple Silicon Mac with Xcode, including GitHub-hosted macos-15 (.github/workflows/release.yml).
+# Output: dist/Wizard.app, dist/Wizard-<ver>.dmg
 set -euo pipefail
 VER=${VER:-0.7.0}
 BUILD=${BUILD:?Set BUILD to a new monotonic positive release build number}
 [[ "$BUILD" =~ ^[1-9][0-9]*$ ]] || { printf 'Invalid BUILD: positive decimal required\n' >&2; exit 2; }
 cd "$(dirname "$0")"
 SRC=$PWD
-SPARKLE_DIR=${SPARKLE_DIR:?Set SPARKLE_DIR to verified Sparkle 2.10.0 distribution on Thales}
+SPARKLE_DIR=${SPARKLE_DIR:?Set SPARKLE_DIR to the verified Sparkle 2.10.0 distribution}
 SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:?Set the public Ed25519 key; private key must stay on signer}
 SPARKLE_FEED=${SPARKLE_FEED:-https://downloads.aiwizards.com/mac/appcast.xml}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}

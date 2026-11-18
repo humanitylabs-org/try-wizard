@@ -1,227 +1,380 @@
-name: Release
+name: Mac release
 
-# Builds a release DMG for a vX.Y.Z tag.
-#  - Guest image: self-hosted Linux runner (Docker, linux/arm64); hosted macOS
-#    has no nested virtualisation, so it cannot run the guest build.
-#  - App + DMG: GitHub-hosted macos-15.
-#  - Signing/notarisation happen ONLY when all five secrets exist:
-#      MACOS_CERT_P12 (base64 Developer ID Application .p12), MACOS_CERT_PASSWORD,
-#      ASC_KEY_P8 (App Store Connect API key .p8 contents), ASC_KEY_ID, ASC_ISSUER_ID.
-#    Otherwise the DMG is built ad-hoc signed, NOT notarised, and labelled unsigned.
-# Output is always a DRAFT GitHub release; a maintainer verifies and publishes it.
-# Both triggers require write access, so no fork code reaches the self-hosted runner.
+# Builds, signs and publishes WizardOS for Mac (next/mac) entirely on GitHub-hosted
+# runners. Design: humanitylabs-org/try-wizard#102, humanitylabs-org/wizard-os#680.
+#
+#   build    macos-15, no secrets, no environment. Runs project code (next/mac/build.sh).
+#            Ad-hoc signed (no Apple Developer ID yet). Produces the DMG, the Sparkle
+#            update ZIP and an UNSIGNED appcast template as artifacts.
+#   sign     environment mac-sign (main only). Secret SPARKLE_ED25519_KEY. Runs only
+#            SHA-pinned download/upload-artifact and Sparkle's sign_update from the
+#            checksum-pinned Sparkle release. No project code. Skips cleanly when the
+#            secret is missing.
+#   publish  environment mac-publish (main only). Secrets R2_ACCOUNT_ID,
+#            R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET. Uploads with a
+#            checksum-pinned rclone: versioned files first (never overwritten), then
+#            the appcast last. No project code. Skips cleanly when a secret is missing.
+#
+# channel: none = build only (any branch). test = sign + publish under mac-test/, with a
+# feed URL of mac-test/appcast.xml baked into the app (dry run, e.g. with a throwaway
+# key). live = sign + publish under mac/, the feed every installed app reads.
+# sign and publish run only when this workflow is dispatched from main.
+# Developer ID signing and notarisation will be added to the sign job once Apple issues
+# the certificate; until then every build is ad-hoc signed and not notarised.
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Existing release tag to build (vX.Y.Z)'
+      version:
+        description: 'Version shown to people (CFBundleShortVersionString), e.g. 0.7.2'
         required: true
         type: string
+      build:
+        description: 'New monotonic build number (CFBundleVersion). Live must exceed the live feed and 309.'
+        required: true
+        type: string
+      channel:
+        description: 'none = build only; test = publish to mac-test/; live = publish to mac/ (main only)'
+        required: true
+        default: none
+        type: choice
+        options: [none, test, live]
+      guest_payload:
+        description: 'Guest update payload: published-308 = reuse the exact payload shipped in build 308; none = native-only update'
+        required: true
+        default: published-308
+        type: choice
+        options: [published-308, none]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: mac-release
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # Sparkle 2.10.0 upstream distribution, verified by SHA-256 before use (next/mac/UPDATER.md).
+  SPARKLE_URL: https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+  SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
+  DOWNLOADS: https://downloads.aiwizards.com
 
 jobs:
-  guest:
-    name: Guest image (Linux, Docker)
-    runs-on: [self-hosted, Linux, X64, forum, try-wizard]
-    timeout-minutes: 180
-    steps:
-      - name: Validate tag
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::invalid tag $RELEASE_TAG"; exit 1; }
-
-      - name: Check out tag
-        uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Build guest artifacts
-        run: guest/build-container.sh --output "$GITHUB_WORKSPACE/dist/guest"
-
-      - name: Upload guest artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: guest-${{ env.RELEASE_TAG }}
-          path: dist/guest/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  app:
-    name: App + DMG (macos-15)
-    needs: guest
+  build:
+    name: Build WizardOS.app, DMG and update ZIP (macos-15, ad-hoc)
     runs-on: macos-15
     timeout-minutes: 120
-    permissions:
-      contents: write   # draft GitHub release
+    outputs:
+      build: ${{ steps.inputs.outputs.build }}
+      version: ${{ steps.inputs.outputs.version }}
+      prefix: ${{ steps.inputs.outputs.prefix }}
     env:
-      HOMEBREW_NO_AUTO_UPDATE: '1'
-      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      IN_VERSION: ${{ inputs.version }}
+      IN_BUILD: ${{ inputs.build }}
+      IN_CHANNEL: ${{ inputs.channel }}
+      IN_GUEST: ${{ inputs.guest_payload }}
+      # Public Ed25519 key of the live feed (SUPublicEDKey of build 308). Public, not a secret.
+      SPARKLE_PUBLIC_KEY: bOBUp3oIbwqpoxFzKMe8hBpgR5x2g9sRocgiZu7FcQ4=
+      # Guest payload shipped in build 308, pinned by the SHA-256 of its published update archive.
+      GUEST_SOURCE_URL: https://downloads.aiwizards.com/mac/308/Wizard-308.zip
+      GUEST_SOURCE_SHA256: f304a924e2f95eed7ce99e024bdacb8ad20932cf80718423390914c375d02a6e
     steps:
-      - name: Check out tag
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
-          fetch-depth: 0
 
-      - name: Require a clean release version
-        run: python3 scripts/app_version.py --root "$GITHUB_WORKSPACE" --require-release
-
-      - name: Download guest artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: guest-${{ env.RELEASE_TAG }}
-          path: dist/guest
-
-      - name: Install runtime build tool
-        run: command -v pkg-config || brew install pkg-config
-
-      - name: Toolchain cache key
-        id: toolchain
+      - name: Validate inputs
+        id: inputs
         run: |
-          key=$(printf '%s|%s|%s|%s' "${ImageOS:-macos}" "${ImageVersion:-local}" \
-            "$(sw_vers -productVersion)" "$(xcrun clang --version | head -1)" | shasum -a 256 | cut -c1-16)
-          echo "key=$key" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          [[ "$IN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
+          [[ "$IN_BUILD" =~ ^[1-9][0-9]*$ ]] || { echo "::error::build must be a positive integer"; exit 1; }
+          if [[ "$IN_CHANNEL" == live ]]; then
+            prefix=mac
+            live=$(curl -fsSL "$DOWNLOADS/mac/appcast.xml?ci=$GITHUB_RUN_ID" \
+              | python3 -c 'import re,sys; print(max(int(v) for v in re.findall(r"<sparkle:version>(\d+)</sparkle:version>", sys.stdin.read())))')
+            (( IN_BUILD > live && IN_BUILD >= 310 )) || { echo "::error::build $IN_BUILD must exceed the live feed ($live) and 309"; exit 1; }
+            [[ "$IN_GUEST" == published-308 ]] || echo "::warning::Live native-only release: legacy 0.6.1 disks cannot cold-upgrade with this DMG."
+          else
+            prefix=mac-test
+          fi
+          {
+            echo "build=$IN_BUILD"; echo "version=$IN_VERSION"; echo "prefix=$prefix"
+          } >> "$GITHUB_OUTPUT"
+          echo "SPARKLE_FEED=$DOWNLOADS/$prefix/appcast.xml" >> "$GITHUB_ENV"
+          echo "PREFIX=$prefix" >> "$GITHUB_ENV"
+          sw_vers; xcrun swiftc --version; df -h "$RUNNER_TEMP"
 
-      - name: Restore native runtime build
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            macos/.build/qemu-gpu-runtime
-            .build/state/runtime.json
-          key: runtime-${{ steps.toolchain.outputs.key }}-${{ hashFiles('macos/build-qemu-gpu-runtime.sh', 'macos/bundle-macho-dependencies.sh', 'macos/pinned-runtime-bottles.sh', 'macos/prepare-qemu-gpu-runtime.sh', 'macos/qemu-hvf.entitlements', 'macos/runtime-files.txt', 'macos/verify-macos-compatibility.sh', 'macos/patches/**', 'macos/Tests/virgl/**', 'scripts/build-cache.py') }}
+      - name: Fetch Sparkle 2.10.0 (checksum-pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" "$SPARKLE_URL"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          echo "SPARKLE_DIR=$RUNNER_TEMP/sparkle" >> "$GITHUB_ENV"
 
-      # build-cache.py re-verifies the fingerprint and rebuilds if it differs.
-      - name: Build native runtime
-        run: make runtime
+      - name: Fetch the published guest payload (build 308, checksum-pinned)
+        if: inputs.guest_payload == 'published-308'
+        run: |
+          set -euo pipefail
+          python3 next/mac/tools/fetch-guest-payload.py --url "$GUEST_SOURCE_URL" \
+            --sha256 "$GUEST_SOURCE_SHA256" --output "$RUNNER_TEMP/GuestUpdate" | tee "$RUNNER_TEMP/guest-receipt.json"
+          echo "GUEST_UPDATE_PAYLOAD=$RUNNER_TEMP/GuestUpdate" >> "$GITHUB_ENV"
 
-      - name: Detect signing secrets
-        id: signing
+      - name: Build next/mac (ad-hoc signed)
         env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          SIGN_IDENTITY: '-'
+        run: |
+          set -euo pipefail
+          VER="$IN_VERSION" BUILD="$IN_BUILD" next/mac/build.sh
+          rm -rf "$RUNNER_TEMP/GuestUpdate"
+          df -h "$RUNNER_TEMP"
+
+      - name: Stage update ZIP and unsigned appcast
+        run: |
+          set -euo pipefail
+          python3 next/mac/tools/make-update-feed.py next/mac/dist/Wizard.app "$RUNNER_TEMP/update" \
+            --base-url "$DOWNLOADS/$PREFIX/$IN_BUILD" --unsigned
+          mv "$RUNNER_TEMP/update/appcast.xml" "$RUNNER_TEMP/update/appcast-unsigned.xml"
+          mkdir -p "$RUNNER_TEMP/dmg"
+          mv "next/mac/dist/Wizard-$IN_VERSION.dmg" "$RUNNER_TEMP/dmg/"
+          (cd "$RUNNER_TEMP/dmg" && shasum -a 256 "Wizard-$IN_VERSION.dmg" > "Wizard-$IN_VERSION.dmg.sha256")
+          (cd "$RUNNER_TEMP/update" && shasum -a 256 "Wizard-$IN_BUILD.zip" > "Wizard-$IN_BUILD.zip.sha256")
+
+      - name: Verify app, DMG and update ZIP
+        run: |
+          set -euo pipefail
+          check_app() { # $1 app bundle
+            codesign --verify --deep --strict --verbose=2 "$1"
+            codesign -dv "$1" 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)'
+            local plist="$1/Contents/Info.plist"
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" == "$IN_BUILD" ]]
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" == "$IN_VERSION" ]]
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")" == "$SPARKLE_FEED" ]]
+            [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist")" == "$SPARKLE_PUBLIC_KEY" ]]
+            if [[ "$IN_GUEST" == published-308 ]]; then
+              test -f "$1/Contents/Resources/GuestUpdate/source/next/guest/cold-bootstrap.py"
+              grep -q '"guestPatch": "mac-stack-v1"' "$1/Contents/Resources/wizard-release.json"
+            fi
+          }
+          check_app next/mac/dist/Wizard.app
+          dmg="$RUNNER_TEMP/dmg/Wizard-$IN_VERSION.dmg"
+          hdiutil verify "$dmg"
+          mnt=$(mktemp -d)
+          hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$dmg" >/dev/null
+          check_app "$mnt/WizardOS.app"
+          test -L "$mnt/Applications"
+          hdiutil detach "$mnt"
+          unz=$(mktemp -d)
+          ditto -x -k "$RUNNER_TEMP/update/Wizard-$IN_BUILD.zip" "$unz"
+          check_app "$unz/Wizard.app"
+          rm -rf "$unz"
+          [[ $(grep -c SPARKLE_ED_SIGNATURE_PLACEHOLDER "$RUNNER_TEMP/update/appcast-unsigned.xml") == 1 ]]
+          {
+            echo "### WizardOS $IN_VERSION ($IN_BUILD), channel \`$IN_CHANNEL\`"
+            echo "Ad-hoc signed, not notarised (no Apple Developer ID yet). Feed: $SPARKLE_FEED"
+            echo '```'
+            ls -l "$dmg" "$RUNNER_TEMP/update/"
+            cat "$RUNNER_TEMP/dmg/"*.sha256 "$RUNNER_TEMP/update/"*.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wizardos-mac-dmg-${{ steps.inputs.outputs.build }}
+          path: ${{ runner.temp }}/dmg/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload update ZIP and unsigned appcast
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wizardos-mac-update-${{ steps.inputs.outputs.build }}
+          path: ${{ runner.temp }}/update/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  sign:
+    name: Sparkle-sign the update (mac-sign)
+    needs: build
+    if: inputs.channel != 'none' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: mac-sign
+    permissions:
+      actions: read
+    outputs:
+      signed: ${{ steps.key.outputs.present }}
+    env:
+      BUILD: ${{ needs.build.outputs.build }}
+    steps:
+      - name: Check for the Sparkle key
+        id: key
+        env:
+          SPARKLE_ED25519_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
+        run: |
+          if [[ -n "$SPARKLE_ED25519_KEY" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SPARKLE_ED25519_KEY is not set in environment mac-sign; skipping signing and publishing. Build artifacts are still available."
+          fi
+
+      - name: Download update ZIP and unsigned appcast
+        if: steps.key.outputs.present == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wizardos-mac-update-${{ needs.build.outputs.build }}
+          path: update
+
+      - name: Fetch Sparkle 2.10.0 (checksum-pinned)
+        if: steps.key.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" "$SPARKLE_URL"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+
+      - name: Sign archive and complete feed
+        if: steps.key.outputs.present == 'true'
+        env:
+          SPARKLE_ED25519_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
+        run: |
+          set -euo pipefail
+          sign_update="$RUNNER_TEMP/sparkle/bin/sign_update"
+          key() { printf '%s' "$SPARKLE_ED25519_KEY"; }
+          zip="update/Wizard-$BUILD.zip"
+          (cd update && shasum -a 256 -c "Wizard-$BUILD.zip.sha256")
+          [[ $(grep -c SPARKLE_ED_SIGNATURE_PLACEHOLDER update/appcast-unsigned.xml) == 1 ]]
+          sig=$(key | "$sign_update" --ed-key-file - -p "$zip")
+          [[ "$sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::unexpected signature format"; exit 1; }
+          mkdir -p feed
+          sed "s|SPARKLE_ED_SIGNATURE_PLACEHOLDER|$sig|" update/appcast-unsigned.xml > feed/appcast.xml
+          key | "$sign_update" --ed-key-file - feed/appcast.xml
+          key | "$sign_update" --ed-key-file - --verify "$zip" "$sig"
+          key | "$sign_update" --ed-key-file - --verify feed/appcast.xml
+          grep -q 'sparkle-signatures' feed/appcast.xml
+          shasum -a 256 feed/appcast.xml | tee feed/appcast.xml.sha256
+
+      - name: Upload signed appcast
+        if: steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wizardos-mac-feed-${{ needs.build.outputs.build }}
+          path: feed/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to downloads.aiwizards.com (mac-publish)
+    needs: [build, sign]
+    if: needs.sign.outputs.signed == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: mac-publish
+    permissions:
+      actions: read
+    env:
+      BUILD: ${{ needs.build.outputs.build }}
+      VERSION: ${{ needs.build.outputs.version }}
+      PREFIX: ${{ needs.build.outputs.prefix }}
+      RCLONE_URL: https://github.com/rclone/rclone/releases/download/v1.68.2/rclone-v1.68.2-linux-amd64.zip
+      RCLONE_SHA256: 0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c
+    steps:
+      - name: Check for R2 credentials
+        id: r2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           missing=()
-          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD ASC_KEY_P8 ASC_KEY_ID ASC_ISSUER_ID; do
+          for name in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET; do
             [[ -n "${!name}" ]] || missing+=("$name")
           done
           if ((${#missing[@]} == 0)); then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Signing and notarisation enabled."
+            echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Missing secrets: ${missing[*]}. Building an UNSIGNED, NOT NOTARISED DMG."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Missing in environment mac-publish: ${missing[*]}. Skipping publishing; the signed feed is still an artifact."
           fi
 
-      - name: Import Developer ID certificate and notary key
-        id: keychain
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          keychain="$RUNNER_TEMP/release-signing.keychain-db"
-          keychain_password=$(uuidgen)
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          security default-keychain -d user -s "$keychain"
-          identity=$(security find-identity -v -p codesigning "$keychain" \
-            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
-          [[ -n "$identity" ]] || { echo "::error::No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
-          key_file="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
-          printf '%s' "$ASC_KEY_P8" > "$key_file"
-          xcrun notarytool store-credentials try-omarchy-ci \
-            --key "$key_file" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
-            --keychain "$keychain" --validate
-          rm -f "$key_file"
-
-      - name: Build signed and notarised DMG
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          SIGN_IDENTITY: ${{ steps.keychain.outputs.identity }}
-        run: |
-          macos/build-app.sh --configuration production --dmg \
-            --guest-dir "$GITHUB_WORKSPACE/dist/guest" \
-            --sign-identity "$SIGN_IDENTITY" --notarize-profile try-omarchy-ci
-          echo "DMG_KIND=signed" >> "$GITHUB_ENV"
-
-      - name: Build unsigned DMG
-        if: steps.signing.outputs.enabled != 'true'
-        run: |
-          macos/build-app.sh --configuration production --dmg \
-            --guest-dir "$GITHUB_WORKSPACE/dist/guest" --sign-identity -
-          echo "DMG_KIND=unsigned" >> "$GITHUB_ENV"
-
-      - name: Name and checksum DMG
-        run: |
-          set -euo pipefail
-          dmg=$(ls dist/*.dmg | head -1)
-          suffix=$([[ "$DMG_KIND" == signed ]] && echo "" || echo "-UNSIGNED")
-          out="dist/release/WizardOS-${RELEASE_TAG}${suffix}.dmg"
-          mkdir -p dist/release
-          cp "$dmg" "$out"
-          (cd dist/release && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256")
-          {
-            echo "### $RELEASE_TAG"
-            if [[ "$DMG_KIND" == signed ]]; then
-              echo "Signed with Developer ID and notarised."
-            else
-              echo "**UNSIGNED / NOT NOTARISED.** Signing secrets are missing; Gatekeeper will block this DMG. Do not publish it as an official release."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+      - name: Download DMG
+        if: steps.r2.outputs.present == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: dmg-${{ env.RELEASE_TAG }}
-          path: dist/release/
-          if-no-files-found: error
+          name: wizardos-mac-dmg-${{ needs.build.outputs.build }}
+          path: out/dmg
 
-      - name: Create draft GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Download update ZIP
+        if: steps.r2.outputs.present == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wizardos-mac-update-${{ needs.build.outputs.build }}
+          path: out/update
+
+      - name: Download signed appcast
+        if: steps.r2.outputs.present == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wizardos-mac-feed-${{ needs.build.outputs.build }}
+          path: out/feed
+
+      - name: Install rclone 1.68.2 (checksum-pinned)
+        if: steps.r2.outputs.present == 'true'
         run: |
-          notes="Draft built by CI from $RELEASE_TAG ($DMG_KIND). Verify before publishing."
-          [[ "$DMG_KIND" == signed ]] || notes="UNSIGNED, NOT NOTARISED build. $notes"
-          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/release/* --clobber -R "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG" dist/release/* --draft --verify-tag \
-              --title "$RELEASE_TAG" --notes "$notes" -R "$GITHUB_REPOSITORY"
-          fi
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/rclone.zip" "$RCLONE_URL"
+          echo "$RCLONE_SHA256  $RUNNER_TEMP/rclone.zip" | sha256sum -c -
+          unzip -q -j "$RUNNER_TEMP/rclone.zip" '*/rclone' -d "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/rclone" version
 
-      - name: Remove signing keychain
-        if: always() && steps.keychain.outputs.keychain != ''
+      - name: Upload versioned files, verify, then switch the feed
+        if: steps.r2.outputs.present == 'true'
         env:
-          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
-        run: security delete-keychain "$KEYCHAIN" || true
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: 'true'
+        run: |
+          set -euo pipefail
+          export RCLONE_CONFIG_R2_ENDPOINT="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          rclone="$RUNNER_TEMP/bin/rclone"
+          (cd out/dmg && sha256sum -c "Wizard-$VERSION.dmg.sha256")
+          (cd out/update && sha256sum -c "Wizard-$BUILD.zip.sha256")
+          (cd out/feed && sha256sum -c appcast.xml.sha256)
+          verify() { # $1 local file, $2 public path
+            local got
+            got=$(curl -fsSL --retry 3 "$DOWNLOADS/$2?verify=$GITHUB_RUN_ID-$RANDOM" | sha256sum | cut -d' ' -f1)
+            [[ "$got" == "$(sha256sum "$1" | cut -d' ' -f1)" ]] || { echo "::error::$2 does not match after upload"; exit 1; }
+            echo "verified $DOWNLOADS/$2"
+          }
+          # Versioned paths are immutable: --immutable refuses to replace a different file.
+          for pair in "out/update/Wizard-$BUILD.zip:$PREFIX/$BUILD/Wizard-$BUILD.zip" \
+                      "out/dmg/Wizard-$VERSION.dmg:$PREFIX/$BUILD/Wizard-$VERSION.dmg"; do
+            src=${pair%%:*}; dest=${pair#*:}
+            "$rclone" copyto --immutable --checksum \
+              --header-upload 'Cache-Control: public, max-age=31536000, immutable' \
+              "$src" "r2:$R2_BUCKET/$dest"
+            verify "$src" "$dest"
+          done
+          # The feed goes last, so apps only see an update once its files are live.
+          "$rclone" copyto --header-upload 'Cache-Control: no-cache' \
+            --header-upload 'Content-Type: application/xml' \
+            out/feed/appcast.xml "r2:$R2_BUCKET/$PREFIX/appcast.xml"
+          verify out/feed/appcast.xml "$PREFIX/appcast.xml"
+          {
+            echo "### Published WizardOS $VERSION ($BUILD) to \`$PREFIX/\`"
+            echo "- $DOWNLOADS/$PREFIX/appcast.xml"
+            echo "- $DOWNLOADS/$PREFIX/$BUILD/Wizard-$BUILD.zip"
+            echo "- $DOWNLOADS/$PREFIX/$BUILD/Wizard-$VERSION.dmg"
+          } >> "$GITHUB_STEP_SUMMARY"
