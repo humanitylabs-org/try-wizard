@@ -12,7 +12,7 @@ Wizard's Mac app, its in-app updates and the WizardOS image are served publicly 
 |---|---|---|
 | `mac/appcast.xml` | Sparkle feed, signed (`SURequireSignedFeed`). Built-in default `SPARKLE_FEED` in `build.sh`. | never cached at the edge |
 | `mac/<build>/Wizard-<build>.zip` | Sparkle update archive named by the appcast | cached at the edge (30 days) |
-| `mac/<version>/Wizard-<version>.dmg` | First-install DMG | cached at the edge |
+| `mac/<build>/Wizard-<version>.dmg` | First-install DMG (the landing page links the newest) | cached at the edge |
 | `os/latest.json` | WizardOS feed the app reads on first install (`Store.osFeedURL`) | never cached at the edge |
 | `os/<version>/wizard-os-<version>.tar.xz.partNN` | WizardOS image in parts, URLs relative to `latest.json`'s folder or absolute | cached at the edge |
 | `index.html` | Plain landing page the app opens when the feed is unreachable | never cached at the edge |
@@ -33,13 +33,25 @@ Write `latest.json` with part URLs relative to `os/latest.json`, for example `0.
 
 ## Publishing
 
-Upload the versioned files first, verify them byte-for-byte through `https://downloads.aiwizards.com`, then upload
-`os/latest.json` and `mac/appcast.xml` last. The Cloudflare credential stays on the operator's control host; the build
-machine never holds it.
+The Mac app is released by GitHub Actions only (`.github/workflows/release.yml`, try-wizard#102): no personal machine
+is involved. To cut a release, merge a PR that raises `next/mac/release/version.json` (`version`, and a `build` higher
+than the live appcast's). The workflow then:
 
-The operator publish helper (`aiwizards_downloads_publish.py os|mac <feed dir on the build Mac> <version>`) enforces
-this order, skips identical files, refuses to overwrite a different file at a versioned path, and verifies every file
-through the public URL with a unique query string before switching the feed.
+1. **build** (macos-15, no secrets): `next/mac/build.sh`, ad-hoc signed until the Apple Developer ID exists, then
+   `next/mac/tools/stage-release.py` (Sparkle zip, DMG, appcast with the archive signature left open, landing page).
+2. **sign** (environment `mac-sign`, `main` only, secret `SPARKLE_ED_PRIVATE_KEY`): Sparkle's checksum-pinned
+   `sign_update` signs the archive and the complete appcast and checks both against the public key built into the app
+   (`next/mac/release/sparkle-public-key.txt`). It runs no project code.
+3. **publish** (environment `mac-publish`, `main` only, secrets `R2_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`): uploads the
+   versioned zip and DMG first, verifies them byte for byte through `https://downloads.aiwizards.com` with a unique query
+   string, refuses to overwrite a different file at a versioned path, then uploads `mac/appcast.xml` and `index.html`.
+4. **tag**: tags the released commit `v<version>` and writes a GitHub release with the links.
+
+"Run workflow" on `main` runs the same pipeline as a dry run by default: it publishes to `mac-dryrun/` only and never
+touches `mac/appcast.xml` or `index.html`. Until the Sparkle key is in `mac-sign`, a run builds and stops before signing.
+
+The WizardOS image (`os/`) is still published by the operator helper (`aiwizards_downloads_publish.py os <feed dir>
+<version>`), which follows the same order: versioned files first, verified through the public URL, `os/latest.json` last.
 
 Verified 15 Oct 2026: a 300 MB two-part test image published, reassembled by the app's Swift URL resolution and matched
 its SHA-256; repeat downloads were edge HITs; feeds and 404s are never edge-cached.

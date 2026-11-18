@@ -1,227 +1,330 @@
-name: Release
+name: Mac release
 
-# Builds a release DMG for a vX.Y.Z tag.
-#  - Guest image: self-hosted Linux runner (Docker, linux/arm64); hosted macOS
-#    has no nested virtualisation, so it cannot run the guest build.
-#  - App + DMG: GitHub-hosted macos-15.
-#  - Signing/notarisation happen ONLY when all five secrets exist:
-#      MACOS_CERT_P12 (base64 Developer ID Application .p12), MACOS_CERT_PASSWORD,
-#      ASC_KEY_P8 (App Store Connect API key .p8 contents), ASC_KEY_ID, ASC_ISSUER_ID.
-#    Otherwise the DMG is built ad-hoc signed, NOT notarised, and labelled unsigned.
-# Output is always a DRAFT GitHub release; a maintainer verifies and publishes it.
-# Both triggers require write access, so no fork code reaches the self-hosted runner.
+# Builds, signs and publishes the WizardOS Mac app (next/mac, the app people run) on GitHub-hosted runners only.
+# No personal machine is involved (try-wizard#102, wizard-os#680).
+#
+# Separate jobs, so the signing key never meets project code:
+#  1. build    macos-15, no secrets, no environment. Runs next/mac/build.sh (ad-hoc signed until Apple's Developer ID
+#              exists) and next/mac/tools/stage-release.py: Sparkle zip, DMG, an appcast with the archive signature left
+#              as a placeholder, and the downloads landing page.
+#  2. sign     environment mac-sign (main only), secret SPARKLE_ED_PRIVATE_KEY. Runs only pinned download/upload-artifact
+#              and Sparkle's sign_update from the checksum-pinned release below. No checkout, no project code.
+#  3. publish  environment mac-publish (main only), secrets R2_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. Uploads the zip and
+#              DMG to downloads.aiwizards.com/<channel>/<build>/, checks them byte for byte through the public URL,
+#              then switches the appcast (and, for a real release, index.html) last. No checkout, no project code.
+#  4. tag      a real release tags the released commit v<version> and writes a GitHub release with the links.
+#
+# How a release starts: a PR that raises next/mac/release/version.json (version and build; the build must be higher
+# than the live appcast's) merges to main. "Run workflow" on main runs it again; that run is a dry run unless dry_run
+# is unticked. The environments only admit main, so a tag cannot start a release; the workflow pushes the tag itself.
+# A dry run publishes to downloads.aiwizards.com/mac-dryrun/ and never touches mac/appcast.xml or index.html; a signing
+# key that does not match the app's public key (next/mac/release/sparkle-public-key.txt) is a warning there and an
+# error in a real release. Pull requests that touch next/mac run the build job only, as a native compile check.
 on:
   push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+    branches: [main]
+    paths:
+      - 'next/mac/release/version.json'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Existing release tag to build (vX.Y.Z)'
-        required: true
-        type: string
+      dry_run:
+        description: 'Dry run: publish to mac-dryrun/ only (untick for a real release)'
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'next/mac/**'
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  group: mac-release-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  SPARKLE_VERSION: '2.10.0'
+  SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
+  DOWNLOADS: https://downloads.aiwizards.com
+  BUCKET: aiwizards-downloads
 
 jobs:
-  guest:
-    name: Guest image (Linux, Docker)
-    runs-on: [self-hosted, Linux, X64, forum, try-wizard]
-    timeout-minutes: 180
+  build:
+    name: Build next/mac (macos-15, no secrets)
+    runs-on: macos-15
+    timeout-minutes: 45
+    outputs:
+      mode: ${{ steps.settings.outputs.mode }}
+      channel: ${{ steps.settings.outputs.channel }}
+      version: ${{ steps.settings.outputs.version }}
+      build: ${{ steps.settings.outputs.build }}
     steps:
-      - name: Validate tag
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::invalid tag $RELEASE_TAG"; exit 1; }
-
-      - name: Check out tag
-        uses: actions/checkout@v4
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
-          fetch-depth: 0
 
-      - name: Build guest artifacts
-        run: guest/build-container.sh --output "$GITHUB_WORKSPACE/dist/guest"
+      - name: Release settings
+        id: settings
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import json;print(json.load(open("next/mac/release/version.json"))["version"])')
+          build=$(python3 -c 'import json;print(json.load(open("next/mac/release/version.json"))["build"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad version $version"; exit 1; }
+          [[ "$build" =~ ^[1-9][0-9]*$ ]] || { echo "::error::bad build $build"; exit 1; }
+          if [[ "$EVENT" == pull_request ]]; then
+            mode=check
+          elif [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Mac releases run from main only (got $GITHUB_REF)"; exit 1
+          elif [[ "$EVENT" == workflow_dispatch && "$DRY_RUN" == true ]]; then
+            mode=dry-run
+          else
+            mode=release
+          fi
+          channel=$([[ "$mode" == dry-run ]] && echo mac-dryrun || echo mac)
+          if [[ "$mode" == release ]]; then
+            live=$(curl -fsS "$DOWNLOADS/mac/appcast.xml?check=$GITHUB_RUN_ID" \
+              | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1)
+            [[ "$live" =~ ^[0-9]+$ ]] || { echo "::error::could not read the live appcast build"; exit 1; }
+            (( build > live )) || { echo "::error::build $build is not higher than the live appcast's $live; raise next/mac/release/version.json"; exit 1; }
+          fi
+          printf 'mode=%s\nchannel=%s\nversion=%s\nbuild=%s\n' "$mode" "$channel" "$version" "$build" >> "$GITHUB_OUTPUT"
+          echo "### WizardOS $version (build $build): $mode" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload guest artifacts
-        uses: actions/upload-artifact@v4
+      - name: Fetch Sparkle (checksum-pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+
+      - name: Build the app and DMG (ad-hoc signed)
+        env:
+          VER: ${{ steps.settings.outputs.version }}
+          BUILD: ${{ steps.settings.outputs.build }}
+          RELEASE_ID: ${{ github.sha }}
+          SIGN_IDENTITY: '-'
+        run: |
+          set -euo pipefail
+          export SPARKLE_DIR="$RUNNER_TEMP/sparkle"
+          SPARKLE_PUBLIC_KEY=$(tr -d '[:space:]' < next/mac/release/sparkle-public-key.txt)
+          export SPARKLE_PUBLIC_KEY SPARKLE_FEED="$DOWNLOADS/mac/appcast.xml"
+          next/mac/build.sh
+
+      - name: Stage zip, DMG, appcast template and landing page
+        env:
+          VER: ${{ steps.settings.outputs.version }}
+          BUILD: ${{ steps.settings.outputs.build }}
+          CHANNEL: ${{ steps.settings.outputs.channel }}
+        run: |
+          set -euo pipefail
+          python3 next/mac/tools/stage-release.py --app next/mac/dist/Wizard.app --dmg "next/mac/dist/Wizard-$VER.dmg" \
+            --out "$RUNNER_TEMP/stage" --base-url "$DOWNLOADS/$CHANNEL" --version "$VER" --build "$BUILD"
+          { echo '```'; cat "$RUNNER_TEMP/stage/release-stage.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload staged release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: guest-${{ env.RELEASE_TAG }}
-          path: dist/guest/
+          name: mac-stage
+          path: ${{ runner.temp }}/stage/
           if-no-files-found: error
-          compression-level: 0
           retention-days: 7
 
-  app:
-    name: App + DMG (macos-15)
-    needs: guest
+  sign:
+    name: Sign the appcast (mac-sign)
+    needs: build
+    if: needs.build.outputs.mode == 'release' || needs.build.outputs.mode == 'dry-run'
     runs-on: macos-15
-    timeout-minutes: 120
-    permissions:
-      contents: write   # draft GitHub release
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: '1'
-      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    environment: mac-sign
+    timeout-minutes: 20
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+      archive_sha256: ${{ steps.sign.outputs.archive_sha256 }}
     steps:
-      - name: Check out tag
-        uses: actions/checkout@v4
+      - name: Download staged release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
-          persist-credentials: false
-          fetch-depth: 0
+          name: mac-stage
+          path: stage
 
-      - name: Require a clean release version
-        run: python3 scripts/app_version.py --root "$GITHUB_WORKSPACE" --require-release
-
-      - name: Download guest artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: guest-${{ env.RELEASE_TAG }}
-          path: dist/guest
-
-      - name: Install runtime build tool
-        run: command -v pkg-config || brew install pkg-config
-
-      - name: Toolchain cache key
-        id: toolchain
+      - name: Fetch Sparkle sign_update (checksum-pinned)
         run: |
-          key=$(printf '%s|%s|%s|%s' "${ImageOS:-macos}" "${ImageVersion:-local}" \
-            "$(sw_vers -productVersion)" "$(xcrun clang --version | head -1)" | shasum -a 256 | cut -c1-16)
-          echo "key=$key" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" ./bin/sign_update
 
-      - name: Restore native runtime build
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            macos/.build/qemu-gpu-runtime
-            .build/state/runtime.json
-          key: runtime-${{ steps.toolchain.outputs.key }}-${{ hashFiles('macos/build-qemu-gpu-runtime.sh', 'macos/bundle-macho-dependencies.sh', 'macos/pinned-runtime-bottles.sh', 'macos/prepare-qemu-gpu-runtime.sh', 'macos/qemu-hvf.entitlements', 'macos/runtime-files.txt', 'macos/verify-macos-compatibility.sh', 'macos/patches/**', 'macos/Tests/virgl/**', 'scripts/build-cache.py') }}
-
-      # build-cache.py re-verifies the fingerprint and rebuilds if it differs.
-      - name: Build native runtime
-        run: make runtime
-
-      - name: Detect signing secrets
-        id: signing
+      - name: Sign archive and feed
+        id: sign
         env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          MODE: ${{ needs.build.outputs.mode }}
         run: |
-          missing=()
-          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD ASC_KEY_P8 ASC_KEY_ID ASC_ISSUER_ID; do
-            [[ -n "${!name}" ]] || missing+=("$name")
-          done
-          if ((${#missing[@]} == 0)); then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Signing and notarisation enabled."
+          set -euo pipefail
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set in environment mac-sign: nothing signed or published."
+            echo "Sparkle key not loaded yet: built only, nothing signed or published." >> "$GITHUB_STEP_SUMMARY"
+            echo "signed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          sign_update() { printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - "$@"; }
+          field() { /usr/bin/plutil -extract "$1" raw -o - stage/release-stage.json; }
+          archive="stage/$(field archive.name)"
+          sum=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+          [[ "$sum" == "$(field archive.sha256)" ]] || { echo "::error::archive checksum changed between jobs"; exit 1; }
+
+          sig=$(sign_update -p "$archive")
+          [[ "$sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::unexpected signature format"; exit 1; }
+          [[ $(grep -c '@ED_SIGNATURE@' stage/appcast.template.xml) == 1 ]] || { echo "::error::appcast placeholder missing"; exit 1; }
+          mkdir -p signed
+          sed "s|@ED_SIGNATURE@|$sig|" stage/appcast.template.xml > signed/appcast.xml
+          sign_update signed/appcast.xml
+          sign_update --verify signed/appcast.xml
+          sign_update --verify "$archive" "$sig"
+
+          # Would installed apps accept these? Check both signatures against the public key the app was built with.
+          cat > "$RUNNER_TEMP/verify.swift" <<'SWIFT'
+          import CryptoKit
+          import Foundation
+          let a = CommandLine.arguments
+          guard a.count == 4, let raw = Data(base64Encoded: a[1]), let sig = Data(base64Encoded: a[2]),
+                let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw),
+                let body = FileManager.default.contents(atPath: a[3]) else { exit(2) }
+          exit(key.isValidSignature(sig, for: body) ? 0 : 1)
+          SWIFT
+          feed_sig=$(sed -n 's/^edSignature: //p' signed/appcast.xml)
+          feed_len=$(sed -n 's/^length: //p' signed/appcast.xml)
+          head -c "$feed_len" signed/appcast.xml > "$RUNNER_TEMP/feed.body"
+          public=$(field publicKey)
+          if xcrun swift "$RUNNER_TEMP/verify.swift" "$public" "$sig" "$archive" \
+             && xcrun swift "$RUNNER_TEMP/verify.swift" "$public" "$feed_sig" "$RUNNER_TEMP/feed.body"; then
+            echo "Signatures match the app's public key $public." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$MODE" == dry-run ]]; then
+            echo "::warning::Dry run: the signing key does not match the app's public key; installed apps must reject this feed."
+            echo "Dry run: signing key does NOT match the app's public key (expected with a throwaway key)." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Missing secrets: ${missing[*]}. Building an UNSIGNED, NOT NOTARISED DMG."
+            echo "::error::The mac-sign key does not match the public key built into the app; installed apps would reject this update."
+            exit 1
+          fi
+          printf 'signed=true\narchive_sha256=%s\n' "$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed appcast
+        if: steps.sign.outputs.signed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-signed
+          path: signed/appcast.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to downloads.aiwizards.com (mac-publish)
+    needs: [build, sign]
+    if: needs.sign.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    environment: mac-publish
+    timeout-minutes: 30
+    steps:
+      - name: Download staged release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-stage
+          path: stage
+
+      - name: Download signed appcast
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-signed
+          path: signed
+
+      - name: Upload versioned files, verify, then switch the feed
+        env:
+          R2_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MODE: ${{ needs.build.outputs.mode }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+          BUILD: ${{ needs.build.outputs.build }}
+          SIGNED_SHA256: ${{ needs.sign.outputs.archive_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$R2_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]] || {
+            echo "::error::R2_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set in environment mac-publish"; exit 1; }
+          field() { jq -er "$1" stage/release-stage.json; }
+          [[ "$(field .build)" == "$BUILD" ]] || { echo "::error::staged build differs"; exit 1; }
+          archive="stage/$(field .archive.name)"; dmg="stage/$(field .dmg.name)"
+          [[ "$(sha256sum "$archive" | cut -d' ' -f1)" == "$SIGNED_SHA256" ]] || { echo "::error::archive is not the one that was signed"; exit 1; }
+          [[ "$(sha256sum "$dmg" | cut -d' ' -f1)" == "$(field .dmg.sha256)" ]] || { echo "::error::DMG checksum changed"; exit 1; }
+          if [[ "$MODE" == release ]]; then
+            live=$(curl -fsS "$DOWNLOADS/mac/appcast.xml?check=$GITHUB_RUN_ID-publish" \
+              | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1)
+            (( BUILD > live )) || { echo "::error::build $BUILD is not higher than the live appcast's $live"; exit 1; }
           fi
 
-      - name: Import Developer ID certificate and notary key
-        id: keychain
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          keychain="$RUNNER_TEMP/release-signing.keychain-db"
-          keychain_password=$(uuidgen)
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          security default-keychain -d user -s "$keychain"
-          identity=$(security find-identity -v -p codesigning "$keychain" \
-            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
-          [[ -n "$identity" ]] || { echo "::error::No Developer ID Application identity in MACOS_CERT_P12"; exit 1; }
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
-          key_file="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
-          printf '%s' "$ASC_KEY_P8" > "$key_file"
-          xcrun notarytool store-credentials try-omarchy-ci \
-            --key "$key_file" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
-            --keychain "$keychain" --validate
-          rm -f "$key_file"
-
-      - name: Build signed and notarised DMG
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          SIGN_IDENTITY: ${{ steps.keychain.outputs.identity }}
-        run: |
-          macos/build-app.sh --configuration production --dmg \
-            --guest-dir "$GITHUB_WORKSPACE/dist/guest" \
-            --sign-identity "$SIGN_IDENTITY" --notarize-profile try-omarchy-ci
-          echo "DMG_KIND=signed" >> "$GITHUB_ENV"
-
-      - name: Build unsigned DMG
-        if: steps.signing.outputs.enabled != 'true'
-        run: |
-          macos/build-app.sh --configuration production --dmg \
-            --guest-dir "$GITHUB_WORKSPACE/dist/guest" --sign-identity -
-          echo "DMG_KIND=unsigned" >> "$GITHUB_ENV"
-
-      - name: Name and checksum DMG
-        run: |
-          set -euo pipefail
-          dmg=$(ls dist/*.dmg | head -1)
-          suffix=$([[ "$DMG_KIND" == signed ]] && echo "" || echo "-UNSIGNED")
-          out="dist/release/WizardOS-${RELEASE_TAG}${suffix}.dmg"
-          mkdir -p dist/release
-          cp "$dmg" "$out"
-          (cd dist/release && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256")
-          {
-            echo "### $RELEASE_TAG"
-            if [[ "$DMG_KIND" == signed ]]; then
-              echo "Signed with Developer ID and notarised."
-            else
-              echo "**UNSIGNED / NOT NOTARISED.** Signing secrets are missing; Gatekeeper will block this DMG. Do not publish it as an official release."
+          n=0
+          fetch() { n=$((n + 1)); curl -sS -o "$RUNNER_TEMP/public.bin" -w '%{http_code}' "$DOWNLOADS/$1?v=$GITHUB_RUN_ID-$n"; }
+          put() { # key file content-type cache-control versioned(yes|no)
+            local key=$1 file=$2 type=$3 cache=$4 versioned=$5 want code
+            want=$(sha256sum "$file" | cut -d' ' -f1)
+            if [[ "$versioned" == yes ]]; then
+              code=$(fetch "$key")
+              if [[ "$code" == 200 ]]; then
+                if [[ "$(sha256sum "$RUNNER_TEMP/public.bin" | cut -d' ' -f1)" == "$want" ]]; then
+                  echo "$key is already published with the same bytes"; return 0
+                elif [[ "$MODE" != dry-run ]]; then
+                  echo "::error::$key already exists with different bytes; versioned paths are never overwritten"; return 1
+                fi
+              elif [[ "$code" != 404 ]]; then
+                echo "::error::checking $key returned HTTP $code"; return 1
+              fi
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+            curl -fsS -X PUT \
+              -H "Authorization: Bearer $R2_API_TOKEN" -H "Content-Type: $type" -H "Cache-Control: $cache" \
+              --data-binary "@$file" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET/objects/$key" > /dev/null
+            code=$(fetch "$key")
+            [[ "$code" == 200 && "$(sha256sum "$RUNNER_TEMP/public.bin" | cut -d' ' -f1)" == "$want" ]] || {
+              echo "::error::$key did not read back byte for byte (HTTP $code)"; return 1; }
+            echo "Published $DOWNLOADS/$key" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+          immutable='public, max-age=31536000, immutable'
+          put "$CHANNEL/$BUILD/$(basename "$archive")" "$archive" application/zip "$immutable" yes
+          put "$CHANNEL/$BUILD/$(basename "$dmg")" "$dmg" application/x-apple-diskimage "$immutable" yes
+          put "$CHANNEL/appcast.xml" signed/appcast.xml application/xml no-cache no
+          if [[ "$MODE" == release ]]; then
+            put index.html stage/index.html 'text/html; charset=utf-8' no-cache no
+          fi
 
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dmg-${{ env.RELEASE_TAG }}
-          path: dist/release/
-          if-no-files-found: error
-
-      - name: Create draft GitHub release
+  tag:
+    name: Tag v<version>
+    needs: [build, publish]
+    if: needs.build.outputs.mode == 'release' && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the released commit and write the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD: ${{ needs.build.outputs.build }}
         run: |
-          notes="Draft built by CI from $RELEASE_TAG ($DMG_KIND). Verify before publishing."
-          [[ "$DMG_KIND" == signed ]] || notes="UNSIGNED, NOT NOTARISED build. $notes"
-          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/release/* --clobber -R "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG" dist/release/* --draft --verify-tag \
-              --title "$RELEASE_TAG" --notes "$notes" -R "$GITHUB_REPOSITORY"
+          set -euo pipefail
+          tag="v$VERSION"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          if [[ -z "$existing" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          elif [[ "$existing" != "$GITHUB_SHA" ]]; then
+            echo "::error::$tag already points at $existing"; exit 1
           fi
-
-      - name: Remove signing keychain
-        if: always() && steps.keychain.outputs.keychain != ''
-        env:
-          KEYCHAIN: ${{ steps.keychain.outputs.keychain }}
-        run: security delete-keychain "$KEYCHAIN" || true
+          notes="Built, signed and published by the Mac release workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          Download: $DOWNLOADS/mac/$BUILD/Wizard-$VERSION.dmg
+          In-app update feed: $DOWNLOADS/mac/appcast.xml (Sparkle-signed)
+          Ad-hoc signed and not notarised until the Apple Developer ID exists."
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" \
+            --verify-tag --title "WizardOS $VERSION for Mac (build $BUILD)" --notes "$notes"
