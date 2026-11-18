@@ -1307,7 +1307,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// prompt) as an invalid directory-sharing configuration. macOS never asks twice, so Try Again alone can't help.
     static func isFolderBlocked(_ error: String) -> Bool { error.localizedCaseInsensitiveContains("directory sharing") }
     func showFolderBlocked() {
-        let folder = WizardShared.filesFolder ?? WizardShared.defaultFilesFolder
+        let folder = WizardShared.activeSharedFolder ?? WizardShared.defaultFilesFolder
         let path = (folder.path as NSString).abbreviatingWithTildeInPath
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].standardizedFileURL.path
         let item = folder.standardizedFileURL.path.hasPrefix(documents + "/") ? "Documents Folder" : "this folder"
@@ -2327,6 +2327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                     "subtitleWidth": controller.subtitle.bounds.width,
                                     "defaultFilesFolder": WizardShared.defaultFilesFolder.path,
                                     "selectedFilesFolder": WizardShared.filesFolder?.path ?? "",
+                                    "activeFilesFolder": WizardShared.activeSharedFolder?.path ?? "",
                                     "overlayButtons": controller.buttons.map { b -> [String: Any] in
                                         let doc = self.controller.stack.superview!
                                         let r = b.convert(b.bounds, to: doc)
@@ -2524,7 +2525,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func restartLocal() { HostControl.send("restart"); DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.controller.begin() } }
     @objc func showFilesFolder() {
-        if let f = WizardShared.filesFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
+        // Only a connected share is opened; an older build's automatic Documents share is never touched (#109).
+        if let f = WizardShared.activeSharedFolder { NSWorkspace.shared.open(f) } else { controller.askFilesFolder() }
     }
 }
 

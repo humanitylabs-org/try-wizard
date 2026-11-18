@@ -583,12 +583,16 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         c.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
 
         // The Wizard's files folder (~/Wizard by default) is the guest's Runtipi media root (virtio-fs tag wizard-files).
-        if let folder = WizardShared.filesFolder {
+        // Only activeSharedFolder is created or mounted: an old build's automatic ~/Documents/Wizard MVP share is
+        // skipped without touching the disk, so startup never asks for Documents access (try-wizard#109).
+        if let folder = WizardShared.activeSharedFolder {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let fs = VZVirtioFileSystemDeviceConfiguration(tag: WizardShared.filesShareTag)
             fs.share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: folder, readOnly: false))
             c.directorySharingDevices = [fs]
             log("sharing \(folder.path) as \(WizardShared.filesShareTag)")
+        } else if WizardShared.legacyAutoShareIgnored {
+            log("saved files folder is an older build's automatic Documents default; not connected, the guest uses its own disk")
         }
         if let payload = WizardShared.guestUpdatePayload {
             let share = VZVirtioFileSystemDeviceConfiguration(tag: "wizard-update")
