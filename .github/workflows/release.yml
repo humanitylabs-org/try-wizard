@@ -222,6 +222,101 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  sign-selftest:
+    name: Sign the appcast (mac-sign)
+    needs: build
+    if: needs.build.outputs.mode == 'check'
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [dry-run, release, match]
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+      archive_sha256: ${{ steps.sign.outputs.archive_sha256 }}
+    steps:
+      - name: Download staged release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-stage
+          path: stage
+
+      - name: Fetch Sparkle sign_update (checksum-pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" ./bin/sign_update
+
+      - name: Sign archive and feed
+        id: sign
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          echo 'import CryptoKit; let k = Curve25519.Signing.PrivateKey(); print(k.rawRepresentation.base64EncodedString(), k.publicKey.rawRepresentation.base64EncodedString())' > "$RUNNER_TEMP/gen.swift"
+          read -r SPARKLE_ED_PRIVATE_KEY throwaway_public < <(xcrun swift "$RUNNER_TEMP/gen.swift")
+          if [[ "$MODE" == match ]]; then
+            python3 -c 'import json,sys;p="stage/release-stage.json";d=json.load(open(p));d["publicKey"]=sys.argv[1];json.dump(d,open(p,"w"))' "$throwaway_public"
+            MODE=release
+          fi
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set in environment mac-sign: nothing signed or published."
+            echo "Sparkle key not loaded yet: built only, nothing signed or published." >> "$GITHUB_STEP_SUMMARY"
+            echo "signed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          sign_update() { printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - "$@"; }
+          field() { /usr/bin/plutil -extract "$1" raw -o - stage/release-stage.json; }
+          archive="stage/$(field archive.name)"
+          sum=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+          [[ "$sum" == "$(field archive.sha256)" ]] || { echo "::error::archive checksum changed between jobs"; exit 1; }
+
+          sig=$(sign_update -p "$archive")
+          [[ "$sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::unexpected signature format"; exit 1; }
+          [[ $(grep -c '@ED_SIGNATURE@' stage/appcast.template.xml) == 1 ]] || { echo "::error::appcast placeholder missing"; exit 1; }
+          mkdir -p signed
+          sed "s|@ED_SIGNATURE@|$sig|" stage/appcast.template.xml > signed/appcast.xml
+          sign_update signed/appcast.xml
+          sign_update --verify signed/appcast.xml
+          sign_update --verify "$archive" "$sig"
+
+          # Would installed apps accept these? Check both signatures against the public key the app was built with.
+          cat > "$RUNNER_TEMP/verify.swift" <<'SWIFT'
+          import CryptoKit
+          import Foundation
+          let a = CommandLine.arguments
+          guard a.count == 4, let raw = Data(base64Encoded: a[1]), let sig = Data(base64Encoded: a[2]),
+                let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw),
+                let body = FileManager.default.contents(atPath: a[3]) else { exit(2) }
+          exit(key.isValidSignature(sig, for: body) ? 0 : 1)
+          SWIFT
+          feed_sig=$(sed -n 's/^edSignature: //p' signed/appcast.xml)
+          feed_len=$(sed -n 's/^length: //p' signed/appcast.xml)
+          head -c "$feed_len" signed/appcast.xml > "$RUNNER_TEMP/feed.body"
+          public=$(field publicKey)
+          if xcrun swift "$RUNNER_TEMP/verify.swift" "$public" "$sig" "$archive" \
+             && xcrun swift "$RUNNER_TEMP/verify.swift" "$public" "$feed_sig" "$RUNNER_TEMP/feed.body"; then
+            echo "Signatures match the app's public key $public." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$MODE" == dry-run ]]; then
+            echo "::warning::Dry run: the signing key does not match the app's public key; installed apps must reject this feed."
+            echo "Dry run: signing key does NOT match the app's public key (expected with a throwaway key)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::The mac-sign key does not match the public key built into the app; installed apps would reject this update."
+            exit 1
+          fi
+          printf 'signed=true\narchive_sha256=%s\n' "$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed appcast
+        if: steps.sign.outputs.signed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-signed-selftest-${{ matrix.mode }}
+          path: signed/appcast.xml
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish to downloads.aiwizards.com (mac-publish)
     needs: [build, sign]
