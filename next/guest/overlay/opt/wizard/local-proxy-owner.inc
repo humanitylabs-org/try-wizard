@@ -1,6 +1,6 @@
 # The local Mac window is the owner: only vsock and guest loopback reach local-proxy.conf. Drop whatever identity
 # the caller sent and name the owner the way Tailscale Serve does (owner.conf, written by wizard-local-routes).
-proxy_set_header Host $http_host;
+# Host is set by each location (the shell and /apps/ keep the window's; Serve's routes follow $wz_serve_host).
 proxy_set_header Forwarded "";
 proxy_set_header X-Forwarded-For $wz_device_hop;
 proxy_set_header X-Forwarded-Host "";
