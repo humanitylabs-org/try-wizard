@@ -27,6 +27,7 @@ Required build environment:
 - `SPARKLE_FEED`: HTTPS public appcast, or loopback HTTP for developer QA only. Default: `https://downloads.aiwizards.com/mac/appcast.xml` (Cloudflare R2, see `next/mac/DOWNLOADS.md`).
 - Optional `SIGN_IDENTITY`: defaults to ad hoc `-` for developer QA. Actual Developer ID + notarization remain separate external gates.
 - Optional `GUEST_UPDATE_PAYLOAD`: exact assembled bounded runtime migration payload below, not a factory disk.
+  The release workflow always sets it to the code-only guest update (`next/guest/build-code-payload.py`, below).
 
 Run the existing `next/mac/build.sh` under the shared `$WIZARD_WORK_ROOT/AndroidBuilds/worker.lock`. It signs explicit nested Sparkle helpers/framework inside-out, embeds Host, signs the app and verifies strict/deep. Only ad hoc developer builds carry disabled library validation. There is **no** downloaded-bundle re-signing or quarantine-clearing updater step.
 
@@ -60,6 +61,25 @@ After migration the new Host stops cleanly, journal disables maintenance, normal
 Retiring the rollback clone (issue #31, on for everyone): the app deletes `updates/previous-disk.img` once the journal says `guest-activated`, the live disk identity matches the journal (and `legacy-complete.json` for a legacy-cold upgrade), at least 24 hours have passed since activation (the journal's modification time), and the local Wizard is running normally with no maintenance lease. It never deletes it in any other phase. The bytes freed go to `logs/host.log`. Installs that already finished an update clean up on their next launch under the same rule. The rule is `Shared/RollbackRetirement.swift`, tested by `swift test --package-path next/mac`.
 
 **Acceptance still required:** actual existing guest receives changed Service/UX/WAM code via the native update route; before/after account identity, chat rows, app/file selection and VM identity; real agent work/recording deferral; failed migration/normal restart/interruption recovery. The native-only probe does not establish these. The final payload must include the stack owner's corrected preservation helper/schema, not the earlier blanket auth.json-byte check.
+
+## Code-only guest update (try-wizard#123)
+
+Every Mac release built by `.github/workflows/release.yml` carries a code-only guest update, so fixes in
+`next/guest/overlay` reach Macs with the version bump. `next/guest/build-code-payload.py --out <dir>` assembles it:
+this repo's files for the setup page (front door) and the Mac window door (`local-proxy.conf`, `local-proxy-owner.inc`,
+`wizard-local-routes`, `wizard-shell-port`, `wizard-ux-bridge` and the `wizard-local-proxy`/`wizard-local-routes`
+units), the guest-side installer and a `runtime-bom.json` with `"kind": "code-only"`. No images, no WAM, no agent
+changes; a few hundred KB. The release contract still says `guestPatch: mac-stack-v1`, so installed apps apply it
+through the activation above (stopped-disk copy first, put back on failure).
+
+In the guest, the fixed `upgrade-mvp-stack.py` hands a code-only payload to `next/guest/code-update.py`. It checks
+every file against the BOM (nothing extra, writes only under `/opt/wizard/` and `/etc/systemd/system/wizard-*`),
+keeps the replaced files in `/var/lib/wizard/patches/mac-stack-v1/code-only-previous-*`, installs, reloads systemd,
+checks the new nginx config with `nginx -t`, then restarts only `wizard-local-proxy` and `wizard-setup`. Its receipt
+passes the same fixed Host check (SOUL.md, .env and account credentials unchanged). It refuses a legacy cold upgrade
+(the app then says the cold bootstrap is missing, before touching the disk). The VM restarts normally afterwards, so
+every installed file runs from that boot. The full `mac-stack-v1` payload (Service image, managed Hermes, WAM) is
+still built only on the owned arm64 build machine; see `next/guest/build-runtime-payload.py`.
 
 ## Evidence / QA
 

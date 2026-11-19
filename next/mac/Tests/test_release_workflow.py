@@ -36,6 +36,15 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertNotIn('macos/build-app.sh', text)
         self.assertNotIn('make runtime', text)
 
+    def test_release_carries_the_code_only_guest_update(self):
+        """try-wizard#123: guest fixes reach Macs with the version bump, not only through a new WizardOS disk."""
+        build = jobs()['build']
+        self.assertIn('next/guest/build-code-payload.py --out "$RUNNER_TEMP/guest-update"', build)
+        self.assertIn('export GUEST_UPDATE_PAYLOAD="$RUNNER_TEMP/guest-update"', build)
+        self.assertLess(build.index('export GUEST_UPDATE_PAYLOAD'), build.index('next/mac/build.sh'))
+        self.assertIn("r['guestPatch'] == 'mac-stack-v1'", build)
+        self.assertIn("- 'next/guest/**'", WORKFLOW.read_text().split('\njobs:\n', 1)[0])
+
     def test_github_hosted_runners_only(self):
         text = WORKFLOW.read_text()
         self.assertNotIn('self-hosted', text)

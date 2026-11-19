@@ -5,7 +5,8 @@ name: Mac release
 #
 # Separate jobs, so the signing key never meets project code:
 #  1. build    macos-15, no secrets, no environment. Runs next/mac/build.sh (ad-hoc signed until Apple's Developer ID
-#              exists) and next/mac/tools/stage-release.py: Sparkle zip, DMG, an appcast with the archive signature left
+#              exists) with the code-only guest update (next/guest/build-code-payload.py, try-wizard#123) and
+#              next/mac/tools/stage-release.py: Sparkle zip, DMG, an appcast with the archive signature left
 #              as a placeholder, and the downloads landing page.
 #  2. sign     environment mac-sign (main only), secret SPARKLE_ED_PRIVATE_KEY. Runs only pinned download/upload-artifact
 #              and Sparkle's sign_update from the checksum-pinned release below. No checkout, no project code.
@@ -37,6 +38,7 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - 'next/mac/**'
+      - 'next/guest/**'
 
 permissions:
   contents: read
@@ -116,7 +118,20 @@ jobs:
           export SPARKLE_DIR="$RUNNER_TEMP/sparkle"
           SPARKLE_PUBLIC_KEY=$(tr -d '[:space:]' < next/mac/release/sparkle-public-key.txt)
           export SPARKLE_PUBLIC_KEY SPARKLE_FEED="$DOWNLOADS/mac/appcast.xml"
+          # The code-only guest update (try-wizard#123): this repo's guest files for the setup page and the Mac
+          # window door, so guest fixes reach Macs with the version bump. No images; see next/guest/build-code-payload.py.
+          python3 next/guest/build-code-payload.py --out "$RUNNER_TEMP/guest-update" --source-rev "$GITHUB_SHA"
+          export GUEST_UPDATE_PAYLOAD="$RUNNER_TEMP/guest-update"
           next/mac/build.sh
+          python3 - <<'PY'
+          import json
+          r = json.load(open('next/mac/dist/Wizard.app/Contents/Resources/wizard-release.json'))
+          bom = json.load(open('next/mac/dist/Wizard.app/Contents/Resources/GuestUpdate/runtime-bom.json'))
+          guest = [f for f in r['files'] if f.startswith('Contents/Resources/GuestUpdate/')]
+          assert r['guestPatch'] == 'mac-stack-v1' and bom['kind'] == 'code-only', 'release carries no guest update'
+          assert len(guest) == len(bom['files']) + 1, 'guest update files missing from the release contract'
+          print('Guest update: code-only, %d files' % len(bom['files']))
+          PY
 
       - name: Stage zip, DMG, appcast template and landing page
         env:
