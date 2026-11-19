@@ -714,6 +714,21 @@ enum WizardImportConnectPrompt {
     }
 }
 
+/// Private first on a fresh Mac (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10): the front door
+/// opens with `?private_first=1`, so its brain step leads with Tinfoil and hands over to the Welcome's Connect your AI,
+/// which makes the private agent the default (the box's `wizard/private-first-setup` switch, as on Linux). The guest
+/// ignores it once setup is done, so an existing install is not moved.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp PrivateFirstSetup -bool YES` turns it on.
+enum WizardPrivateFirstSetup {
+    static let key = "PrivateFirstSetup"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    /// The front door address the window opens on This Mac.
+    static var setupURL: URL {
+        guard isOn else { return WizardShared.localSetupURL }
+        return URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/?private_first=1")!
+    }
+}
+
 /// Installs updated from builds before 0.8.0 still live in `Wizard MVP.app` (Sparkle keeps the old file name), so the
 /// Dock, Cmd-Tab and Finder say "Wizard MVP" (try-wizard#124). At launch, while nothing holds the old path, the app
 /// renames itself to WizardOS.app and reopens from there. Data folder, bundle id and settings don't move.
@@ -1456,7 +1471,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
-                self.load(WizardShared.localSetupURL)
+                self.load(WizardPrivateFirstSetup.setupURL)
             } else {
                 self.showOverlay("\(WizardOSName.text) didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
                                  actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
@@ -1526,7 +1541,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // WizardOS on this Mac may still be bringing a service up: retry quietly before showing an error.
         if Store.active?.kind == .thisMac, localRetries < 12 {
             localRetries += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardShared.localSetupURL) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardPrivateFirstSetup.setupURL) }
             return
         }
         localRetries = 0

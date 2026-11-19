@@ -84,6 +84,7 @@ test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_import_env.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_import_ai_connections.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_setup_name_errors.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/guest/tests/test_setup_private_first.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar_double_click.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar_inset.py"
