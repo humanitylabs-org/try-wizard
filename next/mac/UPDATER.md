@@ -1,4 +1,4 @@
-# Wizard MVP in-app updater — staged integration
+# WizardOS in-app updater — staged integration
 
 This lane is not a release. Parent owns cohort integration, installation and publication. See the round's `UPDATER-LIVE.md` and Thales `updater/evidence/` for actual executed results; do not infer success from scripts or this document.
 

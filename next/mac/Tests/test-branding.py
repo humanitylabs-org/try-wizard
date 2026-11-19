@@ -76,6 +76,60 @@ class BrandTests(unittest.TestCase):
         self.assertNotIn('under Wizard MVP', (MAC/'App/main.swift').read_text())
         self.assertNotIn('Wizard MVP', (MAC/'tools/make-update-feed.py').read_text())
 
+    def test_no_user_visible_wizard_mvp(self):
+        # try-wizard#124: "Wizard MVP" appears nowhere a person can see it. Only bundle ids, QA temp files and the
+        # legacy on-disk names that installed Macs still use (data folder, old .app name, old Documents share) may
+        # say MVP, each in exactly the place listed here.
+        import re
+        literal = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+        allowed = {
+            ('Shared/Shared.swift', '"Wizard MVP"'): 1,        # Application Support data folder: never moved
+            ('Shared/Shared.swift', '"wizard mvp"'): 1,        # recognises the old automatic Documents share
+            ('Shared/BundleName.swift', '"Wizard MVP.app"'): 1,  # recognises the old .app name to rename it
+        }
+        seen = {}
+        bad = []
+        for path in sorted([*MAC.glob('App/*.swift'), *MAC.glob('Shared/*.swift'), *MAC.glob('Host/*.swift')]):
+            rel = str(path.relative_to(MAC))
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                code = line.split('//', 1)[0] if not line.lstrip().startswith('///') else ''
+                for s in literal.findall(code):
+                    if 'mvp' not in s.lower():
+                        continue
+                    if s.startswith('"org.humanitylabs.wizard.mvp') or s.startswith('"/tmp/wizard-mvp-qa'):
+                        continue
+                    if (rel, s) in allowed:
+                        seen[(rel, s)] = seen.get((rel, s), 0) + 1
+                        continue
+                    bad.append('%s:%d %s' % (rel, n, s))
+        self.assertEqual(bad, [])
+        self.assertEqual(seen, allowed)
+        build = (MAC/'build.sh').read_text()
+        self.assertNotRegex(build, r'(?i)wizard[ -]?mvp(?!\.host)(?![\w.])')
+        for page in (ROOT/'next/guest/overlay/opt/wizard/setup/static').rglob('*'):
+            if page.suffix in ('.html', '.js', '.css', '.json'):
+                self.assertNotRegex(page.read_text(), r'(?i)wizard mvp', str(page))
+        for tool in ('tools/make-update-feed.py', 'tools/stage-release.py'):
+            self.assertNotRegex((MAC/tool).read_text(), r'(?i)wizard mvp', tool)
+
+    def test_old_wizard_mvp_app_renames_itself_at_launch(self):
+        # try-wizard#124: Sparkle keeps an app's file name, so Macs updated from before 0.8.0 still run from
+        # "Wizard MVP.app". The app renames itself first thing at launch (before the Host starts), when safe.
+        main = (MAC/'App/main.swift').read_text()
+        launch = main[main.index('func applicationDidFinishLaunching'):]
+        launch = launch[:launch.index('\n    }\n')]
+        first = [l.strip() for l in launch.splitlines()[1:] if l.strip()][:2]
+        self.assertEqual(first[1], 'if WizardBundleRelaunch.renameAndRelaunchIfNeeded() { return }')
+        self.assertLess(launch.index('renameAndRelaunchIfNeeded'), launch.index('controller.begin()'))
+        build = (MAC/'build.sh').read_text()
+        app_line = next(l for l in build.splitlines() if 'App/main.swift' in l and 'SWIFTC' in l)
+        self.assertIn('Shared/BundleName.swift', app_line)
+        shared = (MAC/'Shared/BundleName.swift').read_text()
+        for guard in ('!f.hostRunning', '!f.otherAppRunning', 'updateInFlightPhases', '!exists(target.path)', 'writable(parent.path)'):
+            self.assertIn(guard, shared)
+        self.assertNotIn('removeItem', shared)
+        self.assertIn('"BundleName.swift"', (MAC/'Package.swift').read_text())
+
     def test_guest_onboarding_and_semantic_icon(self):
         static = ROOT/'next/guest/overlay/opt/wizard/setup/static'
         html = (static/'index.html').read_text()

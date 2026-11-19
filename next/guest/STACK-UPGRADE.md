@@ -21,7 +21,7 @@ SHA256 the payload and image on Thales for the private delivery receipt. No acco
 
 ## Existing MVP disk — state preserving
 
-1. Quit Wizard MVP and let its owned guest stop cleanly. Resolve the owner's actual `DataHome` from **that app's** settings; never assume the default and never change other VM preferences. Retain the existing `os/disk.img`, files-folder selection and shared Mac folder. Make an APFS clone/backup of the stopped disk on Thales/external storage (or encrypted R2 for retention), not on the VPS. Do not download/replace the disk with a factory image.
+1. Quit WizardOS and let its owned guest stop cleanly. Resolve the owner's actual `DataHome` from **that app's** settings; never assume the default and never change other VM preferences. Retain the existing `os/disk.img`, files-folder selection and shared Mac folder. Make an APFS clone/backup of the stopped disk on Thales/external storage (or encrypted R2 for retention), not on the VPS. Do not download/replace the disk with a factory image.
 2. Enable the existing opt-in dev shell only for this maintenance launch (`<DataHome>/dev-shell`). Start the **same** native installed app and disk. This is the established local vsock9200 maintenance route, not a published remote admin port. Alternative: run the script through the owner's existing terminal/root administrative path in the guest. Do not bake a secret, add an SSH key or reset onboarding.
 3. Make the **verified payload** available read-only to the guest (a temporary virtio-fs maintenance share in the isolated build/QA harness, or copy the small script/package and image through the chosen shared folder; remove it afterward). Run in the guest:
    ```
