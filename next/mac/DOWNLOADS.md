@@ -42,9 +42,15 @@ than the live appcast's). The workflow then:
 2. **sign** (environment `mac-sign`, `main` only, secret `SPARKLE_ED_PRIVATE_KEY`): Sparkle's checksum-pinned
    `sign_update` signs the archive and the complete appcast and checks both against the public key built into the app
    (`next/mac/release/sparkle-public-key.txt`). It runs no project code.
-3. **publish** (environment `mac-publish`, `main` only, secrets `R2_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`): uploads the
-   versioned zip and DMG first, verifies them byte for byte through `https://downloads.aiwizards.com` with a unique query
-   string, refuses to overwrite a different file at a versioned path, then uploads `mac/appcast.xml` and `index.html`.
+3. **publish** (environment `mac-publish`, `main` only, secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+   `R2_SESSION_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`): temporary R2 S3 credentials scoped to bucket `aiwizards-downloads`,
+   prefixes `mac/` and `mac-dryrun/`, object read-write, valid 7 days at most (try-wizard#115). Archimedes mints fresh
+   ones weekly and loads them into `mac-publish`; GitHub never holds an account-wide token. The job uploads with the
+   runner's preinstalled `aws` CLI through `https://<account>.r2.cloudflarestorage.com`. It first checks that the
+   credentials still work (expired ones fail with a clear error) and that a write outside `mac/` is refused, then uploads
+   the versioned zip and DMG (a HEAD check first: the same bytes are skipped, different bytes fail), verifies each file
+   byte for byte through `https://downloads.aiwizards.com` with a unique query string, and uploads `mac/appcast.xml`
+   last (a real release writes the landing page to `mac/index.html` just before it; the bucket root is out of scope).
 4. **tag**: tags the released commit `v<version>` and writes a GitHub release with the links.
 
 "Run workflow" on `main` runs the same pipeline as a dry run by default: it publishes to `mac-dryrun/` only and never

@@ -9,9 +9,11 @@ name: Mac release
 #              as a placeholder, and the downloads landing page.
 #  2. sign     environment mac-sign (main only), secret SPARKLE_ED_PRIVATE_KEY. Runs only pinned download/upload-artifact
 #              and Sparkle's sign_update from the checksum-pinned release below. No checkout, no project code.
-#  3. publish  environment mac-publish (main only), secrets R2_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. Uploads the zip and
-#              DMG to downloads.aiwizards.com/<channel>/<build>/, checks them byte for byte through the public URL,
-#              then switches the appcast (and, for a real release, index.html) last. No checkout, no project code.
+#  3. publish  environment mac-publish (main only), secrets R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_SESSION_TOKEN and
+#              CLOUDFLARE_ACCOUNT_ID: temporary R2 S3 credentials scoped to mac/ and mac-dryrun/ (7 days at most,
+#              try-wizard#115). Uploads with the runner's aws CLI to downloads.aiwizards.com/<channel>/<build>/,
+#              never overwrites a versioned key, checks every file byte for byte through the public URL, then
+#              switches the appcast last (a real release also writes mac/index.html). No checkout, no project code.
 #  4. tag      a real release tags the released commit v<version> and writes a GitHub release with the links.
 #
 # How a release starts: a PR that raises next/mac/release/version.json (version and build; the build must be higher
@@ -271,16 +273,41 @@ jobs:
 
       - name: Upload versioned files, verify, then switch the feed
         env:
-          R2_API_TOKEN: ${{ secrets.R2_API_TOKEN }}
+          # Temporary R2 S3 credentials (try-wizard#115): bucket aiwizards-downloads, prefixes mac/ and mac-dryrun/,
+          # object read-write, at most 7 days. Archimedes mints fresh ones weekly; GitHub never holds an account token.
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.R2_SESSION_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          AWS_PAGER: ''
           MODE: ${{ needs.build.outputs.mode }}
           CHANNEL: ${{ needs.build.outputs.channel }}
           BUILD: ${{ needs.build.outputs.build }}
           SIGNED_SHA256: ${{ needs.sign.outputs.archive_sha256 }}
         run: |
           set -euo pipefail
-          [[ -n "$R2_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]] || {
-            echo "::error::R2_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set in environment mac-publish"; exit 1; }
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            [[ -n "${!v}" ]] || {
+              echo "::error::R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_SESSION_TOKEN / CLOUDFLARE_ACCOUNT_ID are not all set in environment mac-publish"
+              exit 1; }
+          done
+          [[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun ]] || { echo "::error::unexpected channel $CHANNEL"; exit 1; }
+          command -v aws > /dev/null || { echo "::error::the runner has no aws CLI"; exit 1; }
+          endpoint="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
+          s3() { aws --endpoint-url "$endpoint" --output json s3api "$@"; }
+          err="$RUNNER_TEMP/s3.err"
+          expired() { # $1 what was attempted; reads the last S3 error
+            if grep -qiE 'ExpiredToken|expired|InvalidAccessKeyId|InvalidToken|SignatureDoesNotMatch|Unauthorized' "$err"; then
+              echo "::error::The R2 temporary credentials in mac-publish expired or were revoked ($1). Mint new 7-day credentials and load them into the environment."
+            else
+              echo "::error::$1 failed: $(tr '\n' ' ' < "$err")"
+            fi
+          }
+
           field() { jq -er "$1" stage/release-stage.json; }
           [[ "$(field .build)" == "$BUILD" ]] || { echo "::error::staged build differs"; exit 1; }
           archive="stage/$(field .archive.name)"; dmg="stage/$(field .dmg.name)"
@@ -292,27 +319,42 @@ jobs:
             (( BUILD > live )) || { echo "::error::build $BUILD is not higher than the live appcast's $live"; exit 1; }
           fi
 
+          # The credentials work (a clear error if they expired) and cannot write outside mac/ and mac-dryrun/.
+          if ! s3 get-object --bucket "$BUCKET" --key "$CHANNEL/appcast.xml" "$RUNNER_TEMP/feed.bin" > /dev/null 2> "$err" \
+             && ! grep -q NoSuchKey "$err"; then
+            expired "reading $CHANNEL/appcast.xml"; exit 1
+          fi
+          probe="publish-scope-check/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.txt"
+          : > "$RUNNER_TEMP/empty"
+          if s3 put-object --bucket "$BUCKET" --key "$probe" --body "$RUNNER_TEMP/empty" > /dev/null 2> "$err"; then
+            s3 delete-object --bucket "$BUCKET" --key "$probe" > /dev/null || true
+            echo "::error::the mac-publish credentials can write outside mac/ and mac-dryrun/; load bucket-scoped temporary credentials"
+            exit 1
+          elif ! grep -q AccessDenied "$err"; then
+            expired "the scope check"; exit 1
+          fi
+          echo "Credentials checked: writing $probe was refused (AccessDenied)." >> "$GITHUB_STEP_SUMMARY"
+
           n=0
           fetch() { n=$((n + 1)); curl -sS -o "$RUNNER_TEMP/public.bin" -w '%{http_code}' "$DOWNLOADS/$1?v=$GITHUB_RUN_ID-$n"; }
           put() { # key file content-type cache-control versioned(yes|no)
             local key=$1 file=$2 type=$3 cache=$4 versioned=$5 want code
             want=$(sha256sum "$file" | cut -d' ' -f1)
             if [[ "$versioned" == yes ]]; then
-              code=$(fetch "$key")
-              if [[ "$code" == 200 ]]; then
-                if [[ "$(sha256sum "$RUNNER_TEMP/public.bin" | cut -d' ' -f1)" == "$want" ]]; then
+              if s3 head-object --bucket "$BUCKET" --key "$key" > /dev/null 2> "$err"; then
+                s3 get-object --bucket "$BUCKET" --key "$key" "$RUNNER_TEMP/existing.bin" > /dev/null 2> "$err" || {
+                  expired "reading $key"; return 1; }
+                if [[ "$(sha256sum "$RUNNER_TEMP/existing.bin" | cut -d' ' -f1)" == "$want" ]]; then
                   echo "$key is already published with the same bytes"; return 0
                 elif [[ "$MODE" != dry-run ]]; then
                   echo "::error::$key already exists with different bytes; versioned paths are never overwritten"; return 1
                 fi
-              elif [[ "$code" != 404 ]]; then
-                echo "::error::checking $key returned HTTP $code"; return 1
+              elif ! grep -qE '\(404\)|Not Found|NoSuchKey' "$err"; then
+                expired "checking $key"; return 1
               fi
             fi
-            curl -fsS -X PUT \
-              -H "Authorization: Bearer $R2_API_TOKEN" -H "Content-Type: $type" -H "Cache-Control: $cache" \
-              --data-binary "@$file" \
-              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET/objects/$key" > /dev/null
+            s3 put-object --bucket "$BUCKET" --key "$key" --body "$file" \
+              --content-type "$type" --cache-control "$cache" > /dev/null 2> "$err" || { expired "uploading $key"; return 1; }
             code=$(fetch "$key")
             [[ "$code" == 200 && "$(sha256sum "$RUNNER_TEMP/public.bin" | cut -d' ' -f1)" == "$want" ]] || {
               echo "::error::$key did not read back byte for byte (HTTP $code)"; return 1; }
@@ -321,10 +363,11 @@ jobs:
           immutable='public, max-age=31536000, immutable'
           put "$CHANNEL/$BUILD/$(basename "$archive")" "$archive" application/zip "$immutable" yes
           put "$CHANNEL/$BUILD/$(basename "$dmg")" "$dmg" application/x-apple-diskimage "$immutable" yes
-          put "$CHANNEL/appcast.xml" signed/appcast.xml application/xml no-cache no
           if [[ "$MODE" == release ]]; then
-            put index.html stage/index.html 'text/html; charset=utf-8' no-cache no
+            # The credentials stop at mac/, so the landing page goes to mac/index.html; the root page is not touched.
+            put mac/index.html stage/index.html 'text/html; charset=utf-8' no-cache no
           fi
+          put "$CHANNEL/appcast.xml" signed/appcast.xml application/xml no-cache no
 
   tag:
     name: Tag v<version>
