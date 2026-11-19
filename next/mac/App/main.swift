@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CoreLocation
 import CryptoKit
 import ServiceManagement
 import WebKit
@@ -726,6 +727,53 @@ enum WizardPrivateFirstSetup {
     static var setupURL: URL {
         guard isOn else { return WizardShared.localSetupURL }
         return URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/?private_first=1")!
+    }
+}
+
+/// Maps may use the Mac's location (try-wizard#135, part of wizard-ux#1629). WebKit asks the app before any page
+/// gets `navigator.geolocation`; without an answer it is always denied. With this switch on, the app answers only for
+/// the Wizard's own shell page and the Wizard's own addresses, shows macOS's own location prompt first and grants
+/// only if the owner accepts (decisions in Shared/AppLocation.swift). The shell's `wizard/app-location` switch decides
+/// which app frame may ask at all (only an app that declared `permissions: [geolocation]`, today Maps).
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp AppLocation -bool YES` turns it on.
+enum WizardAppLocation {
+    static let key = "AppLocation"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    /// Installed apps on This Mac open from their own address (`localhost`, same port as the shell).
+    static var thisMacAppsOrigin: NativeOrigin? { NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort)) }
+}
+
+/// Shows macOS's location prompt (once; macOS remembers the answer) and reports the owner's choice.
+final class WizardLocationConsent: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var waiting: [(WizardAppLocationRule.Access) -> Void] = []
+    private var timeout: Timer?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    var access: WizardAppLocationRule.Access { WizardAppLocationRule.Access(rawStatus: manager.authorizationStatus.rawValue) }
+
+    func ask(_ done: @escaping (WizardAppLocationRule.Access) -> Void) {
+        waiting.append(done)
+        guard waiting.count == 1 else { return }
+        manager.requestWhenInUseAuthorization()
+        // A prompt nobody answers is a no, so the page never hangs.
+        timeout = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finish(.notAsked) }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let now = access
+        guard now != .notAsked, !waiting.isEmpty else { return }
+        finish(now)
+    }
+
+    private func finish(_ access: WizardAppLocationRule.Access) {
+        timeout?.invalidate(); timeout = nil
+        let done = waiting; waiting = []
+        done.forEach { $0(access) }
     }
 }
 
@@ -1710,6 +1758,42 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // Native macOS microphone consent still applies; this only settles WebKit's
         // origin decision. The explicitly selected remote backend keeps its path.
         decisionHandler(allowed ? .grant : .deny)
+    }
+
+    // MARK: Location for Maps (try-wizard#135; off unless the AppLocation switch is on)
+    private lazy var locationConsent = WizardLocationConsent()
+
+    /// The Wizard's own addresses: the shell, and on This Mac the installed apps' `localhost` address.
+    private var wizardLocationOrigins: Set<NativeOrigin> {
+        var origins = selectedControlOrigins
+        if Store.active?.kind == .thisMac, let apps = WizardAppLocation.thisMacAppsOrigin { origins.insert(apps) }
+        return origins
+    }
+
+    private func decideLocation(_ origin: WKSecurityOrigin, _ answer: @escaping (Bool) -> Void) {
+        let wizardAddress = NativeOrigin(origin).map { wizardLocationOrigins.contains($0) } ?? false
+        let on = WizardAppLocation.isOn
+        // Never create a CLLocationManager with the switch off: macOS then never hears about location at all.
+        let access: WizardAppLocationRule.Access = on ? locationConsent.access : .refused
+        switch WizardAppLocationRule.decide(switchOn: on, trustedShell: isTrustedDocument, wizardAddress: wizardAddress, access: access) {
+        case .grant: answer(true)
+        case .deny: answer(false)
+        case .askMacOS:
+            locationConsent.ask { answer(WizardAppLocationRule.afterPrompt($0) == .grant) }
+        }
+    }
+
+    /// WebKit's geolocation question (WKUIDelegatePrivate, macOS 12+). Without it WebKit denies every page.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func wizardGeolocationRequest(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo,
+                                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decideLocation(origin) { decisionHandler($0 ? .grant : .deny) }
+    }
+
+    /// The older form of the same question, used when WebKit doesn't find the one above.
+    @objc(_webView:requestGeolocationPermissionForFrame:decisionHandler:)
+    func wizardGeolocationRequest(_ webView: WKWebView, frame: WKFrameInfo, decisionHandler: @escaping (Bool) -> Void) {
+        decideLocation(frame.securityOrigin, decisionHandler)
     }
 
     private var selectedControlOrigins: Set<NativeOrigin> {

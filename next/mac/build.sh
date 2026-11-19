@@ -25,7 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOST/Contents/MacOS" 
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 "${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/GuestPatchCommand.swift Shared/HostTermination.swift Host/OSUpdates.swift Host/main.swift -framework Virtualization -framework AppKit -framework IOKit -o "$HOST/Contents/MacOS/Wizard Host"
-"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/BackupContract.swift Shared/DownloadDestinations.swift Shared/FrontDoorHandoff.swift Shared/RollbackRetirement.swift Shared/BundleName.swift Shared/HostHandover.swift App/WizardBackup.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/WizardRollbackCleanup.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -o "$APP/Contents/MacOS/Wizard"
+"${SWIFTC[@]}" Shared/Shared.swift Shared/DiskIdentity.swift Shared/Brand.swift Shared/UpdateContract.swift Shared/BackupContract.swift Shared/DownloadDestinations.swift Shared/FrontDoorHandoff.swift Shared/RollbackRetirement.swift Shared/BundleName.swift Shared/AppLocation.swift Shared/HostHandover.swift App/WizardBackup.swift App/WizardKeys.swift App/MeetingCapture.swift App/MeetingUI.swift App/WizardGuestActivation.swift App/WizardRollbackCleanup.swift App/WizardUpdater.swift App/main.swift -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -framework Security -framework UniformTypeIdentifiers -framework CryptoKit -framework WebKit -framework AppKit -framework ServiceManagement -framework Carbon -framework AVFoundation -framework CoreAudio -framework CoreMedia -framework ScreenCaptureKit -framework ApplicationServices -framework CoreLocation -o "$APP/Contents/MacOS/Wizard"
 # Stop here rather than ship an app that macOS 14 kills at launch (a required symbol it doesn't have).
 python3 check-launch-symbols.py "$APP/Contents/MacOS/Wizard" "$HOST/Contents/MacOS/Wizard Host"
 
@@ -51,7 +51,7 @@ $5
 EOF
 }
 plist "$APP/Contents/Info.plist" "WizardOS" org.humanitylabs.wizard.mvp Wizard \
-  '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string>'
+  '<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string><key>NSMicrophoneUsageDescription</key><string>Wizard uses the microphone for voice messages, dictation and recording your side of meetings.</string><key>NSAudioCaptureUsageDescription</key><string>Wizard records the other side of your calls (the audio your Mac plays) when you start a meeting recording.</string><key>NSScreenCaptureUsageDescription</key><string>Wizard can use screen audio to record calls if direct call audio is unavailable.</string><key>NSCameraUsageDescription</key><string>Wizard uses the camera when you share a photo.</string><key>NSLocationUsageDescription</key><string>Wizard lets the Maps app show where you are, only after you say yes.</string><key>NSLocationWhenInUseUsageDescription</key><string>Wizard lets the Maps app show where you are, only after you say yes.</string>'
 plist "$HOST/Contents/Info.plist" "Wizard Host" org.humanitylabs.wizard.mvp.host "Wizard Host" '<key>LSUIElement</key><true/>'
 
 # Public metadata only. A private GitHub feed fails visibly; no embedded login/token.
@@ -120,7 +120,7 @@ codesign --force --sign "$SIGN_IDENTITY" --options runtime --entitlements "$OUT/
 cat > "$OUT/obj/app.entitlements" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/><key>com.apple.security.device.camera</key><true/></dict></plist>
+<plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/><key>com.apple.security.device.camera</key><true/><key>com.apple.security.personal-information.location</key><true/></dict></plist>
 EOF
 if [[ "$SIGN_IDENTITY" == - ]]; then
   /usr/libexec/PlistBuddy -c 'Add :com.apple.security.cs.disable-library-validation bool true' "$OUT/obj/app.entitlements"

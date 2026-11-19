@@ -12,7 +12,9 @@ let package = Package(
         .target(name: "WizardBundleName", path: "Shared", exclude: ["Shared.swift"], sources: ["BundleName.swift"]),
         .testTarget(name: "WizardBundleNameTests", dependencies: ["WizardBundleName"], path: "Tests/BundleName"),
         .target(name: "WizardHostHandover", path: "Shared", exclude: ["Shared.swift"], sources: ["HostHandover.swift"]),
-        .testTarget(name: "WizardHostHandoverTests", dependencies: ["WizardHostHandover"], path: "Tests/HostHandover")
+        .testTarget(name: "WizardHostHandoverTests", dependencies: ["WizardHostHandover"], path: "Tests/HostHandover"),
+        .target(name: "WizardAppLocation", path: "Shared", exclude: ["Shared.swift"], sources: ["AppLocation.swift"]),
+        .testTarget(name: "WizardAppLocationTests", dependencies: ["WizardAppLocation"], path: "Tests/AppLocation")
     ],
     swiftLanguageModes: [.v5]
 )
