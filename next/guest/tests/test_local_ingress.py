@@ -12,7 +12,7 @@ def load_routes():
 class Upstream(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.end_headers()
-  self.wfile.write(json.dumps({'port':self.server.server_port,'path':self.path,'login':self.headers.get('Tailscale-User-Login',''),'fwd':self.headers.get('X-Forwarded-For',''),'origin':self.headers.get('Origin','')}).encode())
+  self.wfile.write(json.dumps({'port':self.server.server_port,'path':self.path,'login':self.headers.get('Tailscale-User-Login',''),'fwd':self.headers.get('X-Forwarded-For',''),'origin':self.headers.get('Origin',''),'host':self.headers.get_all('Host',[])}).encode())
  def log_message(self,*args):pass
 def serve():
  s=http.server.ThreadingHTTPServer(('127.0.0.1',0),Upstream);threading.Thread(target=s.serve_forever,daemon=True).start();return s
@@ -28,6 +28,11 @@ class Routes(unittest.TestCase):
    '/wizard-os-home/store-install':{'Proxy':'http://127.0.0.1:7791'},'/far/':{'Proxy':'http://203.0.113.9:80'},'/bad path/':{'Proxy':'http://127.0.0.1:1'}}},
    'wizard.example-tailnet.ts.net:8799':{'Handlers':{'/x/':{'Proxy':'http://127.0.0.1:8799'}}}}}
   self.assertEqual(self.m.handlers(serve,8796),[('/wizard-os-home/store-install','http://127.0.0.1:7791'),('/files/','http://127.0.0.1:8794/files/')])
+ def test_window_host_follows_serve_origin_or_stays(self):
+  self.assertIn('set $wz_served_host "box.example-tailnet.ts.net:8796";',self.m.shell_conf(8796,'https://box.example-tailnet.ts.net:8796'))
+  self.assertIn('set $wz_served_host $http_host;',self.m.shell_conf(8796,''))
+  self.assertIn('proxy_set_header Host $wz_serve_host;',self.m.location('/files/','http://127.0.0.1:8794/files/'))
+  self.assertNotIn('proxy_set_header Host',OWNER_INC.read_text())   # one Host line per location, never two
 class Ingress(unittest.TestCase):
  def test_setup_shell_uses_public_authority_not_transport_port(self):
   import ast, asyncio
@@ -53,7 +58,7 @@ class Ingress(unittest.TestCase):
     '/wizard-os-home/store-install':{'Proxy':f'http://127.0.0.1:{store.server_port}'},'/files/':{'Proxy':f'http://127.0.0.1:{files.server_port}/files/'}}}}},8796)
    (run/'routes.conf').write_text(''.join(m.location(a,b) for a,b in rows).replace('/opt/wizard/local-proxy-owner.inc',str(root/'owner.inc')))
    (run/'owner.conf').write_text('proxy_set_header Tailscale-User-Login "owner@example.com";\n')
-   (run/'shell.conf').write_text(f'set $wz_shell http://127.0.0.1:{shell.server_port};\nset $wz_served_origin "https://box.example-tailnet.ts.net:8796";\n')
+   (run/'shell.conf').write_text(m.shell_conf(shell.server_port,'https://box.example-tailnet.ts.net:8796'))
    (root/'owner.inc').write_text(OWNER_INC.read_text().replace('/run/wizard-local-proxy/',f'{run}/'))
    text=(CONFIG.read_text().replace('/run/wizard-local-proxy.pid',str(root/'nginx.pid')).replace('user root root;','')
     .replace('/run/wizard-local-proxy/',f'{run}/').replace('/opt/wizard/local-proxy-owner.inc',str(root/'owner.inc'))
@@ -95,6 +100,14 @@ class Ingress(unittest.TestCase):
     self.assertEqual(window('/wizard-os-home/store-install/_updates',{'Origin':'https://attacker.test'})['origin'],'https://attacker.test')
     body=window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})
     self.assertEqual((body['port'],body['fwd'],body['origin']),(shell.server_port,'wizard-mac-window','http://127.0.0.1:48023'))
+    # try-wizard#117: the Host goes with the rewritten Origin (apps that check Origin against Host, like the Claude
+    # connection app, refused every window write), exactly once; everything else keeps the window's Host.
+    self.assertEqual(window('/files/x',{'Origin':'http://127.0.0.1:48023'})['host'],['box.example-tailnet.ts.net:8796'])
+    self.assertEqual(window('/files/x',{})['host'],['127.0.0.1:48023'])
+    self.assertEqual(window('/files/x',{'Origin':'https://attacker.test'})['host'],['127.0.0.1:48023'])
+    self.assertEqual(window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})['host'],['127.0.0.1:48023'])
+    self.assertEqual(request('127.0.0.1:48023','/files/x',{'Origin':'http://127.0.0.1:48023'})[1]['host'],['127.0.0.1:48023'])
+    self.assertEqual(request('localhost:48023','/apps/test/')[1]['host'],['localhost:48023'])
    finally:
     process.terminate();process.communicate(timeout=5)
     for s in (shell,store,files):s.shutdown();s.server_close()
