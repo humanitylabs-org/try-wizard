@@ -23,6 +23,12 @@ name: Mac release
 # A dry run publishes to downloads.aiwizards.com/mac-dryrun/ and never touches mac/appcast.xml or index.html; a signing
 # key that does not match the app's public key (next/mac/release/sparkle-public-key.txt) is a warning there and an
 # error in a real release. Pull requests that touch next/mac run the build job only, as a native compile check.
+#
+# Release lanes (wizard-os#720, off by default): with the repository variable WOS_RELEASE_LANES=on, a real release is a
+# tester build. It publishes to downloads.aiwizards.com/mac-beta/ (its signed feed and landing page also kept immutable
+# under mac-beta/<build>/), never touches mac/, and its GitHub release is a prerelease. Installed apps read only
+# mac/appcast.xml, so nobody is updated to it until the release train (promote.yml, every 6h, no person) finds it soaked
+# 72h with no release-blocker open and copies that build's signed feed to mac/ with the same bytes, no rebuild.
 on:
   push:
     branches: [main]
@@ -74,6 +80,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
+          LANES: ${{ vars.WOS_RELEASE_LANES }}
         run: |
           set -euo pipefail
           version=$(python3 -c 'import json;print(json.load(open("next/mac/release/version.json"))["version"])')
@@ -90,11 +97,19 @@ jobs:
             mode=release
           fi
           channel=$([[ "$mode" == dry-run ]] && echo mac-dryrun || echo mac)
+          # Release lanes on (wizard-os#720): a real release is a tester build on mac-beta/, made public by promote.yml after 72h.
+          if [[ "$mode" == release && "$LANES" == on ]]; then channel=mac-beta; fi
           if [[ "$mode" == release ]]; then
             live=$(curl -fsS "$DOWNLOADS/mac/appcast.xml?check=$GITHUB_RUN_ID" \
               | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1)
             [[ "$live" =~ ^[0-9]+$ ]] || { echo "::error::could not read the live appcast build"; exit 1; }
             (( build > live )) || { echo "::error::build $build is not higher than the live appcast's $live; raise next/mac/release/version.json"; exit 1; }
+            if [[ "$channel" == mac-beta ]]; then
+              # No tester feed yet (the first tester build) counts as 0.
+              beta=$(curl -sS "$DOWNLOADS/mac-beta/appcast.xml?check=$GITHUB_RUN_ID" \
+                | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1 || true)
+              (( build > ${beta:-0} )) || { echo "::error::build $build is not higher than the tester appcast's $beta; raise next/mac/release/version.json"; exit 1; }
+            fi
           fi
           printf 'mode=%s\nchannel=%s\nversion=%s\nbuild=%s\n' "$mode" "$channel" "$version" "$build" >> "$GITHUB_OUTPUT"
           echo "### WizardOS $version (build $build): $mode" >> "$GITHUB_STEP_SUMMARY"
@@ -288,7 +303,8 @@ jobs:
 
       - name: Upload versioned files, verify, then switch the feed
         env:
-          # Temporary R2 S3 credentials (try-wizard#115): bucket aiwizards-downloads, prefixes mac/ and mac-dryrun/,
+          # Temporary R2 S3 credentials (try-wizard#115): bucket aiwizards-downloads, prefixes mac/ and mac-dryrun/ (and
+          # mac-beta/ for release lanes, wizard-os#720),
           # object read-write, at most 7 days. Archimedes mints fresh ones weekly; GitHub never holds an account token.
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -310,7 +326,7 @@ jobs:
               echo "::error::R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_SESSION_TOKEN / CLOUDFLARE_ACCOUNT_ID are not all set in environment mac-publish"
               exit 1; }
           done
-          [[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun ]] || { echo "::error::unexpected channel $CHANNEL"; exit 1; }
+          [[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]] || { echo "::error::unexpected channel $CHANNEL"; exit 1; }
           command -v aws > /dev/null || { echo "::error::the runner has no aws CLI"; exit 1; }
           endpoint="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
           s3() { aws --endpoint-url "$endpoint" --output json s3api "$@"; }
@@ -332,9 +348,14 @@ jobs:
             live=$(curl -fsS "$DOWNLOADS/mac/appcast.xml?check=$GITHUB_RUN_ID-publish" \
               | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1)
             (( BUILD > live )) || { echo "::error::build $BUILD is not higher than the live appcast's $live"; exit 1; }
+            if [[ "$CHANNEL" == mac-beta ]]; then
+              beta=$(curl -sS "$DOWNLOADS/mac-beta/appcast.xml?check=$GITHUB_RUN_ID-publish" \
+                | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1 || true)
+              (( BUILD > ${beta:-0} )) || { echo "::error::build $BUILD is not higher than the tester appcast's $beta"; exit 1; }
+            fi
           fi
 
-          # The credentials work (a clear error if they expired) and cannot write outside mac/ and mac-dryrun/.
+          # The credentials work (a clear error if they expired) and cannot write outside mac/, mac-beta/ and mac-dryrun/.
           if ! s3 get-object --bucket "$BUCKET" --key "$CHANNEL/appcast.xml" "$RUNNER_TEMP/feed.bin" > /dev/null 2> "$err" \
              && ! grep -q NoSuchKey "$err"; then
             expired "reading $CHANNEL/appcast.xml"; exit 1
@@ -343,7 +364,7 @@ jobs:
           : > "$RUNNER_TEMP/empty"
           if s3 put-object --bucket "$BUCKET" --key "$probe" --body "$RUNNER_TEMP/empty" > /dev/null 2> "$err"; then
             s3 delete-object --bucket "$BUCKET" --key "$probe" > /dev/null || true
-            echo "::error::the mac-publish credentials can write outside mac/ and mac-dryrun/; load bucket-scoped temporary credentials"
+            echo "::error::the mac-publish credentials can write outside mac/, mac-beta/ and mac-dryrun/; load bucket-scoped temporary credentials"
             exit 1
           elif ! grep -q AccessDenied "$err"; then
             expired "the scope check"; exit 1
@@ -378,9 +399,15 @@ jobs:
           immutable='public, max-age=31536000, immutable'
           put "$CHANNEL/$BUILD/$(basename "$archive")" "$archive" application/zip "$immutable" yes
           put "$CHANNEL/$BUILD/$(basename "$dmg")" "$dmg" application/x-apple-diskimage "$immutable" yes
-          if [[ "$MODE" == release ]]; then
+          if [[ "$MODE" == release && "$CHANNEL" == mac ]]; then
             # The credentials stop at mac/, so the landing page goes to mac/index.html; the root page is not touched.
             put mac/index.html stage/index.html 'text/html; charset=utf-8' no-cache no
+          elif [[ "$MODE" == release ]]; then
+            # A tester build (wizard-os#720) keeps its signed feed and page per build, so promote.yml can later copy
+            # exactly these bytes to mac/ without signing anything again.
+            put "$CHANNEL/$BUILD/appcast.xml" signed/appcast.xml application/xml "$immutable" yes
+            put "$CHANNEL/$BUILD/index.html" stage/index.html 'text/html; charset=utf-8' "$immutable" yes
+            put "$CHANNEL/index.html" stage/index.html 'text/html; charset=utf-8' no-cache no
           fi
           put "$CHANNEL/appcast.xml" signed/appcast.xml application/xml no-cache no
 
@@ -398,6 +425,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
           BUILD: ${{ needs.build.outputs.build }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
           set -euo pipefail
           tag="v$VERSION"
@@ -411,8 +439,15 @@ jobs:
             echo "::error::$tag already points at $existing"; exit 1
           fi
           notes="Built, signed and published by the Mac release workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-          Download: $DOWNLOADS/mac/$BUILD/Wizard-$VERSION.dmg
+          Download: $DOWNLOADS/$CHANNEL/$BUILD/Wizard-$VERSION.dmg
           In-app update feed: $DOWNLOADS/mac/appcast.xml (Sparkle-signed)
           Ad-hoc signed and not notarised until the Apple Developer ID exists."
+          lane=()
+          if [[ "$CHANNEL" == mac-beta ]]; then
+            # A tester build (wizard-os#720): a prerelease until promote.yml makes it public after its 72h soak.
+            lane=(--prerelease --latest=false)
+            notes="$notes
+          Tester build: installed apps are offered it once it has soaked 72h with no release-blocker open (promote.yml)."
+          fi
           gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$tag" -R "$GITHUB_REPOSITORY" \
-            --verify-tag --title "WizardOS $VERSION for Mac (build $BUILD)" --notes "$notes"
+            --verify-tag --title "WizardOS $VERSION for Mac (build $BUILD)" --notes "$notes" "${lane[@]}"

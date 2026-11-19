@@ -1,0 +1,201 @@
+name: Mac promote
+
+# Release lanes (wizard-os#720): the release train makes a Mac tester build public; no person approves it (Miguel,
+# 21 Nov 2026). Every 6 hours it takes the newest tester build (GitHub prerelease "WizardOS <version> for Mac (build
+# <build>)") published 72h or more ago whose build is above the live mac/appcast.xml, the same soak as WizardOS For
+# everyone, and holds while any issue labelled release-blocker is open in the org (next/mac/tools/release-train-pick.py).
+# It copies that build's signed feed from downloads.aiwizards.com/mac-beta/<build>/appcast.xml to mac/appcast.xml, the
+# feed every installed app reads, and its landing page to mac/index.html. The same bytes, no rebuild and no new
+# signature: the feed already names the archive under mac-beta/<build>/, and both signatures were made by release.yml's
+# sign job.
+#
+# Jobs:
+#  1. read     no secrets: picks the build (public feed, GitHub releases, release-blocker search) and reads the app's
+#              Sparkle public key from main. Nothing due: the run ends here and says why.
+#  2. promote  environment mac-publish (main only), the same temporary R2 credentials as release.yml's publish job.
+#              No checkout, no project code. Checks the tester feed names exactly this version and build, that its
+#              archive and DMG are public, that the feed and archive signatures verify against the app's public key,
+#              and that the build is higher than the live public feed's; then writes mac/index.html and
+#              mac/appcast.xml last and reads both back byte for byte.
+#  3. release  flips the GitHub release v<version> from prerelease to latest.
+#
+# Off by default, like the tester lane: nothing runs until the repository variable WOS_RELEASE_LANES=on.
+# "Run workflow" on main promotes right away when a build is due, or repeats a promotion that stopped half way.
+on:
+  schedule:
+    - cron: '47 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # The same group as release.yml's main runs, so a promotion never races a tester publish.
+  group: mac-release-main
+  cancel-in-progress: false
+
+env:
+  DOWNLOADS: https://downloads.aiwizards.com
+  BUCKET: aiwizards-downloads
+
+jobs:
+  read:
+    name: Pick the soaked tester build
+    if: vars.WOS_RELEASE_LANES == 'on' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      build: ${{ steps.pick.outputs.build }}
+      key: ${{ steps.pick.outputs.key }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Newest tester build soaked 72h, no release-blocker open, and the app's Sparkle public key
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live=$(curl -fsS "$DOWNLOADS/mac/appcast.xml?train=$GITHUB_RUN_ID" \
+            | grep -o '<sparkle:version>[0-9]*</sparkle:version>' | tr -dc '0-9\n' | sort -n | tail -1 || true)
+          [[ "$live" =~ ^[0-9]+$ ]] || { echo "::error::could not read the live mac/appcast.xml build"; exit 1; }
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          picked=$(python3 next/mac/tools/release-train-pick.py "$RUNNER_TEMP/releases.json" "$live" 2> "$RUNNER_TEMP/why")
+          echo "Public build $live. $(cat "$RUNNER_TEMP/why")" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ -n "$picked" ]] || exit 0
+          # Fails closed: an unreadable answer stops the promotion.
+          held=$(gh api -X GET search/issues -f q="org:${GITHUB_REPOSITORY%%/*} label:release-blocker state:open is:issue" --jq .total_count)
+          [[ "$held" =~ ^[0-9]+$ ]] || { echo "::error::could not read release-blocker issues"; exit 1; }
+          if (( held > 0 )); then echo "HELD: $held open release-blocker issue(s)" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          read -r version build <<< "$picked"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[1-9][0-9]*$ ]] || { echo "::error::bad pick $picked"; exit 1; }
+          key=$(tr -d '[:space:]' < next/mac/release/sparkle-public-key.txt)
+          [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || { echo "::error::bad Sparkle public key"; exit 1; }
+          printf 'version=%s\nbuild=%s\nkey=%s\n' "$version" "$build" "$key" >> "$GITHUB_OUTPUT"
+          echo "### Promote WizardOS $version (build $build) to mac/" >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Copy the tester feed to mac/ (mac-publish)
+    needs: read
+    if: needs.read.outputs.build != ''
+    runs-on: ubuntu-latest
+    environment: mac-publish
+    timeout-minutes: 30
+    outputs:
+      promoted: ${{ steps.promote.outputs.promoted }}
+    steps:
+      - name: Verify the tester build, then switch the public feed
+        id: promote
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.R2_SESSION_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          AWS_PAGER: ''
+          VERSION: ${{ needs.read.outputs.version }}
+          BUILD: ${{ needs.read.outputs.build }}
+          KEY: ${{ needs.read.outputs.key }}
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            [[ -n "${!v}" ]] || { echo "::error::the R2 credentials are not all set in environment mac-publish"; exit 1; }
+          done
+          t="$RUNNER_TEMP/promote"; mkdir -p "$t"
+          n=0
+          fetch() { # $1 key, $2 output file; prints the HTTP status
+            n=$((n + 1)); curl -sS -o "$2" -w '%{http_code}' "$DOWNLOADS/$1?v=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$n"; }
+          builds() { grep -o '<sparkle:version>[0-9]*</sparkle:version>' "$1" | tr -dc '0-9\n' | sort -n | tail -1 || true; }
+
+          # Already public (a rerun after the feed switched): nothing to do.
+          [[ "$(fetch mac/appcast.xml "$t/live.xml")" == 200 ]] || { echo "::error::could not read the live mac/appcast.xml"; exit 1; }
+          live=$(builds "$t/live.xml")
+          [[ "$live" =~ ^[0-9]+$ ]] || { echo "::error::could not read the live appcast build"; exit 1; }
+          if (( live == BUILD )) && [[ "$(fetch "mac-beta/$BUILD/appcast.xml" "$t/feed.xml")" == 200 ]] && cmp -s "$t/feed.xml" "$t/live.xml"; then
+            echo "Build $BUILD is already the public feed: nothing to promote." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "promoted=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          (( BUILD > live )) || { echo "::error::build $BUILD is not higher than the public appcast's $live"; exit 1; }
+
+          # The tester build's own signed feed, kept immutable by release.yml.
+          [[ "$(fetch "mac-beta/$BUILD/appcast.xml" "$t/feed.xml")" == 200 ]] || {
+            echo "::error::mac-beta/$BUILD/appcast.xml is not published: build $BUILD is not a tester build"; exit 1; }
+          [[ "$(fetch "mac-beta/$BUILD/index.html" "$t/index.html")" == 200 ]] || {
+            echo "::error::mac-beta/$BUILD/index.html is not published"; exit 1; }
+          python3 - "$t/feed.xml" "$VERSION" "$BUILD" "$DOWNLOADS" > "$t/enclosure" <<'PY'
+          import re, sys, xml.etree.ElementTree as X
+          def fail(message):
+              print('::error::' + message, file=sys.stderr); sys.exit(1)
+          path, version, build, downloads = sys.argv[1:]
+          raw = open(path, 'rb').read().decode()
+          S = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
+          items = X.fromstring(re.sub(r'^<\?xml[^>]*\?>', '', raw.strip())).findall('channel/item')
+          len(items) == 1 or fail('the tester feed must hold exactly one item')
+          item = items[0]
+          item.findtext(S + 'version') == build or fail('the tester feed names another build than the picked release')
+          item.findtext(S + 'shortVersionString') == version or fail('the tester feed names another version than the picked release')
+          enc = item.find('enclosure')
+          enc is not None and enc.get('url') == f'{downloads}/mac-beta/{build}/Wizard-{build}.zip' or fail('unexpected archive URL in the tester feed')
+          print(enc.get('length'), enc.get(S + 'edSignature'))
+          PY
+          read -r length sig < "$t/enclosure"
+          [[ "$length" =~ ^[1-9][0-9]*$ && "$sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::bad enclosure"; exit 1; }
+          [[ "$(fetch "mac-beta/$BUILD/Wizard-$BUILD.zip" "$t/archive.zip")" == 200 ]] || { echo "::error::archive missing"; exit 1; }
+          [[ "$(stat -c %s "$t/archive.zip")" == "$length" ]] || { echo "::error::archive length differs from the feed"; exit 1; }
+          [[ "$(curl -sS -o /dev/null -I -w '%{http_code}' "$DOWNLOADS/mac-beta/$BUILD/Wizard-$VERSION.dmg?v=$GITHUB_RUN_ID")" == 200 ]] || {
+            echo "::error::mac-beta/$BUILD/Wizard-$VERSION.dmg is not published"; exit 1; }
+
+          # Would installed apps accept it? Both Ed25519 signatures against the public key built into the app.
+          { printf '302a300506032b6570032100' | xxd -r -p; printf '%s' "$KEY" | base64 -d; } > "$t/key.der"
+          openssl pkey -pubin -inform DER -in "$t/key.der" -out "$t/key.pem"
+          verify() { printf '%s' "$1" | base64 -d > "$t/sig.bin"; openssl pkeyutl -verify -pubin -inkey "$t/key.pem" -rawin -in "$2" -sigfile "$t/sig.bin" > /dev/null; }
+          verify "$sig" "$t/archive.zip" || { echo "::error::the archive signature does not match the app's public key"; exit 1; }
+          feed_sig=$(sed -n 's/^edSignature: //p' "$t/feed.xml"); feed_len=$(sed -n 's/^length: //p' "$t/feed.xml")
+          [[ -n "$feed_sig" && "$feed_len" =~ ^[0-9]+$ ]] || { echo "::error::the tester feed is not signed"; exit 1; }
+          head -c "$feed_len" "$t/feed.xml" > "$t/feed.body"
+          verify "$feed_sig" "$t/feed.body" || { echo "::error::the feed signature does not match the app's public key"; exit 1; }
+          echo "Tester build $BUILD verified: feed and archive signatures match the app's public key $KEY." >> "$GITHUB_STEP_SUMMARY"
+
+          endpoint="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
+          put() { # key file content-type
+            aws --endpoint-url "$endpoint" --output json s3api put-object --bucket "$BUCKET" --key "$1" --body "$2" \
+              --content-type "$3" --cache-control no-cache > /dev/null 2> "$t/s3.err" || {
+              echo "::error::uploading $1 failed (expired R2 credentials in mac-publish?): $(tr '\n' ' ' < "$t/s3.err")"; return 1; }
+            [[ "$(fetch "$1" "$t/readback")" == 200 ]] && cmp -s "$2" "$t/readback" || {
+              echo "::error::$1 did not read back byte for byte"; return 1; }
+            echo "Published $DOWNLOADS/$1" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+          # Landing page first, the feed last: apps see the new build only when everything else is in place.
+          put mac/index.html "$t/index.html" 'text/html; charset=utf-8'
+          put mac/appcast.xml "$t/feed.xml" application/xml
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Mark v<version> as the latest release
+    needs: [read, promote]
+    if: needs.promote.outputs.promoted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Flip the GitHub release from prerelease to latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.read.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --prerelease=false --latest
+          else
+            echo "::warning::no GitHub release v$VERSION to mark (the feed is switched)"
+          fi
