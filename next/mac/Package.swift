@@ -8,7 +8,9 @@ let package = Package(
         .target(name: "WizardBackupContract", path: "Shared", exclude: ["Shared.swift"], sources: ["BackupContract.swift", "DownloadDestinations.swift", "FrontDoorHandoff.swift"]),
         .testTarget(name: "WizardBackupContractTests", dependencies: ["WizardBackupContract"], path: "Tests/Backup"),
         .target(name: "WizardRollbackRetirement", path: "Shared", exclude: ["Shared.swift"], sources: ["RollbackRetirement.swift"]),
-        .testTarget(name: "WizardRollbackRetirementTests", dependencies: ["WizardRollbackRetirement"], path: "Tests/RollbackRetirement")
+        .testTarget(name: "WizardRollbackRetirementTests", dependencies: ["WizardRollbackRetirement"], path: "Tests/RollbackRetirement"),
+        .target(name: "WizardBundleName", path: "Shared", exclude: ["Shared.swift"], sources: ["BundleName.swift"]),
+        .testTarget(name: "WizardBundleNameTests", dependencies: ["WizardBundleName"], path: "Tests/BundleName")
     ],
     swiftLanguageModes: [.v5]
 )

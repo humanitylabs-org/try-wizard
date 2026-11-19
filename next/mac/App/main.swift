@@ -714,6 +714,43 @@ enum WizardImportConnectPrompt {
     }
 }
 
+/// Installs updated from builds before 0.8.0 still live in `Wizard MVP.app` (Sparkle keeps the old file name), so the
+/// Dock, Cmd-Tab and Finder say "Wizard MVP" (try-wizard#124). At launch, while nothing holds the old path, the app
+/// renames itself to WizardOS.app and reopens from there. Data folder, bundle id and settings don't move.
+enum WizardBundleRelaunch {
+    /// True when the app renamed itself and is about to reopen: the caller must not start anything.
+    @MainActor static func renameAndRelaunchIfNeeded() -> Bool {
+        let bundle = Bundle.main.bundleURL
+        let me = getpid()
+        let facts = WizardBundleName.Facts(
+            bundle: bundle,
+            hostRunning: !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).isEmpty,
+            otherAppRunning: NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.appBundleID)
+                .contains { $0.processIdentifier != me },
+            updatePhase: WizardUpdate.json(WizardUpdate.journal)["phase"] as? String)
+        let fm = FileManager.default
+        guard let target = WizardBundleName.renameTarget(facts, exists: { fm.fileExists(atPath: $0) },
+                                                        writable: { fm.isWritableFile(atPath: $0) }) else { return false }
+        guard WizardBundleName.rename(bundle, to: target) else {
+            NSLog("Wizard: couldn't rename \(bundle.path) to \(target.lastPathComponent); keeping the old name")
+            return false
+        }
+        // Reopen from the new path once this process has gone, so only one copy ever runs.
+        let reopen = Process()
+        reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+        reopen.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open \"$2\"",
+                            "wizard-reopen", String(me), target.path]
+        do { try reopen.run() } catch {
+            // Can't reopen: put the app back where it was and carry on under the old name.
+            NSLog("Wizard: couldn't reopen as \(target.lastPathComponent) (\(error)); keeping the old name")
+            if !WizardBundleName.rename(target, to: bundle) { NSLog("Wizard: couldn't move the app back to \(bundle.path)") }
+            return false
+        }
+        NSLog("Wizard: renamed \(bundle.lastPathComponent) to \(target.lastPathComponent); reopening")
+        exit(0)
+    }
+}
+
 /// The Mac app shows the PWA/phone app icon (dark Void tile, glowing hat) instead of the flat purple square
 /// (try-wizard#86). Only the running app's Dock icon changes; the bundle icon, name, bundle id and the
 /// `Wizard MVP` data folder stay as they are, so nothing about an install moves.
@@ -1353,7 +1390,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     /// When the automatic download fails, the person can download the archive in their browser and choose it here.
     func showGetOS(note: String? = nil) {
         showOverlay("Get \(WizardOSName.text)",
-                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this private MVP. Other guest versions are not compatible with this build.",
+                    (note.map { $0 + "\n\n" } ?? "") + "Choose the matching wizard-os-0.3.0.tar.xz supplied with this version of \(WizardOSName.text). Other guest versions are not compatible with this build.",
                     spinning: false,
                     actions: [("Download \(WizardOSName.text)", #selector(openReleasePage)),
                               ("Choose Downloaded File…", #selector(chooseOSFile)),
@@ -1743,6 +1780,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
+        if WizardBundleRelaunch.renameAndRelaunchIfNeeded() { return }
         NSApp.appearance = NSAppearance(named: .darkAqua)
         WizardPWAIcon.apply()
         buildMenus()
