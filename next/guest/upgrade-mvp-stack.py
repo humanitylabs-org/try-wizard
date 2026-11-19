@@ -11,6 +11,12 @@ p=argparse.ArgumentParser(); p.add_argument('payload',type=Path); p.add_argument
 if os.geteuid()!=0: raise SystemExit('Run as root inside the Wizard guest')
 root=Path('/home/wizard/runtipi'); data=root/'app-data/wizardapps/hermes-agent/data'
 if not (data/'config.yaml').is_file(): raise SystemExit('Existing MVP Hermes config not found; refusing unknown layout')
+# A Mac release built by GitHub Actions carries a code-only update (try-wizard#123): code-update.py installs it.
+if (a.payload/'runtime-bom.json').is_file() and json.loads((a.payload/'runtime-bom.json').read_text()).get('kind')=='code-only':
+ spec=importlib.util.spec_from_file_location('code_update',Path(__file__).with_name('code-update.py'))
+ if spec is None or spec.loader is None: raise SystemExit('Missing code-only installer')
+ code_update=importlib.util.module_from_spec(spec); spec.loader.exec_module(code_update)
+ raise SystemExit(code_update.apply(a.payload,apply=a.apply,cold_bootstrap=a.cold_bootstrap))
 for required in ('wam/wam/registry.py','wam/wam/fresh_agent.py','overlay/opt/wizard/local-proxy.conf','overlay/opt/wizard/bin/wizard-product-configure','overlay/opt/wizard/bin/wizard-runtime-configure','agent-runtime/agent_runtime.py','runtime-bom.json','wizard-shell.tar'):
  if not (a.payload/required).is_file(): raise SystemExit('Incomplete payload: '+required)
 bom=json.loads((a.payload/'runtime-bom.json').read_text())
