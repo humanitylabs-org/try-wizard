@@ -12,8 +12,8 @@ permissions:
 
 # GitHub-hosted Apple Silicon runners (free and unlimited once the repository is
 # public). Fork PRs are safe here: read-only token, no secrets, ephemeral VM.
-# The previous self-hosted Mac job now lives in ci-self-hosted.yml (manual
-# dispatch only) so PR code can never reach that machine once public.
+# No workflow in this repo uses self-hosted runners (try-wizard#113,
+# wizard-os#680); tests/test-no-self-hosted-runners.py guards that.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
