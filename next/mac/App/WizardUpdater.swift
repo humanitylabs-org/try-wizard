@@ -229,6 +229,7 @@ final class NoticeBarView: NSView {
         return .terminateNow
     }
     @objc func updateAndRestart() {
+        if phase == "host-recovery" { _ = retryHostHandover(); return }
         if ready == nil { checkForUpdates(); return }
         guard !preparing else { return }
         if isRecording() || qaBusy { show("busy", "Recording or agent work is active — update after it finishes"); return }
@@ -351,36 +352,80 @@ final class NoticeBarView: NSView {
             }
             releaseLease()
             if journal["restartHost"] as? Bool == true {
-                HostControl.ensureRunning()
-                show("activating", "Mac app installed; confirming new local Host…")
-                confirmNativeHost(build: current, deadline: Date().addingTimeInterval(300))
+                show("activating", "Wizard updated; starting \(WizardOSName.text)…")
+                confirmNativeHost(build: current)
             } else {
                 journal["phase"] = "native-activated"; journal["installedBuild"] = current
                 try WizardUpdate.write(journal, WizardUpdate.journal)
                 show("installed", "Wizard updated — build \(current)")
             }
-        } catch { releaseLease(); show("failed", "New app health failed — previous app retained in updates/previous.app", retry: false) }
+        } catch { releaseLease(); show("failed", "The update couldn't be checked. Quit Wizard and open it again. Your data is safe.", retry: false) }
     }
 
-    private func confirmNativeHost(build: String, deadline: Date) {
-        let status = WizardUpdate.json(WizardShared.statusFile)
-        if status["build"] as? String == build, status["hostProtocol"] as? Int == WizardRelease.peer,
-           status["dataHome"] as? String == WizardShared.supportDir.path,
-           let pid = status["pid"] as? Int32, kill(pid, 0) == 0 {
-            if status["state"] as? String == "notInstalled" { nativeActivated(build); return }
-            if status["state"] as? String == "running" {
-                WizardShared.probeReady { ready in DispatchQueue.main.async {
-                    if ready { self.nativeActivated(build) }
-                    else { self.retryNativeHost(build, deadline) }
-                } }
-                return
-            }
-        }
-        retryNativeHost(build, deadline)
+    // MARK: New Host after an app update (try-wizard#127; decisions in Shared/HostHandover.swift)
+
+    private var handover = WizardHostHandover(startedAt: Date())
+    private var handoverBuild = ""
+    /// The updater is bringing up the new Host: the window waits for it instead of launching or starting one itself.
+    private(set) var handoverActive = false
+    /// Called with the plain recovery text when the new Host did not come up, and with nil when it came up after
+    /// that (or after the updater had to replace an old Host), so the window can show or leave its own message.
+    var onHostHandover: (String?) -> Void = { _ in }
+
+    private func confirmNativeHost(build: String) {
+        handoverBuild = build
+        handover = WizardHostHandover(startedAt: Date())
+        guard !handoverActive else { return }
+        handoverActive = true
+        stepNativeHost()
     }
-    private func retryNativeHost(_ build: String, _ deadline: Date) {
-        guard Date() < deadline else { show("failed", "New Host health not confirmed — previous app remains available in updates/previous.app"); return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.confirmNativeHost(build: build, deadline: deadline) }
+    /// Retry from the bar or the window. False when no update handover is waiting for one.
+    @discardableResult func retryHostHandover() -> Bool {
+        guard !handoverBuild.isEmpty, phase == "host-recovery" || handoverActive else { return false }
+        show("activating", "Starting \(WizardOSName.text)…")
+        confirmNativeHost(build: handoverBuild)
+        return true
+    }
+    private func stepNativeHost() {
+        guard handoverActive else { return }
+        let step = handover.next(status: WizardUpdate.json(WizardShared.statusFile), build: handoverBuild,
+            peer: WizardRelease.peer, dataHome: WizardShared.supportDir.path, now: Date(),
+            pidAlive: { kill($0, 0) == 0 },
+            isHostProcess: { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier == WizardShared.hostBundleID },
+            anyHostRunning: !NSRunningApplication.runningApplications(withBundleIdentifier: WizardShared.hostBundleID).isEmpty)
+        switch step {
+        case .wait: break
+        case .activated: finishHandover(); return
+        case .probe:
+            WizardShared.probeReady { ok in DispatchQueue.main.async {
+                if ok { self.finishHandover() } else { self.scheduleHandoverStep() }
+            } }
+            return
+        case .startOS: HostControl.send("start")
+        case .stopOldHost(let pid):
+            // A normal quit: the old Host stops WizardOS cleanly first (applicationShouldTerminate). Never forced.
+            NSLog("Wizard: an older Wizard Host (pid %d) still runs after the update; asking it to quit", pid)
+            NSRunningApplication(processIdentifier: pid)?.terminate()
+            show("activating", "Restarting \(WizardOSName.text) with the new version…")
+        case .launchHost: HostControl.ensureRunning()
+        case .stalled:
+            show("host-recovery", WizardHostHandover.troubleText, retry: true)
+            onHostHandover(WizardHostHandover.troubleText)
+        case .gaveUp:
+            handoverActive = false
+            show("host-recovery", WizardHostHandover.troubleText, retry: true)
+            onHostHandover(WizardHostHandover.troubleText)
+            return
+        }
+        scheduleHandoverStep()
+    }
+    private func scheduleHandoverStep() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.stepNativeHost() }
+    }
+    private func finishHandover() {
+        handoverActive = false
+        nativeActivated(handoverBuild)
+        if handover.intervened { onHostHandover(nil) }
     }
     private func nativeActivated(_ build: String) {
         var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "native-activated"; journal["installedBuild"] = build; journal["hostBuild"] = build

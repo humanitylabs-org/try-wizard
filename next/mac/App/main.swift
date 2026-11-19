@@ -1329,7 +1329,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     @objc func backToChooser() { showChooser() }
     @objc func retryInstall() { installOnThisMac() }
-    @objc func retry() { begin() }
+    @objc func retry() { WizardUpdater.shared.retryHostHandover(); begin() }
     @objc func quitWizard() { NSApp.terminate(nil) }
 
     // MARK: Start errors the owner can fix
@@ -1431,8 +1431,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         startLocalVoice()
         let generation = voiceConnectionGeneration
         let started = Date()
-        HostControl.ensureRunning()
-        HostControl.send("start")
+        // Right after an app update the updater brings up the new Host (and replaces an old one still running,
+        // try-wizard#127); launching or starting from here as well would race it.
+        if !WizardUpdater.shared.handoverActive {
+            HostControl.ensureRunning()
+            HostControl.send("start")
+        }
         var shown = false
         var failed = false
         HostControl.waitForLocalWizard(timeout: 120, tick: { [weak self] elapsed in
@@ -1802,6 +1806,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.controller.web.isHidden = frozen
         }
         WizardUpdater.shared.onGuestFinished = { [weak self] in self?.controller.begin() }
+        WizardUpdater.shared.onHostHandover = { [weak self] trouble in
+            guard let controller = self?.controller, Store.active?.kind == .thisMac else { return }
+            guard let trouble else {
+                // The new Host came up after the updater had to step in: reconnect if the window is still waiting.
+                if !controller.overlay.isHidden { controller.begin() }
+                return
+            }
+            controller.showOverlay("\(WizardOSName.text) didn't restart", trouble, spinning: false,
+                                   actions: [("Try Again", #selector(WizardWindowController.retry)),
+                                             ("Quit Wizard", #selector(WizardWindowController.quitWizard))])
+        }
         WizardUpdater.shared.onActivationStatus = { [weak self] text, failed in
             guard let controller = self?.controller else { return }
             guard failed else { controller.showOverlay("Upgrading your Wizard", text, spinning: true); return }
