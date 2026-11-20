@@ -743,6 +743,17 @@ enum WizardAppLocation {
     static var thisMacAppsOrigin: NativeOrigin? { NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort)) }
 }
 
+/// Music and Podcasts show in Control Center's Now Playing and answer the media keys / AirPods buttons (try-wizard#142,
+/// the Mac part of wizard-ux#1661): title, artist/show, artwork and progress; play/pause, skip back 15 / forward 30 for
+/// Podcasts, next/previous for Music, all routed to the playing app's own page. Clicking Now Playing brings Wizard
+/// forward on that app. Only those two apps (Shared/NowPlaying.swift); the class is App/WizardNowPlaying.swift.
+/// Read when the window is made, so it takes effect the next time Wizard opens.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp NowPlaying -bool YES` turns it on.
+enum WizardNowPlaying {
+    static let key = "NowPlaying"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
 /// Shows macOS's location prompt (once; macOS remembers the answer) and reports the owner's choice.
 final class WizardLocationConsent: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -938,6 +949,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
         cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        if WizardNowPlaying.isOn {
+            // Every frame, because Music and Podcasts run in the shell's app frames; the script stays idle elsewhere.
+            cfg.userContentController.add(WizardNowPlayingCenter.shared, name: WizardNowPlayingCenter.name)
+            cfg.userContentController.addUserScript(WKUserScript(source: WizardNowPlayingCenter.script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -954,6 +970,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         if !window.setFrameUsingName("WizardMainWindow") { window.center() }
         super.init(window: window)
         NativeBridge.shared.owner = self
+        WizardNowPlayingCenter.shared.owner = self
         // files.save: the shell's Save button (photo viewer, file cards) hands over the bytes it holds (try-wizard#139).
         NativeBridge.shared.register("files.") { [weak self] method, params, reply in
             guard method == "files.save", let self else { reply(["status": "failed", "error": "unsupported"]); return }
@@ -1555,6 +1572,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard webView === web else { return }
         documentGeneration &+= 1
+        WizardNowPlayingCenter.shared.reset()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1811,6 +1829,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         var origins = selectedControlOrigins
         if Store.active?.kind == .thisMac, let apps = WizardAppLocation.thisMacAppsOrigin { origins.insert(apps) }
         return origins
+    }
+
+    /// Now Playing (try-wizard#142): the Wizard's own addresses, where Music and Podcasts run.
+    func isWizardAppAddress(_ origin: WKSecurityOrigin) -> Bool {
+        var origins = selectedControlOrigins
+        if Store.active?.kind == .thisMac, let apps = WizardAppLocation.thisMacAppsOrigin { origins.insert(apps) }
+        return NativeOrigin(origin).map { origins.contains($0) } ?? false
     }
 
     private func decideLocation(_ origin: WKSecurityOrigin, _ answer: @escaping (Bool) -> Void) {
@@ -2139,6 +2164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showMainWindow() }
+        // Now Playing clicked (or the Dock icon) while Music or Podcasts plays: open that app (try-wizard#142).
+        WizardNowPlayingCenter.shared.openPlayingApp()
         return true
     }
 

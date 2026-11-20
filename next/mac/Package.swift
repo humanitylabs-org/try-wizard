@@ -14,7 +14,9 @@ let package = Package(
         .target(name: "WizardHostHandover", path: "Shared", exclude: ["Shared.swift"], sources: ["HostHandover.swift"]),
         .testTarget(name: "WizardHostHandoverTests", dependencies: ["WizardHostHandover"], path: "Tests/HostHandover"),
         .target(name: "WizardAppLocation", path: "Shared", exclude: ["Shared.swift"], sources: ["AppLocation.swift"]),
-        .testTarget(name: "WizardAppLocationTests", dependencies: ["WizardAppLocation"], path: "Tests/AppLocation")
+        .testTarget(name: "WizardAppLocationTests", dependencies: ["WizardAppLocation"], path: "Tests/AppLocation"),
+        .target(name: "WizardNowPlaying", path: "Shared", exclude: ["Shared.swift"], sources: ["NowPlaying.swift"]),
+        .testTarget(name: "WizardNowPlayingTests", dependencies: ["WizardNowPlaying"], path: "Tests/NowPlaying")
     ],
     swiftLanguageModes: [.v5]
 )
