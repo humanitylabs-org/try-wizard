@@ -14,6 +14,14 @@ final class WizardNowPlayingCenter: NSObject, WKScriptMessageHandler {
     typealias Rule = WizardNowPlayingRule
 
     weak var owner: WizardWindowController?
+
+    /// The one exception to "main frame only" (Tests/test_native_bridge_frames.py): Music and Podcasts run in the
+    /// shell's app frames, so this script goes to every frame and stays idle outside those two apps. Its own handler
+    /// name carries no other native power, and the receiver below admits a frame only through Shared/NowPlaying.swift.
+    static func install(into controller: WKUserContentController) {
+        controller.add(shared, name: name)
+        controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    }
     /// The app now shown in Now Playing (nil: nothing shown).
     private(set) var activeApp: String?
     private var frames: [String: WKFrameInfo] = [:]

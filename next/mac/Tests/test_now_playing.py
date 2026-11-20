@@ -99,12 +99,12 @@ class NowPlayingTests(unittest.TestCase):
         self.assertIn('defaults write org.humanitylabs.wizard.mvp NowPlaying -bool YES', self.main)
 
     def test_script_and_handler_only_with_switch_on(self):
-        init = block(self.main, 'if WizardNowPlaying.isOn {', '\n        }\n')
-        self.assertIn('add(WizardNowPlayingCenter.shared, name: WizardNowPlayingCenter.name)', init)
-        self.assertIn('source: WizardNowPlayingCenter.script', init)
-        self.assertIn('forMainFrameOnly: false', init)
+        self.assertIn('if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }', self.main)
+        self.assertEqual(self.main.count('WizardNowPlayingCenter.install('), 1)
+        install = block(self.center, 'static func install(into controller: WKUserContentController) {', '\n    }\n')
+        self.assertIn('controller.add(shared, name: name)', install)
+        self.assertIn('WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false)', install)
         self.assertIn('WizardNowPlayingCenter.shared.owner = self', self.main)
-        self.assertEqual(self.main.count('WizardNowPlayingCenter.shared, name:'), 1)
 
     def test_reports_admitted_only_through_the_rule(self):
         handler = block(self.center, 'func userContentController(', '\n    }\n')

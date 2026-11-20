@@ -949,11 +949,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
         cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        if WizardNowPlaying.isOn {
-            // Every frame, because Music and Podcasts run in the shell's app frames; the script stays idle elsewhere.
-            cfg.userContentController.add(WizardNowPlayingCenter.shared, name: WizardNowPlayingCenter.name)
-            cfg.userContentController.addUserScript(WKUserScript(source: WizardNowPlayingCenter.script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        }
+        // Music and Podcasts in Now Playing (try-wizard#142): nothing is installed unless the NowPlaying switch is on.
+        if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
