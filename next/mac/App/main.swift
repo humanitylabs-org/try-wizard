@@ -954,6 +954,11 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         if !window.setFrameUsingName("WizardMainWindow") { window.center() }
         super.init(window: window)
         NativeBridge.shared.owner = self
+        // files.save: the shell's Save button (photo viewer, file cards) hands over the bytes it holds (try-wizard#139).
+        NativeBridge.shared.register("files.") { [weak self] method, params, reply in
+            guard method == "files.save", let self else { reply(["status": "failed", "error": "unsupported"]); return }
+            self.saveFromPage(params, reply: reply)
+        }
         dragView.owner = self
         window.isMovableByWindowBackground = false
 
@@ -1716,6 +1721,44 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             let targets = self.downloadReveals.drain()
             guard !targets.isEmpty else { return }
             NSWorkspace.shared.activateFileViewerSelecting(targets)
+        }
+    }
+    /// Largest file the shell may hand over in one files.save (base64 characters, about 150 MB of file).
+    static let pageSaveMaxBase64 = 200 * 1024 * 1024
+    private var pageSaves: [ObjectIdentifier: NSObject] = [:]
+    /// files.save {data: base64, name}: write a file the trusted shell already holds into ~/Downloads and say
+    /// honestly whether it landed. A blob <a download> fired after the page fetched the photo carries no user
+    /// gesture, so WebKit's download path above refused it without a word on macOS 15.2+ (try-wizard#139).
+    /// Only the trusted shell's main frame reaches this (NativeBridge admits allowsNative frames only); it never
+    /// overwrites: the name is reserved like a download's and the write refuses an existing file.
+    func saveFromPage(_ params: [String: Any], reply: @escaping (Any?) -> Void) {
+        guard let b64 = params["data"] as? String, b64.utf8.count <= Self.pageSaveMaxBase64,
+              let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters), !data.isEmpty else {
+            reply(["status": "failed", "error": "This file couldn't be read."]); return
+        }
+        let token = NSObject(), key = ObjectIdentifier(token)
+        pageSaves[key] = token
+        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        let target = downloadTargets.reserve(for: key, suggestedFilename: params["name"] as? String ?? "",
+                                             folder: folder, fileExists: {
+                                                 (try? FileManager.default.attributesOfItem(atPath: $0)) != nil
+                                             })
+        DispatchQueue.global(qos: .userInitiated).async {
+            let failure: String? = {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try data.write(to: target, options: [.withoutOverwriting])
+                    return nil
+                } catch { return error.localizedDescription }
+            }()
+            DispatchQueue.main.async { [weak self] in
+                self?.downloadTargets.release(key)
+                self?.pageSaves.removeValue(forKey: key)
+                if let failure { reply(["status": "failed", "error": failure]); return }
+                self?.queueDownloadReveal(target)
+                reply(["status": "saved", "name": target.lastPathComponent, "folder": "Downloads"])
+            }
         }
     }
     func downloadDidFinish(_ download: WKDownload) {

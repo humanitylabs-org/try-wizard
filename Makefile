@@ -89,6 +89,7 @@ test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar_double_click.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_titlebar_inset.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_download_reservations.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_page_save.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_front_door_handoff.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_os_update_host_fixes.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_window_zoom.py"
