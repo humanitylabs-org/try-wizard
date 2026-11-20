@@ -96,7 +96,7 @@ class ReleaseWorkflow(unittest.TestCase):
         # Every key written stays inside the credential's prefixes.
         for key in re.findall(r'(?m)^\s+put (\S+) ', publish):
             self.assertRegex(key, r'^"?(\$CHANNEL|mac)/')
-        self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun ]]', publish)
+        self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]]', publish)
 
     def test_only_main_releases_and_tags_are_written_by_the_workflow(self):
         text = WORKFLOW.read_text()
@@ -123,6 +123,86 @@ class ReleaseWorkflow(unittest.TestCase):
         for path in ('/.github/', '/next/mac/tools/stage-release.py', '/next/mac/tools/make-update-feed.py',
                      '/next/mac/release/sparkle-public-key.txt'):
             self.assertRegex(owners, r'(?m)^' + re.escape(path) + r'\s+@\w')
+
+
+PROMOTE = ROOT / '.github/workflows/promote.yml'
+
+
+def promote_jobs():
+    body = PROMOTE.read_text().split('\njobs:\n', 1)[1]
+    parts = re.split(r'(?m)^  ([a-z][\w-]*):\n', body)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+class ReleaseLanes(unittest.TestCase):
+    """wizard-os#720: merges publish tester builds to mac-beta/; public.json (James, Jan or Miguel) promotes one."""
+
+    def test_tester_lane_is_off_until_the_variable_is_on(self):
+        build = jobs()['build']
+        self.assertIn('LANES: ${{ vars.WOS_RELEASE_LANES }}', build)
+        self.assertIn('if [[ "$mode" == release && "$LANES" == on ]]; then channel=mac-beta; fi', build)
+        # The app always reads the public feed, so promoted bytes update installed apps.
+        self.assertIn('SPARKLE_FEED="$DOWNLOADS/mac/appcast.xml"', build)
+
+    def test_tester_build_never_writes_mac(self):
+        publish = jobs()['publish']
+        self.assertIn('if [[ "$MODE" == release && "$CHANNEL" == mac ]]; then', publish)
+        tester = publish.split('elif [[ "$MODE" == release ]]; then', 1)[1].split('\n          fi\n', 1)[0]
+        keys = re.findall(r'(?m)^\s+put (\S+) ', tester)
+        self.assertEqual(len(keys), 3)
+        for key in keys:
+            self.assertTrue(key.startswith('"$CHANNEL/'), key)
+        # Its signed feed and page stay immutable per build, so promotion copies them without signing again.
+        self.assertIn('put "$CHANNEL/$BUILD/appcast.xml" signed/appcast.xml application/xml "$immutable" yes', tester)
+        self.assertIn('put "$CHANNEL/$BUILD/index.html"', tester)
+        self.assertLess(publish.index('put "$CHANNEL/$BUILD/appcast.xml"'), publish.index('put "$CHANNEL/appcast.xml"'))
+        self.assertIn("tester appcast's", publish)
+
+    def test_tester_release_is_a_prerelease(self):
+        tag = jobs()['tag']
+        self.assertIn('lane=(--prerelease --latest=false)', tag)
+        self.assertIn('"${lane[@]}"', tag)
+
+    def test_public_file_is_code_owned_by_james_jan_and_miguel(self):
+        owners = (ROOT / '.github/CODEOWNERS').read_text()
+        rule = re.search(r'(?m)^/next/mac/release/public\.json\s+(.+)$', owners)
+        self.assertEqual(rule.group(1).split(), ['@jdefleur', '@JanMesaric', '@mistermizel'])
+        public = json.loads((ROOT / 'next/mac/release/public.json').read_text())
+        self.assertEqual(set(public), {'version', 'build'})
+        self.assertRegex(public['version'], r'^\d+\.\d+\.\d+$')
+        self.assertIsInstance(public['build'], int)
+        version = json.loads((ROOT / 'next/mac/release/version.json').read_text())
+        self.assertLessEqual(public['build'], version['build'], 'a public build is always an already built version')
+
+    def test_promote_workflow(self):
+        text = PROMOTE.read_text()
+        self.assertIn("'next/mac/release/public.json'", text)
+        self.assertIn('group: mac-release-main', text, 'never races a tester publish')
+        self.assertNotIn('self-hosted', text)
+        for use in re.findall(r'uses:\s*(.+)', text):
+            self.assertRegex(use.strip(), PIN)
+        js = promote_jobs()
+        self.assertEqual(list(js), ['read', 'promote', 'release'])
+        self.assertIn("if: vars.WOS_RELEASE_LANES == 'on' && github.ref == 'refs/heads/main'", js['read'])
+        self.assertNotIn('secrets.', js['read'])
+        self.assertNotIn('environment:', js['read'])
+        promote = js['promote']
+        self.assertIn('environment: mac-publish', promote)
+        self.assertEqual(set(re.findall(r'secrets\.(\w+)', promote)),
+                         {'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_SESSION_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'})
+        self.assertNotIn('actions/checkout', promote)
+        self.assertNotIn('uses:', promote)
+        self.assertNotIn('next/', promote)
+        self.assertNotIn('sign_update', promote, 'promotion never signs: same bytes')
+        # Every check before the first write, the feed last.
+        for check in ('not higher than the public appcast', 'archive signature does not match', 'feed signature does not match',
+                      'names another build', 'Wizard-$VERSION.dmg is not published'):
+            self.assertIn(check, promote)
+            self.assertLess(promote.index(check), promote.index('put mac/index.html'))
+        self.assertLess(promote.index('put mac/index.html'), promote.index('put mac/appcast.xml'))
+        self.assertEqual(re.findall(r'(?m)^\s+put (\S+) ', promote), ['mac/index.html', 'mac/appcast.xml'])
+        self.assertNotIn('secrets.', js['release'])
+        self.assertIn('--prerelease=false --latest', js['release'])
 
 
 class StageRelease(unittest.TestCase):
