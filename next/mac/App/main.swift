@@ -718,16 +718,11 @@ enum WizardImportConnectPrompt {
 /// Private first on a fresh Mac (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10): the front door
 /// opens with `?private_first=1`, so its brain step leads with Tinfoil and hands over to the Welcome's Connect your AI,
 /// which makes the private agent the default (the box's `wizard/private-first-setup` switch, as on Linux). The guest
-/// ignores it once setup is done, so an existing install is not moved.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp PrivateFirstSetup -bool YES` turns it on.
+/// ignores it once setup is done, so an existing install is not moved. On for everyone (the old `PrivateFirstSetup`
+/// switch is gone; its stored value is cleared at launch).
 enum WizardPrivateFirstSetup {
-    static let key = "PrivateFirstSetup"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
     /// The front door address the window opens on This Mac.
-    static var setupURL: URL {
-        guard isOn else { return WizardShared.localSetupURL }
-        return URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/?private_first=1")!
-    }
+    static var setupURL: URL { URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/?private_first=1")! }
 }
 
 /// Maps may use the Mac's location (try-wizard#135, part of wizard-ux#1629). WebKit asks the app before any page
@@ -1943,6 +1938,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if WizardBundleRelaunch.renameAndRelaunchIfNeeded() { return }
         NSApp.appearance = NSAppearance(named: .darkAqua)
         UserDefaults.standard.removeObject(forKey: "PWAIcon")   // try-wizard#86: the PWA icon is the bundle icon now; the old switch is gone
+        UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: private first is on for everyone; the old switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

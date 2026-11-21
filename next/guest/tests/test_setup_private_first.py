@@ -1,6 +1,7 @@
 """try-wizard#134: a fresh Mac starts private first (wizard-os DECISIONS #115, spec/AGENTS.md section 10).
 
-Off by default (Mac default `PrivateFirstSetup`, which opens the front door with `?private_first=1`). With it on, the
+On for every fresh Mac (the Mac opens the front door with `?private_first=1`; the old `PrivateFirstSetup` switch is
+gone). With it on, the
 setup's brain step leads with Tinfoil, runs none of its own brains (no ChatGPT device flow, no API key into Hermes'
 .env), switches the box's `wizard/private-first-setup` on in the owner's Look file and hands over to the Wizard UX
 Welcome, where the wizard-tinfoil app signs in and the Agent Service makes the private agent the default. Claude and
@@ -245,18 +246,20 @@ class PageAndMacSwitch(unittest.TestCase):
         self.assertIn("'/api/brain/private'", self.html)
         self.assertIn("private_first", self.html)
 
-    def test_mac_switch_is_off_by_default_and_only_adds_the_query(self):
+    def test_mac_always_asks_private_first_and_the_switch_is_gone(self):
         block = self.swift[self.swift.index("enum WizardPrivateFirstSetup"):]
         block = block[:block.index("\n}\n") + 3]
-        self.assertIn('static let key = "PrivateFirstSetup"', block)
-        self.assertIn("UserDefaults.standard.bool(forKey: key)", block)
-        self.assertIn("guard isOn else { return WizardShared.localSetupURL }", block)
         self.assertIn("private_first=1", block)
+        self.assertNotIn("isOn", block)
+        self.assertNotIn("WizardShared.localSetupURL", block)
+        self.assertNotIn('UserDefaults.standard.bool(forKey: "PrivateFirstSetup")', self.swift)
+        self.assertNotIn('static let key = "PrivateFirstSetup"', self.swift)
+        # The stored value of the old switch is cleared at launch.
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")', self.swift)
         # Both places the window opens the front door on This Mac (ready, and the quiet retry).
         self.assertEqual(self.swift.count("load(WizardPrivateFirstSetup.setupURL)"), 2)
         self.assertNotIn("self.load(WizardShared.localSetupURL)", self.swift)
         self.assertNotIn("self?.load(WizardShared.localSetupURL)", self.swift)
-
 
 if __name__ == "__main__":
     unittest.main()

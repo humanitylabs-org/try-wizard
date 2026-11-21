@@ -14,7 +14,7 @@ Brains (applied inside the hermes-agent engine container with stock Hermes code,
 * apikey -> Anthropic or OpenRouter key saved to Hermes' .env
 
 Private first (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10), off by default: on when the Mac
-asks for it (its `PrivateFirstSetup` default opens this page with `?private_first=1`), when env WIZARD_PRIVATE_FIRST=1,
+asks for it (it always opens this page with `?private_first=1`), when env WIZARD_PRIVATE_FIRST=1,
 or when the box's own `wizard/private-first-setup` switch is on (the Agent Service's GET /wizard/v1/private-first).
 WIZARD_PRIVATE_FIRST=0 forces it off. With it on, the brain step leads with Tinfoil and this server runs none of the
 brains above: Continue switches the box's `wizard/private-first-setup` on (the owner's Look file, the same switch the
@@ -579,7 +579,7 @@ async def get_state(_: web.Request) -> web.Response:
 
 
 async def post_private_first(request: web.Request) -> web.Response:
-    """The Mac asked for private first (`?private_first=1`, its PrivateFirstSetup default). Only before setup ends,
+    """The Mac asked for private first (`?private_first=1`, which every Mac sends). Only before setup ends,
     and never against WIZARD_PRIVATE_FIRST=0; whether it runs still needs an Agent Service with the route."""
     try:
         body = await request.json()
