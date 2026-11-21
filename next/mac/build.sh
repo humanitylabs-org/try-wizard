@@ -100,15 +100,13 @@ PY
 mkdir -p "$APP/Contents/Resources/bring-hermes"
 install -m 755 bring-hermes/wizard-bring-hermes "$APP/Contents/Resources/bring-hermes/wizard-bring-hermes"
 
-python3 assets/build-icon.py assets/brand "$OUT/obj/Wizard.icns"
+# The app icon is the PWA/phone-app icon (try-wizard#86): dark Void tile, glowing hat. The hat marks stay in brand/.
+python3 assets/build-icon.py assets/brand/pwa "$OUT/obj/Wizard.icns" --no-marks
 for bundle in "$APP" "$HOST"; do
   cp "$OUT/obj/Wizard.icns" "$bundle/Contents/Resources/Wizard.icns"
   cp assets/brand/wizard-mark-{purple,white}.png "$bundle/Contents/Resources/"
   cp assets/brand/provenance.json "$bundle/Contents/Resources/WizardBrandProvenance.json"
 done
-# The PWA/phone-app icon (try-wizard#86), used for the Dock only when the off-by-default `PWAIcon` switch is on.
-python3 assets/build-icon.py assets/brand/pwa "$OUT/obj/WizardPWA.icns" --no-marks
-cp "$OUT/obj/WizardPWA.icns" "$APP/Contents/Resources/WizardPWA.icns"
 
 
 cat > "$OUT/obj/host.entitlements" <<EOF

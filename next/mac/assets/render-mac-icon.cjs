@@ -1,7 +1,7 @@
 // Renders the macOS app icon from the same composition as the WizardOS PWA icon
 // (wizard-ux tools/brand/render-pwa-icons.cjs: Void background, dot grid, UV glow, white->UV hat),
 // placed on Apple's app-icon grid: an 824/1024 rounded tile with a soft shadow, transparent outside.
-// Writes brand/pwa/ (the Mac icon behind the off-by-default `PWAIcon` switch, try-wizard#86); the default icon in brand/ is untouched.
+// Writes brand/pwa/ (the Mac app icon, packed as Wizard.icns, try-wizard#86); the older icon in brand/ is untouched.
 // Usage (repo root): NODE_PATH=<dir with playwright> WIZARD_ICON_BROWSER=/usr/bin/chromium node next/mac/assets/render-mac-icon.cjs
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path'); const crypto = require('crypto');
 const BRAND = path.join(__dirname, 'brand'); const OUT = path.join(BRAND, 'pwa');
