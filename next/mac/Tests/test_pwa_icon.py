@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""The Mac app can show the PWA/phone app icon instead of the flat purple square (try-wizard#86).
+"""The Mac app's icon is the PWA/phone app icon instead of the flat purple square (try-wizard#86).
 
-It ships off by default behind the `PWAIcon` user default. With the switch on, the running app's Dock icon is the
-same dark Void tile as the PWA; the bundle icon, name, bundle id and the `Wizard MVP` data folder stay unchanged.
+It is on for everyone: build.sh packs brand/pwa as the bundle's Wizard.icns (app and Host), so Dock, Cmd-Tab,
+Finder and Launchpad show the dark Void tile. The old `PWAIcon` switch is gone; the name, bundle id and the
+`Wizard MVP` data folder stay unchanged.
 """
 import hashlib
 import importlib.util
@@ -60,27 +61,22 @@ class PWAIconTests(unittest.TestCase):
                 pos += n
             self.assertEqual(pos, len(data))
 
-    def test_build_ships_pwa_icns_beside_default_icon(self):
-        self.assertIn('assets/build-icon.py assets/brand/pwa "$OUT/obj/WizardPWA.icns" --no-marks', self.build)
-        self.assertIn('cp "$OUT/obj/WizardPWA.icns" "$APP/Contents/Resources/WizardPWA.icns"', self.build)
-        # The bundle icon stays the default one, so Finder and existing installs see no change while the switch is off.
+    def test_build_packs_pwa_icon_as_the_bundle_icon(self):
+        self.assertIn('assets/build-icon.py assets/brand/pwa "$OUT/obj/Wizard.icns" --no-marks', self.build)
+        self.assertNotIn('assets/build-icon.py assets/brand "$OUT/obj/Wizard.icns"', self.build)
+        loop = block(self.build, 'for bundle in "$APP" "$HOST"; do', 'done')
+        self.assertIn('cp "$OUT/obj/Wizard.icns" "$bundle/Contents/Resources/Wizard.icns"', loop)
+        self.assertIn('cp assets/brand/wizard-mark-{purple,white}.png', loop)
         self.assertIn('<key>CFBundleIconFile</key><string>Wizard</string>', self.build)
         self.assertIn('org.humanitylabs.wizard.mvp', self.build)
+        self.assertNotIn('WizardPWA', self.build)
 
-    def test_switch_is_off_by_default_and_only_sets_the_dock_icon(self):
-        body = block(self.main, 'enum WizardPWAIcon', '\n}\n')
-        self.assertIn('static let key = "PWAIcon"', body)
-        self.assertRegex(body, r'static var isOn: Bool \{ UserDefaults\.standard\.bool\(forKey: key\) \}')
-        self.assertIn('guard isOn', body)
-        self.assertIn('forResource: resource, ofType: "icns"', body)
-        self.assertIn('static let resource = "WizardPWA"', body)
-        self.assertIn('NSApp.applicationIconImage = image', body)
-        self.assertNotIn('setIcon(', body, 'never write a custom icon into the signed bundle')
-
-    def test_applied_at_launch(self):
+    def test_switch_is_gone_and_its_stored_value_cleared(self):
+        self.assertNotIn('enum WizardPWAIcon', self.main)
+        self.assertNotIn('WizardPWAIcon', self.main)
+        self.assertNotIn('applicationIconImage', self.main, 'the bundle icon is the icon; no runtime swap')
         launch = block(self.main, 'func applicationDidFinishLaunching', 'controller.showWindow(nil)')
-        self.assertIn('WizardPWAIcon.apply()', launch)
-
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "PWAIcon")', launch)
 
 if __name__ == '__main__':
     unittest.main()

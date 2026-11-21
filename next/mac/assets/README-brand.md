@@ -22,6 +22,6 @@ No core Hermes, shortcuts, quit/back contracts, file sharing, guest pins, daily 
 
 `next/mac/Tests/test-branding.py` binds original/derived hashes, exact ICNS representation bytes, mandatory native consumers, alternate packaging default, onboarding markup, and semantic provider-icon preservation. Real Swift builds, codesign/DMG contents and native AppKit runtime/readback are separately recorded in the delivery evidence directory.
 
-## PWA icon switch (try-wizard#86)
+## App icon: the PWA look (try-wizard#86)
 
-`brand/pwa/` holds the Mac app icon in the PWA/phone app's look (dark Void tile, dot grid, UV glow, white-to-UV hat), rendered by `render-mac-icon.cjs` (from PR #56) and hashed in `brand/pwa/provenance.json`. `build.sh` packs it as `WizardPWA.icns` next to the default `Wizard.icns`. It is used only when the off-by-default `PWAIcon` user default is on (`defaults write org.humanitylabs.wizard.mvp PWAIcon -bool YES`, then relaunch): the running app's Dock icon becomes the PWA icon. The bundle icon, app name, bundle id and the `Wizard MVP` data folder do not change. Making it the icon for everyone later means packing `brand/pwa` as `Wizard.icns` and removing the switch.
+`brand/pwa/` holds the Mac app icon in the PWA/phone app's look (dark Void tile, dot grid, UV glow, white-to-UV hat), rendered by `render-mac-icon.cjs` (from PR #56) and hashed in `brand/pwa/provenance.json`. `build.sh` packs it as the bundle's `Wizard.icns` (app and embedded Host), so Dock, Cmd-Tab, Finder and Launchpad all show it. The hat marks (`wizard-mark-*.png`) still come from `brand/`. The app name, bundle id and the `Wizard MVP` data folder do not change. The old `PWAIcon` switch is gone; the app clears any stored value at launch.
