@@ -362,6 +362,26 @@ async def switch_private_first_on() -> None:
     raise RuntimeError("look file kept changing")
 
 
+PRIVATE_FIRST_SETTLE_S = 8.0   # the Agent Service caches the Look switch for 3 s (channels-switch ttlMs)
+
+
+async def wait_until_private_first_reads_on(limit: float | None = None) -> bool:
+    """After the switch is saved, wait until the Agent Service itself answers on:true before handing over. Its switch
+    read is cached for a few seconds, and the Welcome reads it once at boot: handing over too early showed Claude
+    first in Connect your AI (try-wizard#134 tester). Gives up after `limit` seconds; the hand-over still happens."""
+    end = time.monotonic() + (PRIVATE_FIRST_SETTLE_S if limit is None else limit)
+    while True:
+        try:
+            status, answer = await shell("GET", PRIVATE_FIRST_STATE, timeout=4)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            status, answer = 0, None
+        if status == 200 and isinstance(answer, dict) and answer.get("on") is True:
+            return True
+        if time.monotonic() >= end:
+            return False
+        await asyncio.sleep(0.5)
+
+
 async def refuse_if_private_first() -> web.Response | None:
     """With private first on, this server runs no brain of its own (one implementation: the connection apps)."""
     if (await private_first())["on"]:
@@ -602,6 +622,8 @@ async def post_brain_private(_: web.Request) -> web.Response:
     except Exception:
         log_failure("Switching private first on")
         return json_error("Your Wizard could not switch private first on. Try again.", 502)
+    if not await wait_until_private_first_reads_on():
+        print("setup: the Agent Service did not read private first on yet; handing over anyway", flush=True)
     state = load_state()
     name = state.get("name") or "Wizard"
     if state.get("soulPending"):

@@ -39,17 +39,24 @@ server = load_server()
 class FakeAgentService:
     """GET /wizard/v1/private-first and the Pages file API for Pages/wizard-look/look.json."""
 
-    def __init__(self, route=True, on=False, look=None):
+    def __init__(self, route=True, on=False, look=None, stale_reads=0):
         self.route, self.on, self.look, self.version = route, on, look, ("v1" if look is not None else None)
         self.calls = []
         self.conflicts = 0
+        # Reads after a save that still answer the old value (the Agent Service's 3 s switch cache).
+        self.stale_reads, self.stale_left, self.answered = stale_reads, 0, []
 
     async def __call__(self, method, path, body=None, *, timeout=60, headers=None):
         self.calls.append((method, path, body))
         if path == server.PRIVATE_FIRST_STATE:
             if not self.route:
                 return 404, {"error": "not_found"}
-            return 200, {"schema": "wizard.private-first/1", "on": self.on, "standard_agent": "hermes",
+            on = self.on
+            if self.stale_left:
+                self.stale_left -= 1
+                on = not self.on
+            self.answered.append(on)
+            return 200, {"schema": "wizard.private-first/1", "on": on, "standard_agent": "hermes",
                          "private_agent": None, "standard_on": True}
         if path == server.LOOK_FILE and method == "GET":
             if self.look is None:
@@ -65,9 +72,19 @@ class FakeAgentService:
             self.look, self.version = body["text"], "v2"
             # The Agent Service reads the switch from this file (channels-switch.mjs lookSwitchOn).
             look = json.loads(self.look)
-            self.on = look.get("version") == 1 and look.get("tweaks", {}).get(server.PRIVATE_FIRST_SWITCH, {}).get("on") is True
+            on = look.get("version") == 1 and look.get("tweaks", {}).get(server.PRIVATE_FIRST_SWITCH, {}).get("on") is True
+            if on != self.on:
+                self.stale_left = self.stale_reads
+            self.on = on
             return 200, {"exists": True, "version": "v2"}
         return 404, {"error": "not_found"}
+
+
+_real_sleep = asyncio.sleep
+
+
+async def _no_sleep(_seconds):
+    await _real_sleep(0)
 
 
 class PrivateFirstSetup(unittest.TestCase):
@@ -194,6 +211,25 @@ class PrivateFirstSetup(unittest.TestCase):
         self.assertIsNone(saved["firstSessionId"])
         self.assertEqual(self.brains, [], "nothing attached to Hermes by the setup itself")
         # Private first never touches the main Hermes's model: no brain command and no Hermes restart ran.
+
+    def test_hand_over_waits_until_the_agent_service_reads_it_on(self):
+        # The Agent Service caches the switch for 3 s; the Welcome reads it once, so the hand-over waits for on:true.
+        service = FakeAgentService(stale_reads=3)
+        (self.root / "setup.json").write_text(json.dumps({"name": "Merlin"}))
+        with patch.object(server.asyncio, "sleep", new=_no_sleep):
+            out = self.run_with(service, [
+                ("POST", "/api/private-first", {"ask": True}), ("POST", "/api/brain/private", {})])
+        self.assertEqual(out[1][0], 200, out[1][1])
+        self.assertEqual(service.answered[-4:], [False, False, False, True], "polled until the Agent Service said on")
+
+    def test_hand_over_still_happens_if_the_agent_service_never_reads_it_on(self):
+        service = FakeAgentService(stale_reads=10**6)
+        (self.root / "setup.json").write_text(json.dumps({"name": "Merlin"}))
+        with patch.object(server, "PRIVATE_FIRST_SETTLE_S", 0.0):
+            out = self.run_with(service, [
+                ("POST", "/api/private-first", {"ask": True}), ("POST", "/api/brain/private", {})])
+        self.assertEqual(out[1][0], 200, out[1][1])
+        self.assertTrue(json.loads((self.root / "setup.json").read_text())["done"])
 
     def test_existing_look_file_keeps_the_owners_choices(self):
         old = {"version": 1, "skin": {"id": "nebula", "at": 4},
