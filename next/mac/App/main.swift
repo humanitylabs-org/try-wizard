@@ -2009,7 +2009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: Every Wizard app as its own Dock icon (try-wizard#147)
 
-    func installAppWindows() {
+    @MainActor func installAppWindows() {
         let windows = WizardAppWindows.shared
         windows.home = { [weak self] in
             guard let self, Store.active != nil else { return nil }
@@ -2042,7 +2042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    @objc func addAppsToDock(_ sender: Any?) {
+    @MainActor @objc func addAppsToDock(_ sender: Any?) {
         showMainWindow()
         WizardDockApps.shared.chooseApps(from: controller)
     }
@@ -2712,7 +2712,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quitTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.clearQuitConfirmation() }
     }
 
-    @objc func reload() {
+    @MainActor @objc func reload() {
         if let app = WizardAppWindows.shared.keyWindow { app.reload(); return }
         controller.begin()
     }
