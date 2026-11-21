@@ -949,6 +949,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
         cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // The shell's Add to home screen, answered with a Dock icon per app (try-wizard#147). After the meeting adapter.
+        cfg.userContentController.addUserScript(WKUserScript(source: WizardDockApps.portJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // Music and Podcasts in Now Playing (try-wizard#142): nothing is installed unless the NowPlaying switch is on.
         if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }
         web = WKWebView(frame: .zero, configuration: cfg)
@@ -973,6 +975,12 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard method == "files.save", let self else { reply(["status": "failed", "error": "unsupported"]); return }
             self.saveFromPage(params, reply: reply)
         }
+        // dock.message: the shell's home-screen port (status, pin, pinned, refresh), see App/WizardDockApps.swift.
+        NativeBridge.shared.register("dock.") { method, params, reply in
+            guard method == "dock.message", let data = params["data"] as? String else { reply(nil); return }
+            WizardDockApps.shared.answer(data, reply: reply)
+        }
+        WizardDockApps.shared.install(window: window)
         dragView.owner = self
         window.isMovableByWindowBackground = false
 
@@ -1955,6 +1963,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         installQAHooks()
         controller = WizardWindowController()
         controller.window?.delegate = self
+        installAppWindows()
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         installQuitGuard()
@@ -1996,6 +2005,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         WizardUpdater.shared.start()
         WizardUpdater.shared.watchOSUpdates()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
+    }
+
+    // MARK: Every Wizard app as its own Dock icon (try-wizard#147)
+
+    @MainActor func installAppWindows() {
+        let windows = WizardAppWindows.shared
+        windows.home = { [weak self] in
+            guard let self, Store.active != nil else { return nil }
+            if let home = self.controller.homeURL, home.path.hasPrefix("/wizard-os-home") { return home }
+            return self.controller.nativeControlURL.flatMap { URL(string: "wizard-os-home/", relativeTo: $0)?.absoluteURL }
+        }
+        windows.boxOrigins = { [weak self] in
+            var out = Set<String>()
+            if let u = self?.controller.nativeControlURL, let o = NativeOrigin(u) { out.insert("\(o.scheme)://\(o.host):\(o.port)") }
+            if Store.active?.kind == .thisMac, let o = WizardAppLocation.thisMacAppsOrigin { out.insert("\(o.scheme)://\(o.host):\(o.port)") }
+            return out
+        }
+        windows.dataStore = { [weak self] in self?.controller.web.configuration.websiteDataStore ?? .default() }
+        windows.openShell = { [weak self] path in
+            guard let self else { return }
+            if path.isEmpty { self.showMainWindow() } else { self.openView(path) }
+        }
+        windows.windowsChanged = { [weak self] in
+            guard let self else { return }
+            // No Wizard window left on screen: back to the menu bar only, as when the main window closes.
+            if !windows.anyVisible, self.controller.window?.isVisible != true { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
+
+    /// A Dock icon from ~/Applications/Wizard Apps (`wizard://app/<id>`): that app in its own window.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let link = WizardDockAppsRule.parse(url) else { continue }
+            WizardAppWindows.shared.open(link.appId, path: link.path)
+        }
+    }
+
+    @MainActor @objc func addAppsToDock(_ sender: Any?) {
+        showMainWindow()
+        WizardDockApps.shared.chooseApps(from: controller)
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Add Apps to Dock…", action: #selector(addAppsToDock(_:)), keyEquivalent: "").target = self
+        return menu
     }
 
     // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
@@ -2178,7 +2233,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidEnterFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
     func windowDidExitFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
     func windowWillClose(_ notification: Notification) {
-        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+        // An app's own window (try-wizard#147) keeps WizardOS in the Dock and in ⌘Tab.
+        DispatchQueue.main.async { if !WizardAppWindows.shared.anyVisible { NSApp.setActivationPolicy(.accessory) } }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // An ordinary quit must not silently interrupt a backup, restore, undo or switch-over.
@@ -2312,6 +2368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(withTitle: "Connect to Another Computer…", action: #selector(addRemote), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Install \(WizardOSName.text) from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Add Apps to Dock…", action: #selector(addAppsToDock(_:)), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart \(WizardOSName.text) on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
@@ -2655,7 +2712,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quitTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.clearQuitConfirmation() }
     }
 
-    @objc func reload() { controller.begin() }
+    @MainActor @objc func reload() {
+        if let app = WizardAppWindows.shared.keyWindow { app.reload(); return }
+        controller.begin()
+    }
 
     @objc func zoomWizardIn(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: 1)) }
     @objc func zoomWizardOut(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: -1)) }
