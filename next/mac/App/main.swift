@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CoreLocation
 import CryptoKit
 import ServiceManagement
 import WebKit
@@ -714,6 +715,74 @@ enum WizardImportConnectPrompt {
     }
 }
 
+/// Private first on a fresh Mac (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10): the front door
+/// opens with `?private_first=1`, so its brain step leads with Tinfoil and hands over to the Welcome's Connect your AI,
+/// which makes the private agent the default (the box's `wizard/private-first-setup` switch, as on Linux). The guest
+/// ignores it once setup is done, so an existing install is not moved. On for everyone (the old `PrivateFirstSetup`
+/// switch is gone; its stored value is cleared at launch).
+enum WizardPrivateFirstSetup {
+    /// The front door address the window opens on This Mac.
+    static var setupURL: URL { URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/?private_first=1")! }
+}
+
+/// Maps may use the Mac's location (try-wizard#135, part of wizard-ux#1629). WebKit asks the app before any page
+/// gets `navigator.geolocation`; without an answer it is always denied. With this switch on, the app answers only for
+/// the Wizard's own shell page and the Wizard's own addresses, shows macOS's own location prompt first and grants
+/// only if the owner accepts (decisions in Shared/AppLocation.swift). The shell's `wizard/app-location` switch decides
+/// which app frame may ask at all (only an app that declared `permissions: [geolocation]`, today Maps).
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp AppLocation -bool YES` turns it on.
+enum WizardAppLocation {
+    static let key = "AppLocation"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    /// Installed apps on This Mac open from their own address (`localhost`, same port as the shell).
+    static var thisMacAppsOrigin: NativeOrigin? { NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort)) }
+}
+
+/// Music and Podcasts show in Control Center's Now Playing and answer the media keys / AirPods buttons (try-wizard#142,
+/// the Mac part of wizard-ux#1661): title, artist/show, artwork and progress; play/pause, skip back 15 / forward 30 for
+/// Podcasts, next/previous for Music, all routed to the playing app's own page. Clicking Now Playing brings Wizard
+/// forward on that app. Only those two apps (Shared/NowPlaying.swift); the class is App/WizardNowPlaying.swift.
+/// Read when the window is made, so it takes effect the next time Wizard opens.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp NowPlaying -bool YES` turns it on.
+enum WizardNowPlaying {
+    static let key = "NowPlaying"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
+/// Shows macOS's location prompt (once; macOS remembers the answer) and reports the owner's choice.
+final class WizardLocationConsent: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var waiting: [(WizardAppLocationRule.Access) -> Void] = []
+    private var timeout: Timer?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    var access: WizardAppLocationRule.Access { WizardAppLocationRule.Access(rawStatus: manager.authorizationStatus.rawValue) }
+
+    func ask(_ done: @escaping (WizardAppLocationRule.Access) -> Void) {
+        waiting.append(done)
+        guard waiting.count == 1 else { return }
+        manager.requestWhenInUseAuthorization()
+        // A prompt nobody answers is a no, so the page never hangs.
+        timeout = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finish(.notAsked) }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let now = access
+        guard now != .notAsked, !waiting.isEmpty else { return }
+        finish(now)
+    }
+
+    private func finish(_ access: WizardAppLocationRule.Access) {
+        timeout?.invalidate(); timeout = nil
+        let done = waiting; waiting = []
+        done.forEach { $0(access) }
+    }
+}
+
 /// Installs updated from builds before 0.8.0 still live in `Wizard MVP.app` (Sparkle keeps the old file name), so the
 /// Dock, Cmd-Tab and Finder say "Wizard MVP" (try-wizard#124). At launch, while nothing holds the old path, the app
 /// renames itself to WizardOS.app and reopens from there. Data folder, bundle id and settings don't move.
@@ -748,22 +817,6 @@ enum WizardBundleRelaunch {
         }
         NSLog("Wizard: renamed \(bundle.lastPathComponent) to \(target.lastPathComponent); reopening")
         exit(0)
-    }
-}
-
-/// The Mac app shows the PWA/phone app icon (dark Void tile, glowing hat) instead of the flat purple square
-/// (try-wizard#86). Only the running app's Dock icon changes; the bundle icon, name, bundle id and the
-/// `Wizard MVP` data folder stay as they are, so nothing about an install moves.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp PWAIcon -bool YES` turns it on (next launch).
-enum WizardPWAIcon {
-    static let key = "PWAIcon"
-    static let resource = "WizardPWA"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
-
-    @MainActor static func apply() {
-        guard isOn, let path = Bundle.main.path(forResource: resource, ofType: "icns"),
-              let image = NSImage(contentsOfFile: path) else { return }
-        NSApp.applicationIconImage = image
     }
 }
 
@@ -875,6 +928,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // window.wizardNative.meetings etc. — present only inside Wizard.app; pages fall back to web APIs elsewhere.
         cfg.userContentController.addUserScript(WKUserScript(source: MeetingBridge.adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // The shell's Add to home screen, answered with a Dock icon per app (try-wizard#147). After the meeting adapter.
+        cfg.userContentController.addUserScript(WKUserScript(source: WizardDockApps.portJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // Music and Podcasts in Now Playing (try-wizard#142): nothing is installed unless the NowPlaying switch is on.
+        if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -891,6 +948,18 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         if !window.setFrameUsingName("WizardMainWindow") { window.center() }
         super.init(window: window)
         NativeBridge.shared.owner = self
+        WizardNowPlayingCenter.shared.owner = self
+        // files.save: the shell's Save button (photo viewer, file cards) hands over the bytes it holds (try-wizard#139).
+        NativeBridge.shared.register("files.") { [weak self] method, params, reply in
+            guard method == "files.save", let self else { reply(["status": "failed", "error": "unsupported"]); return }
+            self.saveFromPage(params, reply: reply)
+        }
+        // dock.message: the shell's home-screen port (status, pin, pinned, refresh), see App/WizardDockApps.swift.
+        NativeBridge.shared.register("dock.") { method, params, reply in
+            guard method == "dock.message", let data = params["data"] as? String else { reply(nil); return }
+            WizardDockApps.shared.answer(data, reply: reply)
+        }
+        WizardDockApps.shared.install(window: window)
         dragView.owner = self
         window.isMovableByWindowBackground = false
 
@@ -1456,7 +1525,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard let self, !failed, Store.active?.kind == .thisMac, self.voiceConnectionGeneration == generation else { return }
             if ok {
                 NSLog("Wizard: local back end ready after %.2fs", Date().timeIntervalSince(started))
-                self.load(WizardShared.localSetupURL)
+                self.load(WizardPrivateFirstSetup.setupURL)
             } else {
                 self.showOverlay("\(WizardOSName.text) didn't start", "Open the Wizard menu-bar icon → Show Logs, or try again.", spinning: false,
                                  actions: [("Try again", #selector(self.retry)), ("Back", #selector(self.backToChooser))])
@@ -1487,6 +1556,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard webView === web else { return }
         documentGeneration &+= 1
+        WizardNowPlayingCenter.shared.reset()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1526,7 +1596,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // WizardOS on this Mac may still be bringing a service up: retry quietly before showing an error.
         if Store.active?.kind == .thisMac, localRetries < 12 {
             localRetries += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardShared.localSetupURL) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.load(WizardPrivateFirstSetup.setupURL) }
             return
         }
         localRetries = 0
@@ -1655,6 +1725,44 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             NSWorkspace.shared.activateFileViewerSelecting(targets)
         }
     }
+    /// Largest file the shell may hand over in one files.save (base64 characters, about 150 MB of file).
+    static let pageSaveMaxBase64 = 200 * 1024 * 1024
+    private var pageSaves: [ObjectIdentifier: NSObject] = [:]
+    /// files.save {data: base64, name}: write a file the trusted shell already holds into ~/Downloads and say
+    /// honestly whether it landed. A blob <a download> fired after the page fetched the photo carries no user
+    /// gesture, so WebKit's download path above refused it without a word on macOS 15.2+ (try-wizard#139).
+    /// Only the trusted shell's main frame reaches this (NativeBridge admits allowsNative frames only); it never
+    /// overwrites: the name is reserved like a download's and the write refuses an existing file.
+    func saveFromPage(_ params: [String: Any], reply: @escaping (Any?) -> Void) {
+        guard let b64 = params["data"] as? String, b64.utf8.count <= Self.pageSaveMaxBase64,
+              let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters), !data.isEmpty else {
+            reply(["status": "failed", "error": "This file couldn't be read."]); return
+        }
+        let token = NSObject(), key = ObjectIdentifier(token)
+        pageSaves[key] = token
+        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        let target = downloadTargets.reserve(for: key, suggestedFilename: params["name"] as? String ?? "",
+                                             folder: folder, fileExists: {
+                                                 (try? FileManager.default.attributesOfItem(atPath: $0)) != nil
+                                             })
+        DispatchQueue.global(qos: .userInitiated).async {
+            let failure: String? = {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try data.write(to: target, options: [.withoutOverwriting])
+                    return nil
+                } catch { return error.localizedDescription }
+            }()
+            DispatchQueue.main.async { [weak self] in
+                self?.downloadTargets.release(key)
+                self?.pageSaves.removeValue(forKey: key)
+                if let failure { reply(["status": "failed", "error": failure]); return }
+                self?.queueDownloadReveal(target)
+                reply(["status": "saved", "name": target.lastPathComponent, "folder": "Downloads"])
+            }
+        }
+    }
     func downloadDidFinish(_ download: WKDownload) {
         downloadSources.removeValue(forKey: ObjectIdentifier(download))
         activeDownloads.removeValue(forKey: ObjectIdentifier(download))
@@ -1695,6 +1803,49 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         // Native macOS microphone consent still applies; this only settles WebKit's
         // origin decision. The explicitly selected remote backend keeps its path.
         decisionHandler(allowed ? .grant : .deny)
+    }
+
+    // MARK: Location for Maps (try-wizard#135; off unless the AppLocation switch is on)
+    private lazy var locationConsent = WizardLocationConsent()
+
+    /// The Wizard's own addresses: the shell, and on This Mac the installed apps' `localhost` address.
+    private var wizardLocationOrigins: Set<NativeOrigin> {
+        var origins = selectedControlOrigins
+        if Store.active?.kind == .thisMac, let apps = WizardAppLocation.thisMacAppsOrigin { origins.insert(apps) }
+        return origins
+    }
+
+    /// Now Playing (try-wizard#142): the Wizard's own addresses, where Music and Podcasts run.
+    func isWizardAppAddress(_ origin: WKSecurityOrigin) -> Bool {
+        var origins = selectedControlOrigins
+        if Store.active?.kind == .thisMac, let apps = WizardAppLocation.thisMacAppsOrigin { origins.insert(apps) }
+        return NativeOrigin(origin).map { origins.contains($0) } ?? false
+    }
+
+    private func decideLocation(_ origin: WKSecurityOrigin, _ answer: @escaping (Bool) -> Void) {
+        let wizardAddress = NativeOrigin(origin).map { wizardLocationOrigins.contains($0) } ?? false
+        let on = WizardAppLocation.isOn
+        // Never create a CLLocationManager with the switch off: macOS then never hears about location at all.
+        let access: WizardAppLocationRule.Access = on ? locationConsent.access : .refused
+        switch WizardAppLocationRule.decide(switchOn: on, trustedShell: isTrustedDocument, wizardAddress: wizardAddress, access: access) {
+        case .grant: answer(true)
+        case .deny: answer(false)
+        case .askMacOS:
+            locationConsent.ask { answer(WizardAppLocationRule.afterPrompt($0) == .grant) }
+        }
+    }
+
+    /// WebKit's geolocation question (WKUIDelegatePrivate, macOS 12+). Without it WebKit denies every page.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func wizardGeolocationRequest(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo,
+                                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decideLocation(origin) { decisionHandler($0 ? .grant : .deny) }
+    }
+
+    /// The older form of the same question, used when WebKit doesn't find the one above.
+    @objc(_webView:requestGeolocationPermissionForFrame:decisionHandler:)
+    func wizardGeolocationRequest(_ webView: WKWebView, frame: WKFrameInfo, decisionHandler: @escaping (Bool) -> Void) {
+        decideLocation(frame.securityOrigin, decisionHandler)
     }
 
     private var selectedControlOrigins: Set<NativeOrigin> {
@@ -1786,11 +1937,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         signal(SIGPIPE, SIG_IGN)   // a failed tar must surface as a write error, not kill the app
         if WizardBundleRelaunch.renameAndRelaunchIfNeeded() { return }
         NSApp.appearance = NSAppearance(named: .darkAqua)
-        WizardPWAIcon.apply()
+        UserDefaults.standard.removeObject(forKey: "PWAIcon")   // try-wizard#86: the PWA icon is the bundle icon now; the old switch is gone
+        UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: private first is on for everyone; the old switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()
         controller.window?.delegate = self
+        installAppWindows()
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         installQuitGuard()
@@ -1832,6 +1985,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         WizardUpdater.shared.start()
         WizardUpdater.shared.watchOSUpdates()
         if !WizardUpdater.shared.activatingGuest { controller.begin() }
+    }
+
+    // MARK: Every Wizard app as its own Dock icon (try-wizard#147)
+
+    @MainActor func installAppWindows() {
+        let windows = WizardAppWindows.shared
+        windows.home = { [weak self] in
+            guard let self, Store.active != nil else { return nil }
+            if let home = self.controller.homeURL, home.path.hasPrefix("/wizard-os-home") { return home }
+            return self.controller.nativeControlURL.flatMap { URL(string: "wizard-os-home/", relativeTo: $0)?.absoluteURL }
+        }
+        windows.boxOrigins = { [weak self] in
+            var out = Set<String>()
+            if let u = self?.controller.nativeControlURL, let o = NativeOrigin(u) { out.insert("\(o.scheme)://\(o.host):\(o.port)") }
+            if Store.active?.kind == .thisMac, let o = WizardAppLocation.thisMacAppsOrigin { out.insert("\(o.scheme)://\(o.host):\(o.port)") }
+            return out
+        }
+        windows.dataStore = { [weak self] in self?.controller.web.configuration.websiteDataStore ?? .default() }
+        windows.openShell = { [weak self] path in
+            guard let self else { return }
+            if path.isEmpty { self.showMainWindow() } else { self.openView(path) }
+        }
+        windows.windowsChanged = { [weak self] in
+            guard let self else { return }
+            // No Wizard window left on screen: back to the menu bar only, as when the main window closes.
+            if !windows.anyVisible, self.controller.window?.isVisible != true { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
+
+    /// A Dock icon from ~/Applications/Wizard Apps (`wizard://app/<id>`): that app in its own window.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let link = WizardDockAppsRule.parse(url) else { continue }
+            WizardAppWindows.shared.open(link.appId, path: link.path)
+        }
+    }
+
+    @MainActor @objc func addAppsToDock(_ sender: Any?) {
+        showMainWindow()
+        WizardDockApps.shared.chooseApps(from: controller)
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Add Apps to Dock…", action: #selector(addAppsToDock(_:)), keyEquivalent: "").target = self
+        return menu
     }
 
     // MARK: Mizel: native capture, floating recorder, call prompts, voice keys
@@ -1997,6 +2196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showMainWindow() }
+        // Now Playing clicked (or the Dock icon) while Music or Podcasts plays: open that app (try-wizard#142).
+        WizardNowPlayingCenter.shared.openPlayingApp()
         return true
     }
 
@@ -2012,7 +2213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidEnterFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
     func windowDidExitFullScreen(_ notification: Notification) { controller.publishTitleBarInset() }
     func windowWillClose(_ notification: Notification) {
-        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+        // An app's own window (try-wizard#147) keeps WizardOS in the Dock and in ⌘Tab.
+        DispatchQueue.main.async { if !WizardAppWindows.shared.anyVisible { NSApp.setActivationPolicy(.accessory) } }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // An ordinary quit must not silently interrupt a backup, restore, undo or switch-over.
@@ -2146,6 +2348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wizardsMenu.addItem(withTitle: "Connect to Another Computer…", action: #selector(addRemote), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Install \(WizardOSName.text) from File…", action: #selector(installFromFile), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
+        wizardsMenu.addItem(withTitle: "Add Apps to Dock…", action: #selector(addAppsToDock(_:)), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Show Wizard Files in Finder", action: #selector(showFilesFolder), keyEquivalent: "").target = self
         wizardsMenu.addItem(withTitle: "Restart \(WizardOSName.text) on This Mac", action: #selector(restartLocal), keyEquivalent: "").target = self
         wizardsMenu.addItem(.separator())
@@ -2489,7 +2692,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         quitTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.clearQuitConfirmation() }
     }
 
-    @objc func reload() { controller.begin() }
+    @MainActor @objc func reload() {
+        if let app = WizardAppWindows.shared.keyWindow { app.reload(); return }
+        controller.begin()
+    }
 
     @objc func zoomWizardIn(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: 1)) }
     @objc func zoomWizardOut(_ sender: Any?) { setWizardZoom(WizardZoom.step(from: controller.web.pageZoom, by: -1)) }

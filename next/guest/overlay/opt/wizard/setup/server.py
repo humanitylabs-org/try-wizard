@@ -12,6 +12,15 @@ Brains (applied inside the hermes-agent engine container with stock Hermes code,
 * free   -> Hermes guest identity on the Nous free tier (zero login)
 * chatgpt-> Hermes' own OpenAI Codex device-code login; the sign-in page opens in the Mac's browser
 * apikey -> Anthropic or OpenRouter key saved to Hermes' .env
+
+Private first (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10), off by default: on when the Mac
+asks for it (it always opens this page with `?private_first=1`), when env WIZARD_PRIVATE_FIRST=1,
+or when the box's own `wizard/private-first-setup` switch is on (the Agent Service's GET /wizard/v1/private-first).
+WIZARD_PRIVATE_FIRST=0 forces it off. With it on, the brain step leads with Tinfoil and this server runs none of the
+brains above: Continue switches the box's `wizard/private-first-setup` on (the owner's Look file, the same switch the
+Linux install uses) and hands over to the Wizard UX Welcome, whose Connect your AI signs in through the wizard-tinfoil
+app; the Agent Service then makes the private agent the default. Claude or ChatGPT are added there or later as a
+separate standard agent. An Agent Service without the private-first route keeps the brains above.
 """
 
 from __future__ import annotations
@@ -267,6 +276,119 @@ async def _request(method: str, url: str, body: Any, headers: dict[str, str], ti
                 return resp.status, text
 
 
+# ── private first (try-wizard#134) ─────────────────────────────────────────
+PRIVATE_FIRST_SWITCH = "wizard/private-first-setup"
+PRIVATE_FIRST_STATE = "/wizard/v1/private-first"
+LOOK_FILE = "/wizard/v1/pages/wizard-look/look.json"
+PRIVATE_FIRST_REFUSAL = ("Private first is on: connect Tinfoil first. Claude or ChatGPT can be added after that "
+                         "as a separate second agent.")
+
+
+def private_first_forced() -> bool | None:
+    """Env WIZARD_PRIVATE_FIRST: '1' forces it on, '0' off, anything else follows the Mac and the box switch."""
+    value = os.environ.get("WIZARD_PRIVATE_FIRST", "")
+    return True if value == "1" else False if value == "0" else None
+
+
+async def private_first() -> dict[str, Any]:
+    """Whether this setup runs private first. Only an Agent Service that serves the private-first route can."""
+    forced = private_first_forced()
+    try:
+        status, answer = await shell("GET", PRIVATE_FIRST_STATE, timeout=8)
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+        status, answer = 0, None
+    reply: dict[str, Any] = answer if isinstance(answer, dict) else {}
+    supported = status == 200 and isinstance(reply.get("on"), bool)
+    asked = load_state().get("privateFirst") is True
+    on = supported and forced is not False and (forced is True or asked or reply.get("on") is True)
+    agent = reply.get("private_agent") if supported else None
+    return {"on": bool(on), "supported": supported, "privateAgent": agent if isinstance(agent, str) else None}
+
+
+def _look_stamps(look: dict[str, Any]) -> list[float]:
+    stamps: list[float] = []
+    for group in ("tweaks", "defaults", "views"):
+        for choice in (look.get(group) or {}).values() if isinstance(look.get(group), dict) else ():
+            if isinstance(choice, dict) and isinstance(choice.get("at"), (int, float)):
+                stamps.append(choice["at"])
+    for key in ("skin", "desktopBackdrop"):
+        if isinstance(look.get(key), dict) and isinstance(look[key].get("at"), (int, float)):
+            stamps.append(look[key]["at"])
+    return stamps
+
+
+def look_with_private_first(text: str | None) -> dict[str, Any] | None:
+    """The owner's Look file (wizard-ux core/look-sync.js) with the private-first switch on; None = already on.
+
+    A new revision (`at` above every one seen) so every device's look sync keeps it. Never overwrites a file it can't
+    read: that would drop the owner's skin and switches."""
+    if text is None:
+        look: dict[str, Any] = {"version": 1, "skin": None, "tweaks": {}}
+    else:
+        try:
+            look = json.loads(text)
+        except ValueError:
+            look = None  # type: ignore[assignment]
+        if not isinstance(look, dict) or look.get("version") != 1:
+            raise RuntimeError("look file unreadable")
+    tweaks = look.get("tweaks") if isinstance(look.get("tweaks"), dict) else {}
+    if isinstance(tweaks.get(PRIVATE_FIRST_SWITCH), dict) and tweaks[PRIVATE_FIRST_SWITCH].get("on") is True:
+        return None
+    tweaks[PRIVATE_FIRST_SWITCH] = {"on": True, "at": int(max(_look_stamps(look), default=0)) + 1}
+    look["tweaks"] = tweaks
+    return look
+
+
+async def switch_private_first_on() -> None:
+    """Turn the box's `wizard/private-first-setup` switch on through the Agent Service Pages file API (as Wizard UX's
+    look sync does), so the Agent Service and the Welcome both run private first. A stale save (409) is retried."""
+    for _ in range(3):
+        status, found = await shell("GET", LOOK_FILE, timeout=15)
+        if status == 200 and isinstance(found, dict) and isinstance(found.get("text"), str):
+            text, version = found["text"], found.get("version")
+        elif status == 404:
+            text, version = None, None
+        else:
+            raise RuntimeError(f"look file read failed ({status})")
+        look = look_with_private_first(text)
+        if look is None:
+            return
+        status, _ = await shell("PUT", LOOK_FILE, {"text": json.dumps(look, indent=1) + "\n", "version": version},
+                                timeout=15)
+        if status == 200:
+            return
+        if status != 409:
+            raise RuntimeError(f"look file save failed ({status})")
+    raise RuntimeError("look file kept changing")
+
+
+PRIVATE_FIRST_SETTLE_S = 8.0   # the Agent Service caches the Look switch for 3 s (channels-switch ttlMs)
+
+
+async def wait_until_private_first_reads_on(limit: float | None = None) -> bool:
+    """After the switch is saved, wait until the Agent Service itself answers on:true before handing over. Its switch
+    read is cached for a few seconds, and the Welcome reads it once at boot: handing over too early showed Claude
+    first in Connect your AI (try-wizard#134 tester). Gives up after `limit` seconds; the hand-over still happens."""
+    end = time.monotonic() + (PRIVATE_FIRST_SETTLE_S if limit is None else limit)
+    while True:
+        try:
+            status, answer = await shell("GET", PRIVATE_FIRST_STATE, timeout=4)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            status, answer = 0, None
+        if status == 200 and isinstance(answer, dict) and answer.get("on") is True:
+            return True
+        if time.monotonic() >= end:
+            return False
+        await asyncio.sleep(0.5)
+
+
+async def refuse_if_private_first() -> web.Response | None:
+    """With private first on, this server runs no brain of its own (one implementation: the connection apps)."""
+    if (await private_first())["on"]:
+        return json_error(PRIVATE_FIRST_REFUSAL, 409)
+    return None
+
+
 # ── brain: ChatGPT (Codex device login, inside the Hermes container) ─────
 
 
@@ -473,7 +595,53 @@ async def healthz(_: web.Request) -> web.Response:
 
 
 async def get_state(_: web.Request) -> web.Response:
-    return web.json_response(public_state())
+    return web.json_response({**public_state(), "privateFirst": await private_first()})
+
+
+async def post_private_first(request: web.Request) -> web.Response:
+    """The Mac asked for private first (`?private_first=1`, which every Mac sends). Only before setup ends,
+    and never against WIZARD_PRIVATE_FIRST=0; whether it runs still needs an Agent Service with the route."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    state = load_state()
+    if isinstance(body, dict) and body.get("ask") is True and not state.get("done") and private_first_forced() is not False:
+        save_state(privateFirst=True)
+    return web.json_response({**public_state(), "privateFirst": await private_first()})
+
+
+async def post_brain_private(_: web.Request) -> web.Response:
+    """Private first's Continue: switch the box's private-first switch on, then hand over to the Wizard UX Welcome,
+    whose Connect your AI signs in to Tinfoil in the wizard-tinfoil app (the Agent Service makes the private agent)."""
+    pf = await private_first()
+    if not pf["on"]:
+        return json_error("Private first isn't available on this Wizard yet. Pick another brain.", 409)
+    try:
+        await switch_private_first_on()
+    except Exception:
+        log_failure("Switching private first on")
+        return json_error("Your Wizard could not switch private first on. Try again.", 502)
+    if not await wait_until_private_first_reads_on():
+        print("setup: the Agent Service did not read private first on yet; handing over anyway", flush=True)
+    state = load_state()
+    name = state.get("name") or "Wizard"
+    if state.get("soulPending"):
+        try:
+            await asyncio.to_thread(brain_exec, "soul", {"name": name})
+            save_state(soulPending=False)
+        except Exception:
+            pass
+    if state.get("shellSettingsPending"):
+        try:
+            await asyncio.to_thread(write_shell_settings, name)
+            save_state(shellSettingsPending=False)
+        except Exception:
+            log_failure("Writing the shell settings for private first")
+    # No first chat here: a deep link would keep the Welcome away, and the Welcome sends its own first message.
+    save_state(privateFirst=True, brain={"kind": "private", "provider": "tinfoil", "label": "Tinfoil (private)"},
+               verified=False, done=True, firstSessionId=None, firstSessionOpened=True, finishedAt=time.time())
+    return web.json_response({"target": f"{PUBLIC_UX_ORIGIN}{UX_PATH}", **public_state(), "privateFirst": pf})
 
 
 async def post_name(request: web.Request) -> web.Response:
@@ -543,6 +711,9 @@ async def post_brain(request: web.Request) -> web.Response:
 
 
 async def _post_brain(request: web.Request) -> web.Response:
+    refused = await refuse_if_private_first()
+    if refused:
+        return refused
     body = await request.json()
     kind = body.get("kind")
     try:
@@ -572,6 +743,9 @@ async def post_codex_start(request: web.Request) -> web.Response:
     attempt = (await request.json()).get("attempt")
     if not isinstance(attempt, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt):
         return json_error("A valid sign-in attempt ID is required.")
+    refused = await refuse_if_private_first()
+    if refused:
+        return refused
     async with _codex_lifecycle:
         with _codex_lock:
             if _codex.get("attempt") == attempt:
@@ -879,6 +1053,8 @@ def build_app() -> web.Application:
         web.post("/api/name", post_name),
         web.post("/api/portrait", post_portrait),
         web.get("/api/portrait", get_portrait),
+        web.post("/api/private-first", post_private_first),
+        web.post("/api/brain/private", post_brain_private),
         web.post("/api/brain", post_brain),
         web.post("/api/brain/chatgpt/start", post_codex_start),
         web.get("/api/brain/chatgpt", get_codex),

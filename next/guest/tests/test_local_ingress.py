@@ -73,28 +73,34 @@ class Ingress(unittest.TestCase):
     def request(host,path='/wizard/v1/agents',headers=None):
      c=http.client.HTTPConnection('127.0.0.1',port,timeout=2);c.request('GET',path,headers={'Host':host,**(headers or {})});r=c.getresponse();out=(r.status,r.read());c.close()
      return out[0],(json.loads(out[1]) if out[0]==200 else None)
-    for host in ['attacker.test','attacker.test:48023','127.0.0.1','127.0.0.1:9999','localhost:9999','[::1]:48023']:
-     self.assertEqual(request(host)[0],421,host)
-    st,body=request('127.0.0.1:48023',headers={'Tailscale-User-Login':'attacker@example.com','X-Forwarded-For':'203.0.113.9'})
-    self.assertEqual((st,body['port'],body['login'],body['fwd']),(200,shell.server_port,'owner@example.com',''))
-    st,body=request('127.0.0.1:48023','/wizard-os-home/store-install/_updates?x=1')
-    self.assertEqual((body['port'],body['path'],body['login']),(store.server_port,'/_updates?x=1','owner@example.com'))
-    self.assertEqual(request('127.0.0.1:48023','/wizard-os-home/store-install')[1]['path'],'/')
-    self.assertEqual(request('127.0.0.1:48023','/wizard-os-home/store-installer')[1]['port'],shell.server_port)
-    st,body=request('127.0.0.1:48023','/files/a/b.txt')
-    self.assertEqual((body['port'],body['path']),(files.server_port,'/files/a/b.txt'))
-    self.assertEqual(request('localhost:48023')[0],404)
-    st,body=request('localhost:48023','/apps/test/')
-    self.assertEqual((st,body['login']),(200,'owner@example.com'))
-    # Guest loopback is never the owner's device: no hop for the App Manager, Origin untouched.
-    st,body=request('127.0.0.1:48023','/wizard-os-home/store-install/_updates',{'Origin':'http://127.0.0.1:48023'})
-    self.assertEqual((body['fwd'],body['origin']),('','http://127.0.0.1:48023'))
-    # The Mac window's root-only socket is: named hop, and a same-origin write gets Serve's origin on Serve's routes.
     class UnixHTTP(http.client.HTTPConnection):
      def connect(self):
       self.sock=socket.socket(socket.AF_UNIX);self.sock.connect(str(run/'window.sock'))
     def window(path,headers):
      c=UnixHTTP('localhost',timeout=2);c.request('GET',path,headers={'Host':'127.0.0.1:48023',**headers});r=c.getresponse();out=json.loads(r.read());c.close();return out
+    for host in ['attacker.test','attacker.test:48023','127.0.0.1','127.0.0.1:9999','localhost:9999','[::1]:48023']:
+     self.assertEqual(request(host)[0],421,host)
+    st,body=request('127.0.0.1:48023',headers={'Tailscale-User-Login':'attacker@example.com','X-Forwarded-For':'203.0.113.9'})
+    self.assertEqual((st,body['port'],body['login'],body['fwd']),(200,shell.server_port,'owner@example.com',''))
+    # wizard-os#133 (18 Nov): any VM program can open guest loopback, so it reaches the shell port only, never Serve's
+    # other listeners (Store/Updates, Files, ...): those paths go to the shell, which has no such route.
+    for path in ['/wizard-os-home/store-install/_updates?x=1','/wizard-os-home/store-install','/files/a/b.txt']:
+     st,body=request('127.0.0.1:48023',path,{'Origin':'https://box.example-tailnet.ts.net:8796'})
+     self.assertEqual((st,body['port'],body['path']),(200,shell.server_port,path),path)
+    # The Mac window gets the whole table.
+    body=window('/wizard-os-home/store-install/_updates?x=1',{})
+    self.assertEqual((body['port'],body['path'],body['login']),(store.server_port,'/_updates?x=1','owner@example.com'))
+    self.assertEqual(window('/wizard-os-home/store-install',{})['path'],'/')
+    self.assertEqual(window('/wizard-os-home/store-installer',{})['port'],shell.server_port)
+    body=window('/files/a/b.txt',{})
+    self.assertEqual((body['port'],body['path']),(files.server_port,'/files/a/b.txt'))
+    self.assertEqual(request('localhost:48023')[0],404)
+    st,body=request('localhost:48023','/apps/test/')
+    self.assertEqual((st,body['login']),(200,'owner@example.com'))
+    # Guest loopback is never the owner's device: no hop for the App Manager, Origin untouched.
+    st,body=request('127.0.0.1:48023','/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})
+    self.assertEqual((body['port'],body['fwd'],body['origin']),(shell.server_port,'','http://127.0.0.1:48023'))
+    # The Mac window's root-only socket is: named hop, and a same-origin write gets Serve's origin on Serve's routes.
     body=window('/wizard-os-home/store-install/_updates',{'Origin':'http://127.0.0.1:48023','X-Forwarded-For':'203.0.113.9'})
     self.assertEqual((body['port'],body['fwd'],body['origin']),(store.server_port,'wizard-mac-window','https://box.example-tailnet.ts.net:8796'))
     self.assertEqual(window('/wizard-os-home/store-install/_updates',{'Origin':'https://attacker.test'})['origin'],'https://attacker.test')
@@ -106,7 +112,7 @@ class Ingress(unittest.TestCase):
     self.assertEqual(window('/files/x',{})['host'],['127.0.0.1:48023'])
     self.assertEqual(window('/files/x',{'Origin':'https://attacker.test'})['host'],['127.0.0.1:48023'])
     self.assertEqual(window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})['host'],['127.0.0.1:48023'])
-    self.assertEqual(request('127.0.0.1:48023','/files/x',{'Origin':'http://127.0.0.1:48023'})[1]['host'],['127.0.0.1:48023'])
+    self.assertEqual(request('127.0.0.1:48023','/files/x',{'Origin':'http://127.0.0.1:48023'})[1]['port'],shell.server_port)
     self.assertEqual(request('localhost:48023','/apps/test/')[1]['host'],['localhost:48023'])
    finally:
     process.terminate();process.communicate(timeout=5)

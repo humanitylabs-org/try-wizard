@@ -1,7 +1,7 @@
 # Release pipeline (try-wizard#102, wizard-os#680). With "Require review from Code Owners" on main, a change here needs
 # the owner's approval; ordinary app changes and version bumps (next/mac/release/version.json) do not.
-/.github/                                   @jdefleur
+/.github/                                   @jdefleur @oscarhenrycollins
 /.github/CODEOWNERS                         @jdefleur
 /next/mac/release/sparkle-public-key.txt    @jdefleur
-/next/mac/tools/stage-release.py            @jdefleur
-/next/mac/tools/make-update-feed.py         @jdefleur
+/next/mac/tools/stage-release.py            @jdefleur @oscarhenrycollins
+/next/mac/tools/make-update-feed.py         @jdefleur @oscarhenrycollins

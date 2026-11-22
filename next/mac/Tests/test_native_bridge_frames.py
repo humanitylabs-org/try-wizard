@@ -12,6 +12,10 @@ import unittest
 from pathlib import Path
 
 MAIN = Path(__file__).resolve().parents[1] / 'App/main.swift'
+# The one reviewed exception (try-wizard#142): Now Playing's own handler + an every-frame script that stays idle outside
+# Music and Podcasts, installed only with its switch on. Its receiver admits frames through Shared/NowPlaying.swift.
+NOW_PLAYING = Path(__file__).resolve().parents[1] / 'App/WizardNowPlaying.swift'
+OTHER_APP = [p for p in sorted(MAIN.parent.glob('*.swift')) if p not in (MAIN, NOW_PLAYING)]
 
 
 def between(source: str, start: str, end: str) -> str:
@@ -30,6 +34,23 @@ class NativeBridgeFrameTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r'userContentController\.add\(', self.src)), 1)
         self.assertNotIn('addScriptMessageHandler', self.src, 'reply handlers / other content worlds need the same review')
         self.assertNotIn('WKContentWorld', self.src)
+        for p in OTHER_APP:
+            text = p.read_text()
+            found = re.findall(r'userContentController\.add\(|\.add\([^()]*, name:|addScriptMessageHandler|WKUserScript\(', text)
+            self.assertEqual(found, [], p.name)
+
+    def test_now_playing_is_the_only_exception(self):
+        np = NOW_PLAYING.read_text()
+        install = between(np, 'static func install(into controller: WKUserContentController) {', '\n    }')
+        self.assertEqual(len(re.findall(r'controller\.add\(', np)), 1)
+        self.assertEqual(len(re.findall(r'WKUserScript\(', np)), 1)
+        self.assertIn('controller.add(shared, name: name)', install)
+        self.assertIn('static let name = "wizardNowPlaying"', np)
+        self.assertNotIn('addScriptMessageHandler', np)
+        self.assertIn('if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(', self.src)
+        receive = between(np, 'didReceive message: WKScriptMessage) {', '\n    }')
+        self.assertIn('Rule.admit(', receive)
+        self.assertIn('owner.isWizardAppAddress(message.frameInfo.securityOrigin)', receive)
 
     def test_injected_scripts_are_main_frame_only(self):
         scripts = re.findall(r'WKUserScript\(([^)]*)\)', self.src)

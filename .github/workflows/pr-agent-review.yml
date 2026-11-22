@@ -12,6 +12,6 @@ permissions:
 jobs:
   review:
     if: github.event.pull_request.head.repo.full_name == github.repository
+    # GitHub-hosted (the reviewer's default, ubuntu-latest): the repo is public, so hosted minutes are free and no
+    # self-hosted runner is needed (try-wizard#113, wizard-os#680).
     uses: humanitylabs-org/wizard-ux/.github/workflows/pr-agent-review.yml@main
-    with:
-      runs-on: '["self-hosted","Linux","X64","forum","try-wizard"]'

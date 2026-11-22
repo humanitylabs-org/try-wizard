@@ -109,8 +109,14 @@
   <!-- 2. Brain -->
   <section data-step="2" class="hidden">
     <h1>Connect <span class="wname">its</span> brain</h1>
-    <p class="lead">Your Wizard thinks with a language model. Pick how it connects. You can change this later.</p>
-    <div class="choices">
+    <p class="lead" id="lead2">Your Wizard thinks with a language model. Pick how it connects. You can change this later.</p>
+    <!-- Private first (try-wizard#134, wizard-os DECISIONS #115; on for every fresh Mac): Tinfoil
+         leads and is the only brain here; its sign-in is the wizard-tinfoil app's own, in the Welcome that follows. -->
+    <div class="choices hidden" id="pfChoices">
+      <button class="choice" data-kind="private"><span class="ico">🔒</span><div><b>Tinfoil</b><span>Private AI. You sign in to Tinfoil in the next step.</span></div><span class="tag">Recommended</span></button>
+    </div>
+    <p class="note hidden" id="pfNote" style="margin-top:14px">Want Claude or ChatGPT too? Add one later as a second agent. Your private agent and its apps stay private.</p>
+    <div class="choices" id="stdChoices">
       <button class="choice" data-kind="chatgpt"><span class="ico">✦</span><div><b>Sign in with ChatGPT</b><span>Use your ChatGPT plan. Sign-in opens in your Mac browser.</span></div><span class="tag">Recommended</span></button>
       <button class="choice" data-kind="free"><span class="ico">⚡</span><div><b>Start free</b><span>A starter brain, no account needed. Upgrade any time.</span></div></button>
       <button class="choice" data-kind="apikey"><span class="ico">🔑</span><div><b>Use an API key</b><span>Anthropic or OpenRouter.</span></div></button>
@@ -180,6 +186,9 @@ let codexTimer = null
 let codexGeneration = 0
 let codexAttempt = sessionStorage.getItem('wizardCodexAttempt')
 let codexQueue = Promise.resolve()
+// Private first (try-wizard#134): the Mac always opens this page with ?private_first=1.
+const pfAsked = (() => { try { return new URLSearchParams(location.search).get('private_first') === '1' } catch { return false } })()
+let pf = { on: false }
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
@@ -221,6 +230,15 @@ $('#next1').addEventListener('click', async () => {
 })
 
 // 2. Brain
+function applyPrivateFirst() {
+  const on = pf.on === true
+  $('#pfChoices').classList.toggle('hidden', !on); $('#pfNote').classList.toggle('hidden', !on)
+  $('#stdChoices').classList.toggle('hidden', on)
+  $('#lead2').textContent = on
+    ? 'Your Wizard thinks privately with Tinfoil, so your chats and apps stay private.'
+    : 'Your Wizard thinks with a language model. Pick how it connects. You can change this later.'
+  if (on && brainKind !== 'private') { brainKind = null; $('#next2').textContent = 'Connect'; $('#next2').disabled = true }
+}
 $$('.choice').forEach((btn) => btn.addEventListener('click', () => {
   brainKind = btn.dataset.kind
   $$('.choice').forEach((b) => b.classList.toggle('sel', b === btn))
@@ -320,6 +338,17 @@ $('#key').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#next2'
 
 $('#next2').addEventListener('click', async () => {
   $('#err2').textContent = ''
+  if (brainKind === 'private') {
+    const btn = $('#next2'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Connecting'
+    try {
+      // The Welcome in Wizard UX takes over: Connect your AI, Tinfoil first, signed in inside the Tinfoil app.
+      const data = await api('/api/brain/private', { method: 'POST', body: '{}' })
+      location.replace(data.target)
+      return
+    } catch (err) { $('#err2').textContent = err.message }
+    btn.disabled = false; btn.textContent = 'Connect'
+    return
+  }
   if (brainKind === 'chatgpt') { $('#next2').textContent = 'Waiting for sign-in…'; $('#next2').disabled = true; startCodex(); return }
   const btn = $('#next2'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Connecting'
   const kind = brainKind
@@ -407,6 +436,9 @@ $$('[data-back]').forEach((b) => b.addEventListener('click', () => { if (b.datas
 
 ;(async () => {
   try { state = await api('/api/state') } catch {}
+  try { if (pfAsked && !state.done) state = await api('/api/private-first', { method: 'POST', body: JSON.stringify({ ask: true }) }) } catch {}
+  pf = state.privateFirst || { on: false }
+  applyPrivateFirst()
   if (state.name) { $('#name').value = state.name; $('#next1').disabled = false; setName(state.name) }
   if (state.hasPortrait) $('#portrait').innerHTML = '<img src="/api/portrait" alt="">'
   show(state.brain && state.verified ? 4 : state.brain ? 3 : state.name ? 2 : 1)
