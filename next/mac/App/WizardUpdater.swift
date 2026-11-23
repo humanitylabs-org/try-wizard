@@ -158,6 +158,74 @@ final class NoticeBarView: NSView {
         }
         return true
     }
+
+    // MARK: Fresh install: the bundled guest update, once (try-wizard#137)
+
+    /// A fresh install downloads the published WizardOS disk (os/latest.json), which can be older than the guest code
+    /// this app carries (Contents/Resources/GuestUpdate). Before that disk's first boot, apply the bundled code-only
+    /// guest update once, the same way an app update does, so a new Mac gets the same setup page as a Mac that updated.
+    static var freshInstallMarker: URL { WizardUpdate.dir.appendingPathComponent("fresh-install.json") }
+    /// Called once the OS installer has put a new disk in place.
+    static func markFreshInstall() {
+        guard let identity = WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img")) else { return }
+        try? FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? WizardUpdate.write(["diskIdentity": identity, "state": "pending"], freshInstallMarker)
+    }
+    /// True while the bundled guest update runs (the window waits; onGuestFinished calls begin() again).
+    /// Runs only for the disk the installer just wrote, only once (a failed try restores that stopped disk and
+    /// WizardOS starts as downloaded), and only while no Host runs.
+    func admitFreshGuestUpdate() -> Bool {
+        guard Store.active?.kind == .thisMac, WizardShared.osInstalled else { return false }
+        if activatingGuest { return true }
+        var marker = WizardUpdate.json(Self.freshInstallMarker)
+        guard marker["state"] as? String == "pending", marker["diskIdentity"] as? String == WizardShared.diskIdentity else { return false }
+        guard !HostControl.isRunning, !HostControl.hasForeignRunner, !isRecording(), !qaBusy, !preparing else { return false }
+        marker["state"] = "attempted"
+        guard (try? WizardUpdate.write(marker, Self.freshInstallMarker)) != nil else { return false }
+        let ownership = WizardDiskOwnership()
+        do {
+            try ownership.acquire()
+            let release = try WizardRelease.read(Bundle.main.bundleURL)
+            guard release.guestPatch == "mac-stack-v1",
+                  FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/GuestUpdate/runtime-bom.json").path) else {
+                ownership.release(); return false   // this build carries no guest update: start the disk as downloaded
+            }
+            try release.validate(Bundle.main.bundleURL)
+            try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
+            guard leaseFD >= 0, flock(leaseFD, LOCK_EX | LOCK_NB) == 0 else { throw WizardUpdate.error("Another update owns this disk") }
+            guard !HostControl.isRunning, !HostControl.hasForeignRunner else { throw WizardUpdate.error("A Wizard Host started; setup goes on without the bundled update") }
+            preparing = true; activatingGuest = true; onFreeze(true)
+            try WizardGuestActivation.snapshotStoppedDisk()
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? ""
+            try WizardUpdate.write(["kind": "fresh-install", "phase": "installing", "nonce": UUID().uuidString,
+                "diskIdentity": WizardShared.diskIdentity, "dataHome": WizardShared.supportDir.path,
+                "appPath": Bundle.main.bundleURL.path, "releaseID": release.releaseID,
+                "from": build, "to": build, "guestPatch": true, "applyGuest": true], WizardUpdate.journal)
+            ownership.release()
+            WizardGuestActivation.shared.onProgress = { [weak self] text in
+                self?.show("guest-activating", text); self?.onActivationStatus("Adding the latest \(WizardOSName.text) setup to this Mac…", false)
+            }
+            WizardGuestActivation.shared.onDone = { [weak self] error in
+                guard let self else { return }
+                self.activatingGuest = false; self.releaseLease()
+                if error == nil { WizardRollbackCleanup.start() }
+                // The downloaded disk is live again after a rollback: its clone protects nothing, so free its space.
+                if error != nil, WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-rolled-back" {
+                    try? FileManager.default.removeItem(at: WizardGuestActivation.backup)
+                }
+                // A failed try put the downloaded disk back: carry on with it rather than stop the first start.
+                self.show(error == nil ? "installed" : "failed", error.map { "The latest setup couldn't be added (\($0)); \(WizardOSName.text) starts as downloaded." } ?? "\(WizardOSName.text) is set up with the latest local software")
+                self.onGuestFinished()
+            }
+            WizardGuestActivation.shared.activate()
+            return true
+        } catch {
+            ownership.release(); activatingGuest = false; releaseLease()
+            NSLog("Wizard: fresh-install guest update skipped: %@", error.localizedDescription)
+            return false
+        }
+    }
     @objc func checkForUpdates(_ sender: Any? = nil) {
         guard let updater else { return }
         if ready != nil { show("ready", "Update \(version) available — ready to restart"); return }
