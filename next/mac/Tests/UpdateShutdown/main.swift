@@ -23,7 +23,7 @@ enum WizardUpdate {
     static func json(_ url: URL) -> [String: Any] { (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:] }
     static func write(_ value: [String: Any], _ url: URL) throws { try JSONSerialization.data(withJSONObject:value).write(to:url,options:.atomic) }
     static func error(_ text: String) -> NSError { NSError(domain:"stop-fixture",code:1,userInfo:[NSLocalizedDescriptionKey:text]) }
-    static func maintenance(_ nonce: String, _ done: (String?)->Void) { done(nil) }
+    static func maintenance(_ nonce: String, onMissing: (() -> Void)? = nil, _ done: (String?)->Void) { done(nil) }
     static func releaseMaintenance(_ nonce: String) { try? FileManager.default.removeItem(at:maintenanceJournal) }
     static func idle(_ done: (String?)->Void) { fatalError("Normal runtime must never be entered after stop failure") }
 }
@@ -59,6 +59,7 @@ final class VMController {
     let vm = VMController()
     var preparingUpdate = false, quitting = false
     func send() { prepareUpdate() }
+    func admitStandardGuest(_ done: (String?)->Void) { fatalError("the lease answered; no standard admission") }
 // PRODUCTION_PREPARE
 }
 @MainActor enum HostControl {

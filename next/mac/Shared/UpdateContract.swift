@@ -123,14 +123,17 @@ enum WizardUpdate {
                let health = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                health["upstream_reachable"] as? Bool == true, let q = health["queue"] as? [String: Any],
                q["liveness_available"] as? Bool == true, let active = q["active"] as? Int, let queued = q["queued"] as? Int {
-                reason = active + queued == 0 ? nil : "Agent work is active — update after it finishes"
+                reason = active + queued == 0 ? nil : "Wizard is working on a chat reply — updates when it finishes"
             }
             DispatchQueue.main.async { done(reason) }
         }.resume()
     }
     /// Owner-local admission lease, not the UX queue projection. Never targets a connected remote backend.
     static let maintenanceJournal = dir.appendingPathComponent("maintenance-lease.json")
-    static func maintenance(_ token: String, release: Bool = false, _ done: @escaping (String?) -> Void) {
+    /// `onMissing`: what a standard-install guest (os.sh, Host-run updates) gets instead. Its Agent Service has no
+    /// such route and answers 404 (the Mac-line route answers 201 or 409, never 404). Only a caller that passes it
+    /// gets that path, and it must still ask the guest itself (WizardStandardAdmission): a 404 never means idle.
+    static func maintenance(_ token: String, release: Bool = false, onMissing: (() -> Void)? = nil, _ done: @escaping (String?) -> Void) {
         // The same token owns stop, maintenance boot, rollback and final release.
         let token = (json(maintenanceJournal)["token"] as? String) ?? token
         if !release {
@@ -145,8 +148,14 @@ enum WizardUpdate {
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
         URLSession.shared.dataTask(with: req) { data, response, _ in
             let body = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            let ok = (response as? HTTPURLResponse)?.statusCode == (release ? 200 : 201) && body?["ok"] as? Bool == true
+            let code = (response as? HTTPURLResponse)?.statusCode
+            let ok = code == (release ? 200 : 201) && body?["ok"] as? Bool == true
             DispatchQueue.main.async {
+                if !release, code == 404, let onMissing {
+                    // No lease to hold or release later: drop the token so the Host's release loop doesn't retry it.
+                    try? FileManager.default.removeItem(at: maintenanceJournal)
+                    onMissing(); return
+                }
                 if ok {
                     if release { try? FileManager.default.removeItem(at: maintenanceJournal) }
                     else { try? write(["token": token], maintenanceJournal) }
