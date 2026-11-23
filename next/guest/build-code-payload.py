@@ -51,6 +51,8 @@ CODE = (
     'etc/systemd/system/wizard-local-proxy.service',
     'etc/systemd/system/wizard-local-routes.service',
     'etc/systemd/system/wizard-local-routes.timer',
+    # A second DNS route next to the Mac's NAT DNS, so image pulls resolve on every Mac (try-wizard#155).
+    'etc/systemd/resolved.conf.d/50-wizard-dns.conf',
 )
 SKIP_PARTS = {'__pycache__', 'tests', 'testing', '.DS_Store'}
 

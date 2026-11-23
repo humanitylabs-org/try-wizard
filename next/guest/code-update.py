@@ -20,8 +20,9 @@ from pathlib import Path
 
 PATCH = 'mac-stack-v1'
 # The only places a code-only payload may write (relative to the guest's /).
-ALLOWED = ('opt/wizard/', 'etc/systemd/system/wizard-')
+ALLOWED = ('opt/wizard/', 'etc/systemd/system/wizard-', 'etc/systemd/resolved.conf.d/50-wizard-dns.conf')
 UNITS = 'etc/systemd/system/'
+DNS = 'etc/systemd/resolved.conf.d/50-wizard-dns.conf'
 WINDOW_DOOR = ('opt/wizard/local-proxy.conf', 'opt/wizard/local-proxy-owner.inc', 'opt/wizard/bin/wizard-local-routes')
 HERMES_DATA = 'home/wizard/runtipi/app-data/wizardapps/hermes-agent/data'
 
@@ -142,6 +143,9 @@ def apply(payload, *, apply=True, cold_bootstrap=False, root=Path('/'), run=subp
         run(['systemctl', 'daemon-reload'], check=True)
         if 'etc/systemd/system/wizard-local-routes.timer' in targets:
             run(['systemctl', 'enable', 'wizard-local-routes.timer'], check=True, stdout=subprocess.DEVNULL)
+    if DNS in targets:
+        # The guest's resolver reads the drop-in only when it starts (try-wizard#155).
+        run(['systemctl', 'restart', 'systemd-resolved'], check=True)
     if all(rel in targets for rel in WINDOW_DOOR):
         # nginx reads the generated route files; check the new config before it replaces the running one.
         run(['/opt/wizard/bin/wizard-local-routes'], check=True, stdout=subprocess.DEVNULL)
@@ -166,7 +170,7 @@ def apply(payload, *, apply=True, cold_bootstrap=False, root=Path('/'), run=subp
     env_report = guard.compare_env(before_env, env_path.read_bytes() if env_path.is_file() else b'')
     report = {'patch': PATCH, 'kind': 'code-only', 'at': int(time.time()), 'source_pins': bom.get('sources', {}),
               'runtime_bom_sha256': _sha(payload / 'runtime-bom.json'), 'installed': targets,
-              'restarted': ['wizard-local-proxy', 'wizard-setup'], 'service_image': service_image,
+              'restarted': (['systemd-resolved'] if DNS in targets else []) + ['wizard-local-proxy', 'wizard-setup'], 'service_image': service_image,
               'protected_files_byte_unchanged': before == after, 'protected_before_sha256': before,
               'protected_after_sha256': after, 'env': env_report, 'auth': auth_report,
               'permanent_identity_credentials_preserved': auth_report['stable_identity_credentials_preserved']}

@@ -68,14 +68,14 @@ Every Mac release built by `.github/workflows/release.yml` carries a code-only g
 `next/guest/overlay` reach Macs with the version bump. `next/guest/build-code-payload.py --out <dir>` assembles it:
 this repo's files for the setup page (front door) and the Mac window door (`local-proxy.conf`, `local-proxy-owner.inc`,
 `wizard-local-routes`, `wizard-shell-port`, `wizard-ux-bridge` and the `wizard-local-proxy`/`wizard-local-routes`
-units), the guest-side installer and a `runtime-bom.json` with `"kind": "code-only"`. No images, no WAM, no agent
+units), the guest's second DNS route (`/etc/systemd/resolved.conf.d/50-wizard-dns.conf`, try-wizard#155), the guest-side installer and a `runtime-bom.json` with `"kind": "code-only"`. No images, no WAM, no agent
 changes; a few hundred KB. The release contract still says `guestPatch: mac-stack-v1`, so installed apps apply it
 through the activation above (stopped-disk copy first, put back on failure).
 
 In the guest, the fixed `upgrade-mvp-stack.py` hands a code-only payload to `next/guest/code-update.py`. It checks
-every file against the BOM (nothing extra, writes only under `/opt/wizard/` and `/etc/systemd/system/wizard-*`),
+every file against the BOM (nothing extra, writes only under `/opt/wizard/`, `/etc/systemd/system/wizard-*` and the DNS drop-in),
 keeps the replaced files in `/var/lib/wizard/patches/mac-stack-v1/code-only-previous-*`, installs, reloads systemd,
-checks the new nginx config with `nginx -t`, then restarts only `wizard-local-proxy` and `wizard-setup`. Its receipt
+restarts `systemd-resolved` when it carries the DNS drop-in, checks the new nginx config with `nginx -t`, then restarts only `wizard-local-proxy` and `wizard-setup`. Its receipt
 passes the same fixed Host check (SOUL.md, .env and account credentials unchanged). It refuses a legacy cold upgrade
 (the app then says the cold bootstrap is missing, before touching the disk). The VM restarts normally afterwards, so
 every installed file runs from that boot. The full `mac-stack-v1` payload (Service image, managed Hermes, WAM) is
