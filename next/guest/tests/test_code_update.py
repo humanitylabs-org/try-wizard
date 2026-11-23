@@ -76,7 +76,8 @@ class CodeOnlyPayload(unittest.TestCase):
                      'overlay/opt/wizard/local-proxy.conf', 'overlay/opt/wizard/local-proxy-owner.inc',
                      'overlay/opt/wizard/bin/wizard-local-routes', 'overlay/opt/wizard/bin/wizard-shell-port',
                      'overlay/etc/systemd/system/wizard-local-proxy.service',
-                     'overlay/etc/systemd/system/wizard-local-routes.timer'):
+                     'overlay/etc/systemd/system/wizard-local-routes.timer',
+                     'overlay/etc/systemd/resolved.conf.d/50-wizard-dns.conf'):
             self.assertIn(need, files)
         for path in files:
             self.assertNotIn('/tests/', path)
@@ -110,6 +111,36 @@ class CodeOnlyPayload(unittest.TestCase):
         (self.payload / 'runtime-bom.json').write_text(json.dumps(bom))
         with self.assertRaisesRegex(SystemExit, 'may not write'):
             installer.verify(self.payload)
+
+    def test_only_the_wizard_dns_drop_in_may_go_to_resolved(self):
+        bom = json.loads((self.payload / 'runtime-bom.json').read_text())
+        other = self.payload / 'overlay/etc/systemd/resolved.conf.d/99-other.conf'
+        other.write_text('[Resolve]\nDNS=203.0.113.1\n')
+        bom['files']['overlay/etc/systemd/resolved.conf.d/99-other.conf'] = builder.sha(other)
+        (self.payload / 'runtime-bom.json').write_text(json.dumps(bom))
+        with self.assertRaisesRegex(SystemExit, 'may not write'):
+            installer.verify(self.payload)
+
+
+class GuestDns(unittest.TestCase):
+    """try-wizard#155: a second DNS route next to the Mac's NAT DNS, never one that replaces it."""
+    def test_public_servers_added_next_to_the_nat_dns(self):
+        import configparser
+        conf = configparser.ConfigParser(strict=True)
+        conf.optionxform = str
+        conf.read_string((GUEST / 'overlay' / installer.DNS).read_text())
+        resolve = dict(conf['Resolve'])
+        self.assertEqual(resolve['DNS'].split(), ['1.1.1.1', '9.9.9.9'])
+        # Domains=~. would send every name to these servers alone: tailnet (*.ts.net) and local names would break.
+        self.assertNotIn('Domains', resolve)
+        # A global DNSOverTLS also applies to the NAT link; keep plain DNS there.
+        self.assertNotIn('DNSOverTLS', resolve)
+        self.assertEqual(set(resolve), {'DNS'})
+
+    def test_build_time_dns_override_is_a_different_file(self):
+        # wizard-provision deletes its own build-only drop-in; it must never delete the shipped one.
+        provision = (GUEST / 'overlay/opt/wizard/bin/wizard-provision').read_text()
+        self.assertNotIn('50-wizard-dns.conf', provision)
 
 
 class CodeOnlyInstall(unittest.TestCase):
@@ -147,6 +178,11 @@ class CodeOnlyInstall(unittest.TestCase):
         self.assertEqual([k.read_text() for k in kept], ['# 0.4.0 config\n'])
         calls = [' '.join(c) for c in stub.calls]
         self.assertLess(calls.index('systemctl daemon-reload'), calls.index('systemctl restart wizard-local-proxy wizard-setup'))
+        # The DNS drop-in is installed and the resolver restarted to read it (try-wizard#155).
+        dns = self.root / installer.DNS
+        self.assertEqual(dns.read_bytes(), (GUEST / 'overlay' / installer.DNS).read_bytes())
+        self.assertEqual(stat.S_IMODE(dns.stat().st_mode), 0o644)
+        self.assertIn('systemctl restart systemd-resolved', calls)
         nginx = [i for i, c in enumerate(calls) if c.startswith('/usr/sbin/nginx -t')]
         self.assertEqual(len(nginx), 1)
         self.assertLess(nginx[0], calls.index('systemctl restart wizard-local-proxy wizard-setup'))
@@ -160,6 +196,7 @@ class CodeOnlyInstall(unittest.TestCase):
             self.assertNotIn('wizard-app-manager-api', c)
         receipt = self.receipt()
         self.assertEqual(receipt['kind'], 'code-only')
+        self.assertIn('systemd-resolved', receipt['restarted'])
         self.assertNotIn('managed_runtime_image', receipt)
         exec(host_check(), {'d': receipt})
 
