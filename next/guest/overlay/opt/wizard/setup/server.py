@@ -258,10 +258,26 @@ async def hermes(method: str, path: str, body: Any = None, *, timeout: float = 2
     return await _request(method, f"{origin}{path}", body, all_headers, timeout)
 
 
+# wizard-os#133: with the browser boundary on (`wam browser-boundary on`), every owner call needs the box's shell
+# token. The setup page is a program on the box (the owner there, wizard-os spec/OWNER_PROOF.md), so it reads the same
+# file the App Manager's own owner-API clients read (wam/browser_boundary.py owner_headers). No file: no header.
+SHELL_TOKEN_FILE = Path(os.environ.get("WIZARD_OS_HOME", str(Path.home() / ".wizard-os"))).expanduser() \
+    / "browser-boundary" / "shell-token"
+
+
+def shell_token_headers() -> dict[str, str]:
+    try:
+        got = SHELL_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return {}
+    return {"X-Wizard-Shell-Token": got} if re.fullmatch(r"[0-9a-f]{64}", got) else {}
+
+
 async def shell(method: str, path: str, body: Any = None, *, timeout: float = 60,
                 headers: dict[str, str] | None = None) -> tuple[int, Any]:
     """The Agent Service API (what Wizard UX itself calls), on the VM's loopback."""
-    all_headers = {"Content-Type": "application/json", "Host": urlsplit(PUBLIC_UX_ORIGIN).netloc, **(headers or {})}
+    all_headers = {"Content-Type": "application/json", "Host": urlsplit(PUBLIC_UX_ORIGIN).netloc,
+                   **shell_token_headers(), **(headers or {})}
     return await _request(method, f"{SHELL_ORIGIN}{path}", body, all_headers, timeout)
 
 
