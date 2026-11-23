@@ -231,7 +231,8 @@ final class NoticeBarView: NSView {
         if ready != nil { show("ready", "Update \(version) available — ready to restart"); return }
         if updater.canCheckForUpdates { updater.checkForUpdates() }
     }
-    @objc private func hideNotice() { view.isHidden = true; height.constant = 0 }
+    // Later also stops a waiting update from asking again (waitThenRetry): the owner presses Update and restart anew.
+    @objc private func hideNotice() { view.isHidden = true; height.constant = 0; waitToken = UUID(); waitingSince = nil }
 
     // MARK: WizardOS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
 
@@ -300,7 +301,7 @@ final class NoticeBarView: NSView {
         if phase == "host-recovery" { _ = retryHostHandover(); return }
         if ready == nil { checkForUpdates(); return }
         guard !preparing else { return }
-        if isRecording() || qaBusy { show("busy", "Recording or agent work is active — update after it finishes"); return }
+        if isRecording() || qaBusy { waitThenRetry("Recording or agent work is active — updates when it finishes"); return }
         if HostControl.hasForeignRunner { show("busy", "Another candidate's Wizard Host is running — close that candidate before updating"); return }
         plannedGuestActivation = incomingGuest && Store.active?.kind == .thisMac && WizardShared.osInstalled
         preparing = true
@@ -308,7 +309,7 @@ final class NoticeBarView: NSView {
             guard let self, self.preparing else { return }
             guard idle, !self.isRecording(), !self.qaBusy else {
                 self.preparing = false; self.onFreeze(false)
-                self.show("busy", "Finish recording or let the chat finish loading before updating")
+                self.waitThenRetry("Finish recording or let the chat finish loading — updates when it's done")
                 return
             }
             self.onFreeze(true)
@@ -318,7 +319,7 @@ final class NoticeBarView: NSView {
     private func prepareIdleHost() {
         WizardUpdate.idle { [weak self] reason in
             guard let self else { return }
-            if let reason { self.preparing = false; self.onFreeze(false); self.show("busy", reason); return }
+            if let reason { self.preparing = false; self.onFreeze(false); self.waitThenRetry(reason); return }
             do {
                 try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 self.leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
@@ -342,7 +343,8 @@ final class NoticeBarView: NSView {
         let response = WizardUpdate.json(WizardUpdate.response)
         if response["nonce"] as? String == nonce {
             let state = response["state"] as? String
-            if state == "failed" || state == "busy" { fail(response["error"] as? String ?? "Host could not stop safely"); return }
+            if state == "busy" { deferBusy(response["error"] as? String ?? "Wizard is busy — updates when it finishes"); return }
+            if state == "failed" { fail(response["error"] as? String ?? "Host could not stop safely"); return }
             if state == "stopped", !HostControl.isRunning { install(); return }
         }
         guard Date() < deadline else { fail("Host shutdown was not confirmed — prior app remains installed"); return }
@@ -371,6 +373,31 @@ final class NoticeBarView: NSView {
         try? FileManager.default.removeItem(at: WizardUpdate.request)
         if leaseFD >= 0 { flock(leaseFD, LOCK_UN); close(leaseFD); leaseFD = -1 }
         preparing = false; onFreeze(false)
+    }
+    /// The Host refused to stop WizardOS because Wizard is working (try-wizard#154): nothing failed, so put things
+    /// back the way fail() does but say it updates when the work finishes, and try again by itself.
+    private func deferBusy(_ text: String) {
+        restartAuthorized = false; releaseLease()
+        var journal = WizardUpdate.json(WizardUpdate.journal)
+        if journal["phase"] as? String == "prepared" { journal["phase"] = "install-failed"; try? WizardUpdate.write(journal, WizardUpdate.journal) }
+        if stoppedHost && !HostControl.isRunning { HostControl.ensureRunning() }
+        waitThenRetry(text)
+    }
+    /// "Wizard is working on …, updates when it finishes": the owner already chose Update and restart, so it is
+    /// asked again every 30 s while the update is still ready, for up to 6 hours (WAM's Update when they finish).
+    private var waitingSince: Date?
+    private var waitToken = UUID()
+    static let busyRetryEvery: TimeInterval = 30
+    static let busyRetryFor: TimeInterval = 6 * 3600
+    private func waitThenRetry(_ text: String) {
+        show("busy", text)
+        let since = waitingSince ?? Date(); waitingSince = since
+        guard Date().timeIntervalSince(since) < Self.busyRetryFor else { waitingSince = nil; return }
+        let token = UUID(); waitToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.busyRetryEvery) { [weak self] in
+            guard let self, self.waitToken == token, self.phase == "busy", self.ready != nil, !self.preparing else { return }
+            self.updateAndRestart()
+        }
     }
     private func fail(_ text: String) {
         restartAuthorized = false; releaseLease()
@@ -530,7 +557,7 @@ final class NoticeBarView: NSView {
     func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
     func showDownloadDidStartExtractingUpdate() { cancel = nil; show("verifying", "Verifying and preparing update…") }
     func showExtractionReceivedProgress(_ progress: Double) { show("verifying", "Preparing update \(Int(progress * 100))%") }
-    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; show("ready", "Update \(version) available — ready to restart") }
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; waitingSince = nil; show("ready", "Update \(version) available — ready to restart") }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
         show("installing", "Installing update and restarting…")
         // Installation handoff is confirmed. Quit ourselves after the deliberate

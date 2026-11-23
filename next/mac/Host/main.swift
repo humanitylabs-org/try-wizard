@@ -754,7 +754,27 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if WizardShared.coldBootstrapToken != nil { apply(nil) }
-        else { WizardUpdate.maintenance(nonce, apply) }
+        else { WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(apply) }, apply) }
+    }
+
+    /// A standard-install guest has no maintenance lease route (try-wizard#154): ask it what is running, the way a
+    /// Host-run WizardOS update does (OSUpdates), and stop only when nothing is. WizardStandardAdmission decides.
+    private func admitStandardGuest(_ done: @escaping (String?) -> Void) {
+        vm.control("work", timeout: 20) { [weak self] work in
+            guard let self else { done(WizardStandardAdmission.unknownText); return }
+            self.vm.control("update-status", timeout: 40) { status in
+                var req = URLRequest(url: WizardShared.localUXHealthURL); req.timeoutInterval = 5
+                req.cachePolicy = .reloadIgnoringLocalCacheData
+                URLSession.shared.dataTask(with: req) { data, response, _ in
+                    let health = (response as? HTTPURLResponse)?.statusCode == 200 ? data : nil
+                    DispatchQueue.main.async {
+                        let reason = WizardStandardAdmission.reason(work: work, status: status, health: health)
+                        log(reason.map { "update admission (standard guest): \($0)" } ?? "update admission (standard guest): quiet")
+                        done(reason)
+                    }
+                }.resume()
+            }
+        }
     }
 
     private func prepareUpdate() {
@@ -789,7 +809,7 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // A failed WizardOS has no agent work to protect: stop what is left (if anything) and update.
         if self.vm.state == .stopped || self.vm.state == .notInstalled || self.vm.state == .error || WizardShared.coldBootstrapToken != nil { stopWhenIdle(nil) }
-        else { WizardUpdate.maintenance(nonce, stopWhenIdle) }
+        else { WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(stopWhenIdle) }, stopWhenIdle) }
     }
 
     func refresh() {

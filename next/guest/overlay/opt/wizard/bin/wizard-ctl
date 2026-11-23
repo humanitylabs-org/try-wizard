@@ -7,6 +7,8 @@
 #   update-auto   install it, under the same rules (wam updates --apply-if-auto); sent only after the disk copy
 #   update-now    install the channel's release now (wam updates --apply): the owner's confirmed Update now
 #   update-status the App Manager's update status (installing, failed, installed, ...), read-only
+#   work          everything running (wam work: chat replies, agent turns, scheduled jobs, tasks), read-only; the
+#                 Mac asks before it stops WizardOS for a Wizard.app update (Shared/StandardAdmission.swift)
 #   update-inbox  what the owner said from any device: {"request": Update now, "postponed": Not tonight}; a request
 #                 with "when_idle" waits until update-status has nothing in waiting_for (Update when they finish)
 #   update-request-clear | update-postpone-clear   the Mac took it
@@ -31,6 +33,14 @@ owner_wam() {
 # The decision was made before the Mac's disk copy (update-check / the owner's Update now); after the copy's restart,
 # work Hermes resumes must not stop the update the owner already chose. Older App Managers don't know --anyway.
 anyway() { sudo -iu wizard wam updates --help </dev/null 2>/dev/null | grep -q -- '--anyway' && echo --anyway; }
+owner_work() {
+  local out
+  out=$(sudo -iu wizard env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+    wam work </dev/null 2>/dev/null)
+  # An App Manager without `wam work` answers like a guest without this command; the Mac then asks update-status and
+  # the Agent Service queue only.
+  if [ -n "$out" ]; then printf '%s\n' "$out"; else echo unknown; fi
+}
 json_or_null() { if [ -s "$1" ]; then cat "$1"; else echo null; fi; }
 case "$cmd" in
   poweroff) echo ok; systemctl poweroff ;;
@@ -39,6 +49,7 @@ case "$cmd" in
   update-auto) owner_wam --apply-if-auto $(anyway) ;;
   update-now) owner_wam --apply $(anyway) ;;
   update-status) owner_wam ;;
+  work) owner_work ;;
   update-inbox)
     printf '{"request": %s, "postponed": %s}\n' "$(json_or_null $W/host-update-request.json)" \
       "$(json_or_null $W/host-update-postpone.json)" ;;

@@ -18,7 +18,9 @@ let package = Package(
         .target(name: "WizardNowPlaying", path: "Shared", exclude: ["Shared.swift"], sources: ["NowPlaying.swift"]),
         .testTarget(name: "WizardNowPlayingTests", dependencies: ["WizardNowPlaying"], path: "Tests/NowPlaying"),
         .target(name: "WizardDockApps", path: "Shared", exclude: ["Shared.swift"], sources: ["DockApps.swift"]),
-        .testTarget(name: "WizardDockAppsTests", dependencies: ["WizardDockApps"], path: "Tests/DockApps")
+        .testTarget(name: "WizardDockAppsTests", dependencies: ["WizardDockApps"], path: "Tests/DockApps"),
+        .target(name: "WizardStandardAdmission", path: "Shared", exclude: ["Shared.swift"], sources: ["StandardAdmission.swift"]),
+        .testTarget(name: "WizardStandardAdmissionTests", dependencies: ["WizardStandardAdmission"], path: "Tests/StandardAdmission")
     ],
     swiftLanguageModes: [.v5]
 )
