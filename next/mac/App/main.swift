@@ -1219,6 +1219,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard WizardShared.filesFolder != nil else { askFilesFolder(); return }
             guard WizardShared.osInstalled else { installOnThisMac(); return }
             guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
+            guard !WizardUpdater.shared.admitFreshGuestUpdate() else { return }   // try-wizard#137
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)
@@ -1449,6 +1450,9 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                 let bad = err.localizedDescription.contains("valid \(WizardOSName.text)")
                 self.showGetOS(note: bad ? err.localizedDescription : nil)
             } else {
+                // A fresh disk may predate this app's guest code: apply the bundled update before its first boot (try-wizard#137).
+                WizardUpdater.markFreshInstall()
+                if WizardUpdater.shared.admitFreshGuestUpdate() { return }
                 HostControl.send("start")
                 self.connectLocal()
             }
