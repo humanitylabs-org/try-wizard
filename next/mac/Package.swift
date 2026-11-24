@@ -20,7 +20,9 @@ let package = Package(
         .target(name: "WizardDockApps", path: "Shared", exclude: ["Shared.swift"], sources: ["DockApps.swift"]),
         .testTarget(name: "WizardDockAppsTests", dependencies: ["WizardDockApps"], path: "Tests/DockApps"),
         .target(name: "WizardStandardAdmission", path: "Shared", exclude: ["Shared.swift"], sources: ["StandardAdmission.swift"]),
-        .testTarget(name: "WizardStandardAdmissionTests", dependencies: ["WizardStandardAdmission"], path: "Tests/StandardAdmission")
+        .testTarget(name: "WizardStandardAdmissionTests", dependencies: ["WizardStandardAdmission"], path: "Tests/StandardAdmission"),
+        .target(name: "WizardDragRegions", path: "Shared", exclude: ["Shared.swift"], sources: ["DragRegions.swift"]),
+        .testTarget(name: "WizardDragRegionsTests", dependencies: ["WizardDragRegions"], path: "Tests/DragRegions")
     ],
     swiftLanguageModes: [.v5]
 )
