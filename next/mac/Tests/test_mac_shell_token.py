@@ -72,10 +72,12 @@ class MacShellToken(unittest.TestCase):
         self.assertIn('|| (release && code == 401 && body?["error"] as? String == "shell_token_required")', m)
 
     def test_guest_update_says_this_mac_app_sends_the_token(self):
-        caps = json.loads((ROOT / 'next/guest/overlay/opt/wizard/host-capabilities.json').read_text())
+        caps = json.loads((ROOT / 'next/guest/host-update/opt/wizard/host-capabilities.json').read_text())
         self.assertIs(caps['shell_token'], True)
         payload = (ROOT / 'next/guest/build-code-payload.py').read_text()
-        self.assertIn("'opt/wizard/host-capabilities.json',", block(payload, 'CODE = (', '\n)'))
+        self.assertIn("HOST_ONLY = ('opt/wizard/host-capabilities.json',)", payload)
+        # Never in the guest image: build-image.sh copies overlay/ whole, and an older Mac app may boot a newer image.
+        self.assertFalse((ROOT / 'next/guest/overlay/opt/wizard/host-capabilities.json').exists())
 
 
 if __name__ == '__main__':

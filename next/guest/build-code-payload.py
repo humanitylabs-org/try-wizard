@@ -53,10 +53,13 @@ CODE = (
     'etc/systemd/system/wizard-local-routes.timer',
     # A second DNS route next to the Mac's NAT DNS, so image pulls resolve on every Mac (try-wizard#155).
     'etc/systemd/resolved.conf.d/50-wizard-dns.conf',
-    # What this Mac app does for the guest: its own calls to owner routes carry the browser boundary's shell token,
-    # so the App Manager may turn the boundary on in a Mac guest too (wizard-os#133, wam browser_boundary.mac_guest).
-    'opt/wizard/host-capabilities.json',
 )
+# Files only a Mac app's own guest update installs, never the guest image (build-image.sh copies overlay/ whole, and an
+# older Mac app may boot a newer image). host-capabilities.json says what this Mac app does for the guest: its own
+# calls to owner routes carry the browser boundary's shell token, so the App Manager may turn the boundary on in this
+# Mac guest too (wizard-os#133, wizard-app-manager wam/browser_boundary.py mac_host_sends_token).
+HOST_UPDATE = GUEST / 'host-update'
+HOST_ONLY = ('opt/wizard/host-capabilities.json',)
 SKIP_PARTS = {'__pycache__', 'tests', 'testing', '.DS_Store'}
 
 
@@ -111,6 +114,14 @@ def build(out, source_rev=None):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(OVERLAY / member, dst)
             files['overlay/' + member] = sha(dst)
+    for rel in HOST_ONLY:
+        src = HOST_UPDATE / rel
+        if src.is_symlink() or not src.is_file():
+            raise SystemExit('Missing Mac guest update file: ' + rel)
+        dst = out / 'overlay' / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        files['overlay/' + rel] = sha(dst)
     bom = {'schema': 1, 'kind': 'code-only', 'architecture': 'arm64',
            'sources': {'source': source_rev or revision()},
            'recipe': 'try-wizard guest files only (setup page and Mac window door); no images, no agent changes',
