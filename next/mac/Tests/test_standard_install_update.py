@@ -26,8 +26,9 @@ class StandardInstallAdmission(unittest.TestCase):
         m = block(src, 'static func maintenance(', 'static func releaseMaintenance(')
         self.assertIn('onMissing: (() -> Void)? = nil', m)
         # Only a 404 on the lease request (never on release) and only for a caller that passes onMissing.
-        self.assertIn('if !release, code == 404, let onMissing {', m)
-        self.assertIn('removeItem(at: maintenanceJournal)', m.split('if !release, code == 404')[1].split('onMissing(); return')[0])
+        self.assertIn('let noLeaseRoute = code == 404 || (code == 401 && body?["error"] as? String == "shell_token_required")', m)
+        self.assertIn('if !release, noLeaseRoute, let onMissing {', m)
+        self.assertIn('removeItem(at: maintenanceJournal)', m.split('if !release, noLeaseRoute')[1].split('onMissing(); return')[0])
         # Everything else still refuses as before (Tests/LegacyAdmission: 404 without onMissing is refused).
         self.assertIn('done(ok ? nil : "Local maintenance deferred:', m)
 

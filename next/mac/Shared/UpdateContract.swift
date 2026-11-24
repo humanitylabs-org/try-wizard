@@ -149,9 +149,14 @@ enum WizardUpdate {
         URLSession.shared.dataTask(with: req) { data, response, _ in
             let body = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             let code = (response as? HTTPURLResponse)?.statusCode
-            let ok = code == (release ? 200 : 201) && body?["ok"] as? Bool == true
+            // wizard-os#133: a standard guest with the browser boundary on refuses the Mac's call for want of the
+            // shell token (401 shell_token_required) before it can say 404. Only the standard Agent Service has the
+            // boundary and it has no lease route, so this is the same answer as its 404: no lease here.
+            let noLeaseRoute = code == 404 || (code == 401 && body?["error"] as? String == "shell_token_required")
+            let ok = (code == (release ? 200 : 201) && body?["ok"] as? Bool == true)
+                || (release && code == 401 && body?["error"] as? String == "shell_token_required")
             DispatchQueue.main.async {
-                if !release, code == 404, let onMissing {
+                if !release, noLeaseRoute, let onMissing {
                     // No lease to hold or release later: drop the token so the Host's release loop doesn't retry it.
                     try? FileManager.default.removeItem(at: maintenanceJournal)
                     onMissing(); return

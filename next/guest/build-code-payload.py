@@ -53,6 +53,9 @@ CODE = (
     'etc/systemd/system/wizard-local-routes.timer',
     # A second DNS route next to the Mac's NAT DNS, so image pulls resolve on every Mac (try-wizard#155).
     'etc/systemd/resolved.conf.d/50-wizard-dns.conf',
+    # What this Mac app does for the guest: its own calls to owner routes carry the browser boundary's shell token,
+    # so the App Manager may turn the boundary on in a Mac guest too (wizard-os#133, wam browser_boundary.mac_guest).
+    'opt/wizard/host-capabilities.json',
 )
 SKIP_PARTS = {'__pycache__', 'tests', 'testing', '.DS_Store'}
 

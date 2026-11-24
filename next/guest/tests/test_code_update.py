@@ -77,7 +77,8 @@ class CodeOnlyPayload(unittest.TestCase):
                      'overlay/opt/wizard/bin/wizard-local-routes', 'overlay/opt/wizard/bin/wizard-shell-port',
                      'overlay/etc/systemd/system/wizard-local-proxy.service',
                      'overlay/etc/systemd/system/wizard-local-routes.timer',
-                     'overlay/etc/systemd/resolved.conf.d/50-wizard-dns.conf'):
+                     'overlay/etc/systemd/resolved.conf.d/50-wizard-dns.conf',
+                     'overlay/opt/wizard/host-capabilities.json'):
             self.assertIn(need, files)
         for path in files:
             self.assertNotIn('/tests/', path)
