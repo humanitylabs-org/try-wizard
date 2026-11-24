@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// The Mac window's title-bar drag strip (try-wizard#160, earlier wizard-os#548). Wizard's own top bar sits where a
 /// title bar would be, so a mouse-down on its blank space moves the window, and a mouse-down on anything the owner can
