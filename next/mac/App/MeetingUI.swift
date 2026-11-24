@@ -543,13 +543,14 @@ final class VoiceKeys {
         var req = URLRequest(url: url, timeoutInterval: 90); req.httpMethod = "POST"
         req.setValue("audio/wav", forHTTPHeaderField: "Content-Type"); req.setValue("wizard-dictation.wav", forHTTPHeaderField: "X-Wizard-Filename")
         req.httpBody = wav
-        URLSession.shared.dataTask(with: req) { data, resp, err in
+        // An owner route: on a Wizard with the browser boundary on it needs the shell token (wizard-os#133).
+        WizardShellToken.send(req) { data, resp, err in
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             let text = (j?["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             MeetingLog.log("dictation: HTTP \(code), \(text?.count ?? 0) chars, provider \(j?["provider"] as? String ?? "-")")
             DispatchQueue.main.async { done(code == 200 ? text : nil, code == 200 ? nil : (err?.localizedDescription ?? "Transcription failed (\(code))")) }
-        }.resume()
+        }
     }
 
     /// Type into the focused app: put the text on the pasteboard, ⌘V, then restore the clipboard.

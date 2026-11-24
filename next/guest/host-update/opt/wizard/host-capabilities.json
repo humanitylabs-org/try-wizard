@@ -1,0 +1,4 @@
+{
+  "about": "What the Mac app that installed this guest update does for the guest (wizard-os#133). Shipped only inside a WizardOS for Mac release, so it is here only once that Mac app runs the VM.",
+  "shell_token": true
+}

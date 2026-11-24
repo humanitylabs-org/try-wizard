@@ -41,8 +41,9 @@ stamp network
 # then runs get.sh as that user: clone wizard-app-manager main, install.sh (Runtipi box-only, wam, defaults).
 curl -fsSL "$OS_SH_URL" -o /tmp/os.sh || fail "download os.sh"
 sha256sum /tmp/os.sh
-# Browser boundary off on the Mac guest for now (wizard-os#133): a new Linux box starts with it on, but the guest's
-# setup page (opt/wizard/setup/server.py) calls the owner API on loopback without the shell token yet.
+# Browser boundary off when the Mac guest image is built (wizard-os#133): any Mac app version may boot this image, and
+# an older one calls the guest's owner routes without the shell token. The guest follows like a box installed before
+# once a Mac app that sends the token has installed its guest update (/opt/wizard/host-capabilities.json).
 WAM_IMAGE="$WAM_IMAGE" WIZARD_PRIVATE_ACCESS=tailscale WIZARD_BROWSER_BOUNDARY=0 bash /tmp/os.sh </dev/null || fail "os.sh exited $?"
 stamp os_sh
 # Pin: os.sh installs whatever main is today; if main moved past the pinned commit, re-run install.sh there.

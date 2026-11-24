@@ -24,7 +24,9 @@ let package = Package(
         .target(name: "WizardDragRegions", path: "Shared", exclude: ["Shared.swift"], sources: ["DragRegions.swift"]),
         .testTarget(name: "WizardDragRegionsTests", dependencies: ["WizardDragRegions"], path: "Tests/DragRegions"),
         .target(name: "WizardBundledGuestUpdate", path: "Shared", exclude: ["Shared.swift"], sources: ["BundledGuestUpdate.swift"]),
-        .testTarget(name: "WizardBundledGuestUpdateTests", dependencies: ["WizardBundledGuestUpdate"], path: "Tests/BundledGuestUpdate")
+        .testTarget(name: "WizardBundledGuestUpdateTests", dependencies: ["WizardBundledGuestUpdate"], path: "Tests/BundledGuestUpdate"),
+        .target(name: "WizardShellToken", path: "Shared", exclude: ["Shared.swift"], sources: ["ShellToken.swift"]),
+        .testTarget(name: "WizardShellTokenTests", dependencies: ["WizardShellToken"], path: "Tests/ShellToken")
     ],
     swiftLanguageModes: [.v5]
 )
