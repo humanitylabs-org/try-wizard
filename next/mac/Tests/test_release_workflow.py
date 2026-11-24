@@ -115,6 +115,32 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertNotIn('secrets.', tag)
         self.assertNotIn('environment:', tag)
 
+    def test_tag_step_creates_a_missing_tag(self):
+        """gh api prints the 404 body on stdout, so a missing tag must not be read as an existing one (try-wizard#118)."""
+        import os, subprocess, tempfile
+        tag_job = jobs()['tag']
+        script = tag_job.split('run: |\n', 1)[1]
+        script = '\n'.join(line[10:] for line in script.splitlines())
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / 'calls'
+            stub = Path(tmp) / 'gh'
+            stub.write_text('#!/bin/bash\n'
+                            'echo "$*" >> "$LOG"\n'
+                            'if [[ "$1 $2" == "api repos/o/r/git/ref/tags/v9.9.9" ]]; then\n'
+                            '  echo \'{"message":"Not Found","status":"404"}\'; exit 1\n'
+                            'fi\n'
+                            'if [[ "$1 $2" == "release view" ]]; then exit 1; fi\n'
+                            'exit 0\n')
+            stub.chmod(0o755)
+            env = dict(os.environ, PATH=f'{tmp}:{os.environ["PATH"]}', LOG=str(log), GITHUB_REPOSITORY='o/r',
+                       GITHUB_SHA='a' * 40, GITHUB_SERVER_URL='https://github.com', GITHUB_RUN_ID='1',
+                       DOWNLOADS='https://downloads.example', VERSION='9.9.9', BUILD='999', GH_TOKEN='x')
+            run = subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            calls = log.read_text()
+            self.assertIn('api repos/o/r/git/refs -f ref=refs/tags/v9.9.9 -f sha=' + 'a' * 40, calls)
+            self.assertIn('release create v9.9.9', calls)
+
     def test_sparkle_is_the_verified_upstream_release(self):
         pinned = re.search(r"SPARKLE_SHA256:\s*([0-9a-f]{64})", WORKFLOW.read_text()).group(1)
         self.assertIn(pinned, (ROOT / 'next/mac/UPDATER.md').read_text())

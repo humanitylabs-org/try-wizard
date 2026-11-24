@@ -401,7 +401,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$VERSION"
-          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          # gh prints the 404 body on stdout, so a failed lookup must read as "no tag" (try-wizard#118).
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null) || existing=''
           if [[ -z "$existing" ]]; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
           elif [[ "$existing" != "$GITHUB_SHA" ]]; then
