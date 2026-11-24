@@ -619,10 +619,12 @@ struct LocalVoiceStatus: Decodable {
 
 /// A hit-test-only overlay. Controls and everything below the header fall through
 /// to WebKit; blank header space never receives a web text-selection mouseDown.
+/// Which points drag is Shared/DragRegions.swift (try-wizard#160).
 final class WizardDragView: NSView {
     weak var owner: WizardWindowController?
-    var header = NSRect.zero
-    var controls: [NSRect] = []
+    var regions = WizardDragRegions.Regions()
+    var header: CGRect { regions.header }
+    var controls: [CGRect] { regions.controls }
     private(set) var dragCount = 0
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
@@ -631,9 +633,10 @@ final class WizardDragView: NSView {
         guard let owner, owner.window?.styleMask.contains(.fullScreen) == false else { return nil }
         let p = convert(point, from: superview)
         // Keep the native traffic lights and their hover target untouched.
-        if p.x < 96 && p.y < 32 { return nil }
+        if WizardDragRegions.inWindowButtons(p) { return nil }
         if !owner.overlay.isHidden { return p.y < 28 ? self : nil }
-        guard owner.isTrustedDocument, header.contains(p), !controls.contains(where: { $0.contains(p) }) else { return nil }
+        guard owner.isTrustedDocument,
+              WizardDragRegions.drags(regions, at: p, pageZoom: owner.web.pageZoom, viewSize: bounds.size) else { return nil }
         return self
     }
     override func mouseDown(with event: NSEvent) {
@@ -657,31 +660,7 @@ final class WizardDragView: NSView {
                                           y: frame.minY + screen.y - start.y))
         }
     }
-    static let script = """
-    (() => {
-      let pending = false;
-      const rect = e => { const r=e.getBoundingClientRect(); return [r.x,r.y,r.width,r.height]; };
-      const update = () => {
-        pending=false;
-        const bar=document.querySelector('header#bar.bar');
-        const header=bar ? rect(bar) : [0,0,innerWidth,28];
-        const elements=(bar || document).querySelectorAll('button,a,input,select,textarea,summary,[role="button"],[tabindex],[contenteditable],[data-ws],#voicePill');
-        const params={header,controls:[...elements].filter(e=>e.getClientRects().length && e.getBoundingClientRect().top < header[3]).map(rect)};
-        window.webkit.messageHandlers.wizardNative.postMessage({method:'chrome.regions',params});
-      };
-      // RAF can be suspended while the native window is occluded/headless.
-      // Geometry is an input contract and must not depend on compositor frames.
-      const schedule = () => { if (!pending) { pending=true; setTimeout(update,0); } };
-      addEventListener('DOMContentLoaded', () => {
-        const bar=document.querySelector('header#bar.bar');
-        if (bar) new MutationObserver(schedule).observe(bar,{subtree:true,childList:true,attributes:true});
-        new ResizeObserver(schedule).observe(document.documentElement);
-        document.fonts.ready.then(schedule);
-        schedule();
-      }, {once:true});
-      addEventListener('resize',schedule); addEventListener('scroll',schedule,true);
-    })();
-    """
+    static let script = WizardDragRegions.script
 }
 
 /// After Bring My Hermes, the AI runs only through Wizard's own Claude/ChatGPT connections (James, 31 Oct,
@@ -1538,7 +1517,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     }
 
     func load(_ url: URL) {
-        dragView.header = .zero; dragView.controls = []
+        dragView.regions = WizardDragRegions.Regions()
         loadedAt = nil
         web.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
     }
@@ -1552,7 +1531,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
     var resolvedOrigins: Set<String> = []
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        dragView.header = .zero; dragView.controls = []
+        dragView.regions = WizardDragRegions.Regions()
     }
 
     /// Bumped when a new main-frame document commits; NativeBridge binds every reply to the generation it was asked in.
@@ -1902,17 +1881,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
                                                fullScreen: window.styleMask.contains(.fullScreen))
         web.evaluateJavaScript(WizardTitleBarInset.script(left: left))
     }
+    /// The page's title-bar report (CSS px, see WizardDragRegions); only the top header may move the window.
     func updateDragRegions(_ params: [String: Any]) {
-        func rect(_ values: [Double]) -> NSRect? {
-            guard values.count == 4, values.allSatisfy({ $0.isFinite }), values[2] >= 0, values[3] >= 0 else { return nil }
-            return NSRect(x: values[0], y: values[1], width: values[2], height: values[3])
-        }
-        guard let h = params["header"] as? [Double], let header = rect(h),
-              let controls = params["controls"] as? [[Double]] else { return }
-        // Only the top header may delegate dragging, never the desktop/composer.
-        guard header.minY >= 0, header.minY < 2, header.height <= 100 else { return }
-        dragView.header = header.intersection(dragView.bounds)
-        dragView.controls = controls.prefix(100).compactMap(rect).map { $0.insetBy(dx: -2, dy: -2) }
+        guard let regions = WizardDragRegions.parse(params) else { return }
+        dragView.regions = regions
     }
 }
 
