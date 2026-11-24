@@ -234,6 +234,150 @@ final class NoticeBarView: NSView {
     // Later also stops a waiting update from asking again (waitThenRetry): the owner presses Update and restart anew.
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0; waitToken = UUID(); waitingSince = nil }
 
+    // MARK: Hand install: the guest update this app carries and this disk hasn't received (try-wizard#162)
+
+    /// An app dragged in from the DMG over an existing Wizard has no Sparkle journal and no fresh-install marker, so
+    /// its guest update never ran. Written before an automatic try, so a failed one is offered, never looped.
+    static var handInstallMarker: URL { WizardUpdate.dir.appendingPathComponent("hand-install.json") }
+    static let finishText = "Finish updating Wizard (about a minute)"
+    private func bundledGuestDecision() -> (WizardBundledGuestUpdate.Decision, WizardRelease?) {
+        guard let release = try? WizardRelease.read(Bundle.main.bundleURL) else { return (.received, nil) }
+        let carries = release.guestPatch == "mac-stack-v1" && FileManager.default.fileExists(
+            atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/GuestUpdate/runtime-bom.json").path)
+        let decision = WizardBundledGuestUpdate.decide(releaseID: release.releaseID, carriesGuest: carries,
+            diskIdentity: WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img")),
+            receipt: WizardUpdate.json(WizardUpdate.dir.appendingPathComponent("guest-receipt.json")),
+            journal: WizardUpdate.json(WizardUpdate.journal), marker: WizardUpdate.json(Self.handInstallMarker))
+        return (decision, release)
+    }
+    /// Called on every local start after the legacy and fresh-install checks. True while the update runs (the
+    /// window waits; onGuestFinished calls begin() again). With the Host already running, something recording, or
+    /// a try that already failed, Wizard starts as usual and the bar offers "Finish updating Wizard".
+    func admitBundledGuestUpdate() -> Bool {
+        guard Store.active?.kind == .thisMac, WizardShared.osInstalled else { return false }
+        if activatingGuest { return true }
+        guard !preparing, !handoverActive else { return false }
+        let (decision, release) = bundledGuestDecision()
+        guard decision != .received, let release else { return false }
+        if decision == .applyNow, !HostControl.isRunning, !HostControl.hasForeignRunner, !isRecording(), !qaBusy {
+            return applyBundledGuest(release, automatic: true)
+        }
+        offerBundledGuest()
+        return false
+    }
+    private func offerBundledGuest(_ text: String = WizardUpdater.finishText) {
+        // Keep a failure the owner hasn't read yet (e.g. a fresh-install try), and add the way forward to it.
+        if phase == "failed", !view.isHidden, !message.isEmpty { show("guest-pending", "\(message) \(text).", button: "Finish updating"); return }
+        show("guest-pending", text, button: "Finish updating")
+    }
+    /// The bar's Finish updating: never during a recording or an unfinished chat; the Host stops WizardOS only when
+    /// nothing runs there (the same prepare-update an in-app update uses), then the update runs.
+    func finishBundledGuestUpdate() {
+        guard !preparing, !activatingGuest, Store.active?.kind == .thisMac, WizardShared.osInstalled else { return }
+        let (decision, release) = bundledGuestDecision()
+        guard decision != .received, let release else { hideNotice(); return }
+        if isRecording() || qaBusy { offerBundledGuest("Recording is on. When it ends: \(Self.finishText)"); return }
+        if HostControl.hasForeignRunner { show("busy", "Another candidate's Wizard Host is running — close that candidate, then finish updating"); return }
+        preparing = true
+        admitWebRestart { [weak self] idle in
+            guard let self, self.preparing else { return }
+            guard idle, !self.isRecording(), !self.qaBusy else {
+                self.preparing = false; self.onFreeze(false)
+                self.offerBundledGuest("Let the chat finish or the recording end, then: \(Self.finishText)"); return
+            }
+            guard HostControl.isRunning else { self.preparing = false; self.applyBundledGuest(release, automatic: false); return }
+            WizardUpdate.idle { [weak self] reason in
+                guard let self, self.preparing else { return }
+                if let reason { self.bundledStopRefused(reason); return }
+                guard WizardUpdate.json(WizardShared.statusFile)["hostProtocol"] as? Int == WizardRelease.peer else {
+                    self.bundledStopRefused("The running Wizard Host is from another version. Quit Wizard from its menu-bar icon and open it again"); return
+                }
+                let nonce = UUID().uuidString
+                do {
+                    try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                    try WizardUpdate.write(["nonce": nonce, "pid": getpid(), "peer": WizardRelease.peer, "expires": Date().timeIntervalSince1970 + 110,
+                                            "appPath": Bundle.main.bundleURL.standardizedFileURL.path], WizardUpdate.request)
+                } catch { self.bundledStopRefused(error.localizedDescription); return }
+                self.onFreeze(true)
+                let text = "Stopping \(WizardOSName.text) safely to finish updating…"
+                self.show("stopping", text); self.onActivationStatus(text, false)
+                HostControl.send("prepare-update")
+                self.waitForBundledStop(nonce, release, Date().addingTimeInterval(105))
+            }
+        }
+    }
+    private func waitForBundledStop(_ nonce: String, _ release: WizardRelease, _ deadline: Date) {
+        let response = WizardUpdate.json(WizardUpdate.response)
+        if response["nonce"] as? String == nonce {
+            let state = response["state"] as? String
+            if state == "busy" { bundledStopRefused(response["error"] as? String ?? "Wizard is working"); return }
+            if state == "failed" { bundledStopRefused(response["error"] as? String ?? "\(WizardOSName.text) could not stop safely"); return }
+            if state == "stopped", !HostControl.isRunning {
+                try? FileManager.default.removeItem(at: WizardUpdate.request)
+                preparing = false; applyBundledGuest(release, automatic: false); return
+            }
+        }
+        guard Date() < deadline else { bundledStopRefused("\(WizardOSName.text) didn't confirm it stopped"); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.waitForBundledStop(nonce, release, deadline) }
+    }
+    /// Nothing changed on the disk: Wizard carries on as it was and the bar keeps the offer.
+    private func bundledStopRefused(_ reason: String) {
+        try? FileManager.default.removeItem(at: WizardUpdate.request)
+        preparing = false; onFreeze(false)
+        if !HostControl.isRunning { onGuestFinished() }   // begin() again: it starts WizardOS (or applies, now it's stopped)
+        if phase != "guest-activating", !activatingGuest { offerBundledGuest("\(reason). Then: \(Self.finishText)") }
+    }
+    /// The same safe path as an in-app update and the fresh-install update: stopped-disk APFS clone, a journal for
+    /// this release, apply-guest-update in a maintenance boot, the receipt on success, the clone put back on failure.
+    @discardableResult private func applyBundledGuest(_ release: WizardRelease, automatic: Bool) -> Bool {
+        let ownership = WizardDiskOwnership()
+        do {
+            try ownership.acquire()
+            try release.validate(Bundle.main.bundleURL)
+            guard !HostControl.isRunning, !HostControl.hasForeignRunner, !isRecording(), !qaBusy else {
+                throw WizardUpdate.error("Wizard started working; nothing was changed")
+            }
+            try FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try WizardUpdate.write(["releaseID": release.releaseID, "diskIdentity": WizardShared.diskIdentity, "state": "attempted",
+                                    "automatic": automatic, "at": Date().timeIntervalSince1970], Self.handInstallMarker)
+            leaseFD = open(WizardUpdate.dir.appendingPathComponent("lease").path, O_CREAT | O_RDWR, 0o600)
+            guard leaseFD >= 0, flock(leaseFD, LOCK_EX | LOCK_NB) == 0 else { throw WizardUpdate.error("Another update owns this disk") }
+            preparing = true; activatingGuest = true; onFreeze(true)
+            try WizardGuestActivation.snapshotStoppedDisk()
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+            try WizardUpdate.write(["kind": "hand-install", "phase": "installing", "nonce": UUID().uuidString,
+                "diskIdentity": WizardShared.diskIdentity, "dataHome": WizardShared.supportDir.path,
+                "appPath": Bundle.main.bundleURL.path, "releaseID": release.releaseID,
+                "from": build, "to": build, "guestPatch": true, "applyGuest": true], WizardUpdate.journal)
+            ownership.release()
+            WizardGuestActivation.shared.onProgress = { [weak self] text in
+                self?.show("guest-activating", text)
+                self?.onActivationStatus("Finishing the update of \(WizardOSName.text) on this Mac (about a minute)…", false)
+            }
+            WizardGuestActivation.shared.onDone = { [weak self] error in
+                guard let self else { return }
+                self.activatingGuest = false; self.releaseLease()
+                if error == nil { WizardRollbackCleanup.start() }
+                self.onGuestFinished()
+                if let error {
+                    let rolledBack = WizardUpdate.json(WizardUpdate.journal)["phase"] as? String == "guest-rolled-back"
+                    self.show("guest-pending", "Wizard couldn't finish updating (\(error)). "
+                              + (rolledBack ? "Your previous \(WizardOSName.text) disk is back, with your data. " : "Your previous disk is kept. ")
+                              + Self.finishText + " again later.", button: "Try again")
+                } else {
+                    self.show("installed", "Wizard finished updating — build \(build)")
+                }
+            }
+            WizardGuestActivation.shared.activate()
+            return true
+        } catch {
+            ownership.release(); activatingGuest = false; releaseLease()
+            NSLog("Wizard: bundled guest update deferred: %@", error.localizedDescription)
+            offerBundledGuest("\(error.localizedDescription). \(Self.finishText)")
+            return false
+        }
+    }
+
     // MARK: WizardOS updates (Host/OSUpdates.swift runs them; this shows them and says when Wizard is recording)
 
     private var osUpdatesDir: URL { WizardShared.supportDir.appendingPathComponent("os-updates", isDirectory: true) }
@@ -266,13 +410,14 @@ final class NoticeBarView: NSView {
     /// window included; the window adds no notice of its own.
     private func osUpdateTick() {}
     private var noticeToken = UUID()
-    private func show(_ state: String, _ text: String, retry: Bool = false) {
+    private func show(_ state: String, _ text: String, retry: Bool = false, button: String? = nil) {
         phase = state; message = text; label.stringValue = text
         view.isHidden = false; height?.constant = 94
-        action.title = retry ? "Retry" : "Update and restart"
-        action.isEnabled = retry || ready != nil && !preparing
-        // Offer the button only when it can do something (a ready update or a retry), not greyed out under news.
-        action.isHidden = !(retry || ready != nil)
+        action.title = button ?? (retry ? "Retry" : "Update and restart")
+        action.isEnabled = button != nil && !preparing || retry || ready != nil && !preparing
+        // Offer the button only when it can do something (a ready update, a retry, finishing an update), not greyed
+        // out under news.
+        action.isHidden = !(button != nil || retry || ready != nil)
         later.isEnabled = !preparing
         try? WizardUpdate.write(snapshot, WizardUpdate.dir.appendingPathComponent("ui.json"))
         // Good news needs no answer: let it go by itself unless something newer replaced it.
@@ -299,6 +444,7 @@ final class NoticeBarView: NSView {
     }
     @objc func updateAndRestart() {
         if phase == "host-recovery" { _ = retryHostHandover(); return }
+        if phase == "guest-pending" && ready == nil { finishBundledGuestUpdate(); return }   // try-wizard#162
         if ready == nil { checkForUpdates(); return }
         guard !preparing else { return }
         if isRecording() || qaBusy { waitThenRetry("Recording or agent work is active — updates when it finishes"); return }
