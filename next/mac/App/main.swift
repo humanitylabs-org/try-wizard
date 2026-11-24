@@ -1199,6 +1199,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             guard WizardShared.osInstalled else { installOnThisMac(); return }
             guard !WizardUpdater.shared.admitLegacyBootstrap() else { return }
             guard !WizardUpdater.shared.admitFreshGuestUpdate() else { return }   // try-wizard#137
+            guard !WizardUpdater.shared.admitBundledGuestUpdate() else { return }   // try-wizard#162
             connectLocal()
         case .remote:
             showOverlay("Connecting…", backend.name, spinning: true)

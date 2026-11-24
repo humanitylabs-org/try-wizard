@@ -22,7 +22,9 @@ let package = Package(
         .target(name: "WizardStandardAdmission", path: "Shared", exclude: ["Shared.swift"], sources: ["StandardAdmission.swift"]),
         .testTarget(name: "WizardStandardAdmissionTests", dependencies: ["WizardStandardAdmission"], path: "Tests/StandardAdmission"),
         .target(name: "WizardDragRegions", path: "Shared", exclude: ["Shared.swift"], sources: ["DragRegions.swift"]),
-        .testTarget(name: "WizardDragRegionsTests", dependencies: ["WizardDragRegions"], path: "Tests/DragRegions")
+        .testTarget(name: "WizardDragRegionsTests", dependencies: ["WizardDragRegions"], path: "Tests/DragRegions"),
+        .target(name: "WizardBundledGuestUpdate", path: "Shared", exclude: ["Shared.swift"], sources: ["BundledGuestUpdate.swift"]),
+        .testTarget(name: "WizardBundledGuestUpdateTests", dependencies: ["WizardBundledGuestUpdate"], path: "Tests/BundledGuestUpdate")
     ],
     swiftLanguageModes: [.v5]
 )

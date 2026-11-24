@@ -164,6 +164,9 @@ import Darwin
                     let receiptURL = WizardUpdate.dir.appendingPathComponent("guest-receipt.json")
                     var receipt = WizardUpdate.json(receiptURL)
                     receipt["diskIdentity"] = identity; receipt["transactionNonce"] = nonce
+                    // Name the release whose guest update this disk now has (try-wizard#162), so a later start of
+                    // the same app knows it arrived and an app installed by hand knows it didn't.
+                    if let releaseID = journal["releaseID"] as? String, !releaseID.isEmpty { receipt["releaseID"] = releaseID }
                     try WizardUpdate.write(receipt, receiptURL)
                     journal["diskIdentity"] = identity; journal["phase"] = "guest-activated"
                     try WizardUpdate.write(journal, WizardUpdate.journal)
