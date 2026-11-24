@@ -11,6 +11,8 @@ def load_routes():
  spec=importlib.util.spec_from_loader(loader.name,loader);m=importlib.util.module_from_spec(spec);loader.exec_module(m);return m
 class Upstream(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
+  if self.path.endswith('/redirect'):   # an app's redirect built from the Host it was given
+   self.send_response(302);self.send_header('Location',f"https://{self.headers['Host']}/files/x");self.end_headers();return
   self.send_response(200);self.end_headers()
   self.wfile.write(json.dumps({'port':self.server.server_port,'path':self.path,'login':self.headers.get('Tailscale-User-Login',''),'fwd':self.headers.get('X-Forwarded-For',''),'origin':self.headers.get('Origin',''),'host':self.headers.get_all('Host',[])}).encode())
  def log_message(self,*args):pass
@@ -39,7 +41,8 @@ class Ingress(unittest.TestCase):
   from urllib.parse import urlsplit
   tree=ast.parse((CONFIG.parent/'setup/server.py').read_text())
   function=next(node for node in tree.body if isinstance(node,ast.AsyncFunctionDef) and node.name=='shell')
-  namespace={'Any':object,'urlsplit':urlsplit,'PUBLIC_UX_ORIGIN':'http://127.0.0.1:48023','SHELL_ORIGIN':'http://127.0.0.1:8924'}
+  namespace={'Any':object,'urlsplit':urlsplit,'PUBLIC_UX_ORIGIN':'http://127.0.0.1:48023','SHELL_ORIGIN':'http://127.0.0.1:8924',
+   'shell_token_headers':lambda:{}}   # the box's shell token (read from a file) is not part of this check
   calls=[]
   async def request(*args):calls.append(args);return (200,{'ok':True})
   namespace['_request']=request
@@ -107,9 +110,13 @@ class Ingress(unittest.TestCase):
     body=window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})
     self.assertEqual((body['port'],body['fwd'],body['origin']),(shell.server_port,'wizard-mac-window','http://127.0.0.1:48023'))
     # try-wizard#117: the Host goes with the rewritten Origin (apps that check Origin against Host, like the Claude
-    # connection app, refused every window write), exactly once; everything else keeps the window's Host.
+    # connection app, refused every window write), exactly once; a cross-site Origin keeps the window's Host.
     self.assertEqual(window('/files/x',{'Origin':'http://127.0.0.1:48023'})['host'],['box.example-tailnet.ts.net:8796'])
-    self.assertEqual(window('/files/x',{})['host'],['127.0.0.1:48023'])
+    # A window page load (no Origin) gets Serve's Host too: builder-made apps trust only Serve's Host (WIZARD_TRUSTED_HOSTS)
+    # and answered "Unknown host." in the Mac window. Their redirects come back to the window's own address.
+    self.assertEqual(window('/files/x',{})['host'],['box.example-tailnet.ts.net:8796'])
+    c=UnixHTTP('localhost',timeout=2);c.request('GET','/files/redirect',headers={'Host':'127.0.0.1:48023'});r=c.getresponse();r.read();c.close()
+    self.assertEqual((r.status,r.getheader('Location')),(302,'http://127.0.0.1:48023/files/x'))
     self.assertEqual(window('/files/x',{'Origin':'https://attacker.test'})['host'],['127.0.0.1:48023'])
     self.assertEqual(window('/wizard/v1/agents',{'Origin':'http://127.0.0.1:48023'})['host'],['127.0.0.1:48023'])
     self.assertEqual(request('127.0.0.1:48023','/files/x',{'Origin':'http://127.0.0.1:48023'})[1]['port'],shell.server_port)
