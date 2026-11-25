@@ -26,7 +26,9 @@ let package = Package(
         .target(name: "WizardBundledGuestUpdate", path: "Shared", exclude: ["Shared.swift"], sources: ["BundledGuestUpdate.swift"]),
         .testTarget(name: "WizardBundledGuestUpdateTests", dependencies: ["WizardBundledGuestUpdate"], path: "Tests/BundledGuestUpdate"),
         .target(name: "WizardShellToken", path: "Shared", exclude: ["Shared.swift"], sources: ["ShellToken.swift"]),
-        .testTarget(name: "WizardShellTokenTests", dependencies: ["WizardShellToken"], path: "Tests/ShellToken")
+        .testTarget(name: "WizardShellTokenTests", dependencies: ["WizardShellToken"], path: "Tests/ShellToken"),
+        .target(name: "WizardOSDownload", path: "Shared", exclude: ["Shared.swift"], sources: ["OSDownload.swift"]),
+        .testTarget(name: "WizardOSDownloadTests", dependencies: ["WizardOSDownload"], path: "Tests/OSDownload")
     ],
     swiftLanguageModes: [.v5]
 )

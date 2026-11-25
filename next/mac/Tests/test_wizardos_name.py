@@ -71,8 +71,8 @@ class WizardOSNameTests(unittest.TestCase):
         for text in ('"Get \\(WizardOSName.text)"', '"Download \\(WizardOSName.text)"',
                      '"Install \\(WizardOSName.text) from File…"', '"\\(WizardOSName.text) didn\'t start"'):
             self.assertIn(text, main)
-        # The corrupt-file check matches the error it built, whichever name is on.
-        self.assertIn('contains("valid \\(WizardOSName.text)")', main)
+        # Every install error, the corrupt-file one included, is shown as it was built (try-wizard#177).
+        self.assertIn('self.showGetOS(note: err.localizedDescription)', main)
         self.assertIn('"This file isn\'t a valid \\(WizardOSName.text) image.', main)
         keys = (MAC / 'App/WizardKeys.swift').read_text()
         self.assertIn('"Restart \\(WizardOSName.text)"', keys)
