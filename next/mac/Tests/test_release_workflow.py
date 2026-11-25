@@ -4,7 +4,10 @@ signing job that runs no project code, and publishes from a separate job (try-wi
 import base64
 import importlib.util
 import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 import xml.etree.ElementTree as X
 from pathlib import Path
@@ -132,6 +135,58 @@ class ReleaseWorkflow(unittest.TestCase):
         for path in ('/.github/', '/next/mac/tools/stage-release.py', '/next/mac/tools/make-update-feed.py',
                      '/next/mac/release/sparkle-public-key.txt'):
             self.assertRegex(owners, r'(?m)^' + re.escape(path) + r'\s+@\w')
+
+
+FAKE_GH = r"""#!/usr/bin/env bash
+echo "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "api repos/o/r/git/ref/tags/v1.2.3")
+    if [[ -n "${GH_TAG_SHA:-}" ]]; then echo "$GH_TAG_SHA"; exit 0; fi
+    echo '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/git/refs#get-a-reference","status":"404"}'
+    echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+  "api repos/o/r/git/refs") echo '{}'; exit 0 ;;
+  "release view") exit 1 ;;
+  "release create") exit 0 ;;
+esac
+exit 3
+"""
+
+
+class TagStep(unittest.TestCase):
+    """Runs the tag job's own script with a fake gh that answers like gh 2.10x does (try-wizard#182)."""
+
+    def run_step(self, tag_sha=''):
+        script = re.search(r'(?ms)^        run: \|\n(.*)', jobs()['tag']).group(1)
+        script = '\n'.join(line[10:] for line in script.splitlines())
+        with tempfile.TemporaryDirectory(prefix='try-wizard-182-') as tmp:
+            gh = Path(tmp, 'gh')
+            gh.write_text(FAKE_GH)
+            gh.chmod(0o755)
+            log = Path(tmp, 'gh.log')
+            env = dict(os.environ, PATH=f'{tmp}:{os.environ["PATH"]}', GH_LOG=str(log), GH_TAG_SHA=tag_sha,
+                       GITHUB_REPOSITORY='o/r', GITHUB_SHA='a' * 40, GITHUB_RUN_ID='1',
+                       GITHUB_SERVER_URL='https://github.com', VERSION='1.2.3', BUILD='400',
+                       DOWNLOADS='https://downloads.example')
+            done = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+            return done, (log.read_text() if log.exists() else '')
+
+    def test_missing_tag_is_created_and_released(self):
+        done, log = self.run_step()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn(f'api repos/o/r/git/refs -f ref=refs/tags/v1.2.3 -f sha={"a" * 40}', log)
+        self.assertIn('release create v1.2.3', log)
+
+    def test_tag_at_the_release_commit_passes_without_a_new_tag(self):
+        done, log = self.run_step('a' * 40)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotIn('git/refs -f', log)
+        self.assertIn('release create v1.2.3', log)
+
+    def test_tag_at_another_commit_stops(self):
+        done, log = self.run_step('b' * 40)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('already points at ' + 'b' * 40, done.stdout)
+        self.assertNotIn('git/refs -f', log)
 
 
 class StageRelease(unittest.TestCase):
