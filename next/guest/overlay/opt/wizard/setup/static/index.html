@@ -110,7 +110,7 @@
   <section data-step="2" class="hidden">
     <h1>Connect <span class="wname">its</span> brain</h1>
     <p class="lead" id="lead2">Your Wizard thinks with a language model. Pick how it connects. You can change this later.</p>
-    <!-- Private first (try-wizard#134, wizard-os DECISIONS #115; on for every fresh Mac): Tinfoil
+    <!-- Private first (try-wizard#134, wizard-os DECISIONS #115; when the Mac or the box asks, try-wizard#171): Tinfoil
          leads and is the only brain here; its sign-in is the wizard-tinfoil app's own, in the Welcome that follows. -->
     <div class="choices hidden" id="pfChoices">
       <button class="choice" data-kind="private"><span class="ico">🔒</span><div><b>Tinfoil</b><span>Private AI. You sign in to Tinfoil in the next step.</span></div><span class="tag">Recommended</span></button>
@@ -186,7 +186,7 @@ let codexTimer = null
 let codexGeneration = 0
 let codexAttempt = sessionStorage.getItem('wizardCodexAttempt')
 let codexQueue = Promise.resolve()
-// Private first (try-wizard#134): the Mac always opens this page with ?private_first=1.
+// Private first (try-wizard#134): the Mac opens this page with ?private_first=1 unless its StandardFirstSetup switch is on (#171).
 const pfAsked = (() => { try { return new URLSearchParams(location.search).get('private_first') === '1' } catch { return false } })()
 let pf = { on: false }
 
