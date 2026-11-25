@@ -701,14 +701,12 @@ enum WizardPrivateFirstSetup {
 }
 
 /// Maps may use the Mac's location (try-wizard#135, part of wizard-ux#1629). WebKit asks the app before any page
-/// gets `navigator.geolocation`; without an answer it is always denied. With this switch on, the app answers only for
+/// gets `navigator.geolocation`; without an answer it is always denied. The app answers only for
 /// the Wizard's own shell page and the Wizard's own addresses, shows macOS's own location prompt first and grants
 /// only if the owner accepts (decisions in Shared/AppLocation.swift). The shell's `wizard/app-location` switch decides
 /// which app frame may ask at all (only an app that declared `permissions: [geolocation]`, today Maps).
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp AppLocation -bool YES` turns it on.
+/// On for every Mac (try-wizard#135 approved); the old `AppLocation` switch is gone.
 enum WizardAppLocation {
-    static let key = "AppLocation"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
     /// Installed apps on This Mac open from their own address (`localhost`, same port as the shell).
     static var thisMacAppsOrigin: NativeOrigin? { NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort)) }
 }
@@ -1788,7 +1786,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         decisionHandler(allowed ? .grant : .deny)
     }
 
-    // MARK: Location for Maps (try-wizard#135; off unless the AppLocation switch is on)
+    // MARK: Location for Maps (try-wizard#135)
     private lazy var locationConsent = WizardLocationConsent()
 
     /// The Wizard's own addresses: the shell, and on This Mac the installed apps' `localhost` address.
@@ -1807,10 +1805,10 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     private func decideLocation(_ origin: WKSecurityOrigin, _ answer: @escaping (Bool) -> Void) {
         let wizardAddress = NativeOrigin(origin).map { wizardLocationOrigins.contains($0) } ?? false
-        let on = WizardAppLocation.isOn
-        // Never create a CLLocationManager with the switch off: macOS then never hears about location at all.
-        let access: WizardAppLocationRule.Access = on ? locationConsent.access : .refused
-        switch WizardAppLocationRule.decide(switchOn: on, trustedShell: isTrustedDocument, wizardAddress: wizardAddress, access: access) {
+        // Never create a CLLocationManager for a page that may not ask: macOS then never hears about it.
+        let mayAsk = isTrustedDocument && wizardAddress
+        let access: WizardAppLocationRule.Access = mayAsk ? locationConsent.access : .refused
+        switch WizardAppLocationRule.decide(trustedShell: isTrustedDocument, wizardAddress: wizardAddress, access: access) {
         case .grant: answer(true)
         case .deny: answer(false)
         case .askMacOS:
@@ -1916,6 +1914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         UserDefaults.standard.removeObject(forKey: "PWAIcon")   // try-wizard#86: the PWA icon is the bundle icon now; the old switch is gone
         UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: the old private-first switch is gone
         UserDefaults.standard.removeObject(forKey: "StandardFirstSetup")   // try-wizard#171: standard first is on for everyone; the switch is gone
+        UserDefaults.standard.removeObject(forKey: "AppLocation")   // try-wizard#135: Maps location is on for everyone; the switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

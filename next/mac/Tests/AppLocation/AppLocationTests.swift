@@ -5,30 +5,25 @@ import XCTest
 final class AppLocationTests: XCTestCase {
     typealias R = WizardAppLocationRule
 
-    func testSwitchOffDeniesEvenWhenMacOSAllows() {
-        XCTAssertEqual(R.decide(switchOn: false, trustedShell: true, wizardAddress: true, access: .allowed), .deny)
-        XCTAssertEqual(R.decide(switchOn: false, trustedShell: true, wizardAddress: true, access: .notAsked), .deny)
-    }
-
     func testOnlyTheWizardShellAtTheWizardAddressMayAsk() {
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: false, wizardAddress: true, access: .notAsked), .deny)
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: true, wizardAddress: false, access: .notAsked), .deny)
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: false, wizardAddress: false, access: .allowed), .deny)
+        XCTAssertEqual(R.decide(trustedShell: false, wizardAddress: true, access: .notAsked), .deny)
+        XCTAssertEqual(R.decide(trustedShell: true, wizardAddress: false, access: .notAsked), .deny)
+        XCTAssertEqual(R.decide(trustedShell: false, wizardAddress: false, access: .allowed), .deny)
     }
 
     func testFirstAskShowsMacOSPromptAndGrantsOnlyOnYes() {
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: true, wizardAddress: true, access: .notAsked), .askMacOS)
+        XCTAssertEqual(R.decide(trustedShell: true, wizardAddress: true, access: .notAsked), .askMacOS)
         XCTAssertEqual(R.afterPrompt(.allowed), .grant)
         XCTAssertEqual(R.afterPrompt(.refused), .deny)
         XCTAssertEqual(R.afterPrompt(.notAsked), .deny)
     }
 
     func testAcceptedOnceThenFollowsWithoutAnotherPrompt() {
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: true, wizardAddress: true, access: .allowed), .grant)
+        XCTAssertEqual(R.decide(trustedShell: true, wizardAddress: true, access: .allowed), .grant)
     }
 
     func testDeniedInMacOSStaysDeniedWithNoPrompt() {
-        XCTAssertEqual(R.decide(switchOn: true, trustedShell: true, wizardAddress: true, access: .refused), .deny)
+        XCTAssertEqual(R.decide(trustedShell: true, wizardAddress: true, access: .refused), .deny)
     }
 
     func testCoreLocationStatusMapping() {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Maps may use the Mac's location after macOS's own prompt; nobody else can (try-wizard#135, wizard-ux#1629).
 
-Off by default behind the `AppLocation` user default. The rules live in Shared/AppLocation.swift (XCTest in
+On for every Mac (the old `AppLocation` switch is gone). The rules live in Shared/AppLocation.swift (XCTest in
 Tests/AppLocation, run by `swift test` on macOS CI); this checks the wiring from source on any machine.
 """
 import re
@@ -25,23 +25,24 @@ class AppLocationTests(unittest.TestCase):
         self.build = (MAC / 'build.sh').read_text()
         self.rule = (MAC / 'Shared/AppLocation.swift').read_text()
 
-    def test_switch_is_off_by_default(self):
+    def test_switch_is_gone_and_its_stored_value_cleared(self):
         body = block(self.main, 'enum WizardAppLocation {', '\n}\n')
-        self.assertIn('static let key = "AppLocation"', body)
-        self.assertRegex(body, r'static var isOn: Bool \{ UserDefaults\.standard\.bool\(forKey: key\) \}')
-        self.assertIn('defaults write org.humanitylabs.wizard.mvp AppLocation -bool YES', self.main)
+        self.assertNotIn('isOn', body)
+        self.assertNotIn('bool(forKey: "AppLocation")', self.main)
+        self.assertNotIn('defaults write org.humanitylabs.wizard.mvp AppLocation', self.main)
+        self.assertNotIn('switchOn', self.rule)
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "AppLocation")', self.main)
 
     def test_webkit_geolocation_question_is_answered_through_the_rule(self):
         self.assertIn('@objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)', self.main)
         self.assertIn('@objc(_webView:requestGeolocationPermissionForFrame:decisionHandler:)', self.main)
         decide = block(self.main, 'private func decideLocation(', '\n    }\n')
-        self.assertIn('switchOn: on', decide)
         self.assertIn('trustedShell: isTrustedDocument', decide)
         self.assertIn('wizardLocationOrigins.contains', decide)
         self.assertIn('locationConsent.ask', decide)
         self.assertIn('afterPrompt($0) == .grant', decide)
-        # With the switch off the app never touches CoreLocation.
-        self.assertIn('on ? locationConsent.access : .refused', decide)
+        # A page that may not ask never touches CoreLocation.
+        self.assertIn('mayAsk ? locationConsent.access : .refused', decide)
         self.assertIn('private lazy var locationConsent', self.main)
 
     def test_only_wizard_addresses(self):
@@ -51,7 +52,7 @@ class AppLocationTests(unittest.TestCase):
         self.assertIn('NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort))', self.main)
 
     def test_rule_grants_only_after_a_yes(self):
-        self.assertIn('guard switchOn, trustedShell, wizardAddress else { return .deny }', self.rule)
+        self.assertIn('guard trustedShell, wizardAddress else { return .deny }', self.rule)
         self.assertIn('case .refused: return .deny', self.rule)
         self.assertIn("access == .allowed ? .grant : .deny", self.rule)
 

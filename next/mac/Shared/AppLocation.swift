@@ -4,7 +4,7 @@ import Foundation
 /// wizard-ux#1629). The shell already decides which app frame may even ask (switch `wizard/app-location`: only an app
 /// that declared `permissions: [geolocation]` gets `allow="geolocation"`). This decides what the Mac app answers when
 /// WebKit asks for location: never for a page that is not the Wizard's own shell, never for an address that is not the
-/// Wizard's own, never without the Mac switch, and never before macOS's prompt was accepted. Denied in macOS stays
+/// Wizard's own, and never before macOS's prompt was accepted. Denied in macOS stays
 /// denied (no second prompt); the owner can change it in System Settings. Pure logic, so Tests/AppLocation drives it.
 enum WizardAppLocationRule {
     /// The app's macOS location permission, as CoreLocation reports it.
@@ -30,8 +30,8 @@ enum WizardAppLocationRule {
         case askMacOS
     }
 
-    static func decide(switchOn: Bool, trustedShell: Bool, wizardAddress: Bool, access: Access) -> Decision {
-        guard switchOn, trustedShell, wizardAddress else { return .deny }
+    static func decide(trustedShell: Bool, wizardAddress: Bool, access: Access) -> Decision {
+        guard trustedShell, wizardAddress else { return .deny }
         switch access {
         case .allowed: return .grant
         case .refused: return .deny
