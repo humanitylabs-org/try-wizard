@@ -694,25 +694,14 @@ enum WizardImportConnectPrompt {
     }
 }
 
-/// Private first on a fresh Mac (try-wizard#134, wizard-os DECISIONS #115, spec/AGENTS.md section 10): the front door
-/// opens with `?private_first=1`, so its brain step leads with Tinfoil and hands over to the Welcome's Connect your AI,
-/// which makes the private agent the default (the box's `wizard/private-first-setup` switch, as on Linux). The guest
-/// ignores it once setup is done, so an existing install is not moved. (The old `PrivateFirstSetup` switch is gone;
-/// its stored value is cleared at launch.)
-///
-/// Standard first (try-wizard#171, pair of wizard-ux#1800): with the `StandardFirstSetup` switch on, the front door
-/// opens without `?private_first=1`, as on Linux: a fresh Wizard's brain step takes Claude or ChatGPT and private AI
-/// is offered after, in the Welcome. Private first still runs when the box asks for it (guest env
-/// WIZARD_PRIVATE_FIRST=1 or the box's own `wizard/private-first-setup` switch), and a setup that already asked keeps it.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp StandardFirstSetup -bool YES` turns it on.
+/// Standard first on a fresh Mac (try-wizard#171, pair of wizard-ux#1800; on for everyone since James's yes): the front
+/// door opens without `?private_first=1`, as on Linux: a fresh Wizard's brain step takes Claude or ChatGPT and private
+/// AI is offered after, in the Welcome. Private first (try-wizard#134) still runs when the box asks for it (guest env
+/// WIZARD_PRIVATE_FIRST=1 or the box's own `wizard/private-first-setup` switch), and a setup that already asked keeps
+/// it. The old `PrivateFirstSetup` and `StandardFirstSetup` switches are gone; their stored values are cleared at launch.
 enum WizardPrivateFirstSetup {
-    static let standardFirstKey = "StandardFirstSetup"
-    static var standardFirst: Bool { UserDefaults.standard.bool(forKey: standardFirstKey) }
     /// The front door address the window opens on This Mac.
-    static var setupURL: URL { setupURL(standardFirst: standardFirst) }
-    static func setupURL(standardFirst: Bool) -> URL {
-        URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/" + (standardFirst ? "" : "?private_first=1"))!
-    }
+    static var setupURL: URL { URL(string: "http://127.0.0.1:\(WizardShared.setupPort)/")! }
 }
 
 /// Maps may use the Mac's location (try-wizard#135, part of wizard-ux#1629). WebKit asks the app before any page
@@ -1926,7 +1915,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if WizardBundleRelaunch.renameAndRelaunchIfNeeded() { return }
         NSApp.appearance = NSAppearance(named: .darkAqua)
         UserDefaults.standard.removeObject(forKey: "PWAIcon")   // try-wizard#86: the PWA icon is the bundle icon now; the old switch is gone
-        UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: the old private-first switch is gone (#171 adds StandardFirstSetup)
+        UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: the old private-first switch is gone
+        UserDefaults.standard.removeObject(forKey: "StandardFirstSetup")   // try-wizard#171: standard first is on for everyone; the switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()
