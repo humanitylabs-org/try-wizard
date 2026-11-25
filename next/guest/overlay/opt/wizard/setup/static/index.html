@@ -186,7 +186,7 @@ let codexTimer = null
 let codexGeneration = 0
 let codexAttempt = sessionStorage.getItem('wizardCodexAttempt')
 let codexQueue = Promise.resolve()
-// Private first (try-wizard#134): the Mac opens this page with ?private_first=1 unless its StandardFirstSetup switch is on (#171).
+// Private first (try-wizard#134): Mac apps before #171 open this page with ?private_first=1 (a Mac now opens it standard first).
 const pfAsked = (() => { try { return new URLSearchParams(location.search).get('private_first') === '1' } catch { return false } })()
 let pf = { on: false }
 

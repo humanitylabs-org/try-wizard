@@ -1,7 +1,8 @@
 """try-wizard#134: a fresh Mac starts private first (wizard-os DECISIONS #115, spec/AGENTS.md section 10).
 
-On for a fresh Mac unless its StandardFirstSetup switch is on (try-wizard#171): the Mac opens the front door with
-`?private_first=1`; the old `PrivateFirstSetup` switch is gone. With it on, the
+Since try-wizard#171 a fresh Mac opens the front door standard first (no `?private_first=1`); private first runs when
+the box asks for it or an older Mac sends `?private_first=1`. The old `PrivateFirstSetup` and `StandardFirstSetup`
+switches are gone. With it on, the
 setup's brain step leads with Tinfoil, runs none of its own brains (no ChatGPT device flow, no API key into Hermes'
 .env), switches the box's `wizard/private-first-setup` on in the owner's Look file and hands over to the Wizard UX
 Welcome, where the wizard-tinfoil app signs in and the Agent Service makes the private agent the default. Claude and
@@ -282,20 +283,19 @@ class PageAndMacSwitch(unittest.TestCase):
         self.assertIn("'/api/brain/private'", self.html)
         self.assertIn("private_first", self.html)
 
-    def test_mac_asks_private_first_unless_standard_first_is_on(self):
+    def test_mac_opens_standard_first_for_everyone(self):
         block = self.swift[self.swift.index("enum WizardPrivateFirstSetup"):]
         block = block[:block.index("\n}\n") + 3]
-        # try-wizard#171: the StandardFirstSetup switch (off by default) drops the ask; off keeps #150's front door.
-        self.assertIn('static let standardFirstKey = "StandardFirstSetup"', block)
-        self.assertIn("UserDefaults.standard.bool(forKey: standardFirstKey)", block)
-        self.assertIn('(standardFirst ? "" : "?private_first=1")', block)
-        self.assertIn("static var setupURL: URL { setupURL(standardFirst: standardFirst) }", block)
-        self.assertNotIn("WizardShared.localSetupURL", block)
+        # try-wizard#171 switch-default: standard first for everyone, no switch, no ?private_first=1.
+        self.assertIn('static var setupURL: URL { URL(string: "http://127.0.0.1:\\(WizardShared.setupPort)/")! }', block)
+        self.assertNotIn("private_first=1", block)
+        self.assertNotIn("UserDefaults", block)
+        self.assertNotIn('bool(forKey: "StandardFirstSetup")', self.swift)
+        self.assertNotIn("standardFirstKey", self.swift)
         self.assertNotIn('UserDefaults.standard.bool(forKey: "PrivateFirstSetup")', self.swift)
-        self.assertNotIn('static let key = "PrivateFirstSetup"', self.swift)
-        # The stored value of the old switch is cleared at launch; the new one is never cleared.
+        # The stored values of both old switches are cleared at launch.
         self.assertIn('UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")', self.swift)
-        self.assertNotIn('removeObject(forKey: "StandardFirstSetup")', self.swift)
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "StandardFirstSetup")', self.swift)
         # Both places the window opens the front door on This Mac (ready, and the quiet retry).
         self.assertEqual(self.swift.count("load(WizardPrivateFirstSetup.setupURL)"), 2)
         self.assertNotIn("self.load(WizardShared.localSetupURL)", self.swift)
@@ -307,7 +307,7 @@ class PageAndMacSwitch(unittest.TestCase):
 
 
 class StandardFirstMac(unittest.TestCase):
-    """try-wizard#171: a Mac with StandardFirstSetup on opens the front door without `?private_first=1`, so the page
+    """try-wizard#171: a Mac opens the front door without `?private_first=1`, so the page
     never asks; a fresh box (the Agent Service says off) takes Claude or ChatGPT as its first agent."""
 
     setUp, tearDown = PrivateFirstSetup.setUp, PrivateFirstSetup.tearDown
