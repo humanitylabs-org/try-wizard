@@ -13,7 +13,7 @@ from pathlib import Path
 
 MAIN = Path(__file__).resolve().parents[1] / 'App/main.swift'
 # The one reviewed exception (try-wizard#142): Now Playing's own handler + an every-frame script that stays idle outside
-# Music and Podcasts, installed only with its switch on. Its receiver admits frames through Shared/NowPlaying.swift.
+# Music and Podcasts (on for every Mac). Its receiver admits frames through Shared/NowPlaying.swift.
 NOW_PLAYING = Path(__file__).resolve().parents[1] / 'App/WizardNowPlaying.swift'
 OTHER_APP = [p for p in sorted(MAIN.parent.glob('*.swift')) if p not in (MAIN, NOW_PLAYING)]
 
@@ -47,7 +47,7 @@ class NativeBridgeFrameTests(unittest.TestCase):
         self.assertIn('controller.add(shared, name: name)', install)
         self.assertIn('static let name = "wizardNowPlaying"', np)
         self.assertNotIn('addScriptMessageHandler', np)
-        self.assertIn('if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(', self.src)
+        self.assertEqual(self.src.count('WizardNowPlayingCenter.install(into: cfg.userContentController)'), 1)
         receive = between(np, 'didReceive message: WKScriptMessage) {', '\n    }')
         self.assertIn('Rule.admit(', receive)
         self.assertIn('owner.isWizardAppAddress(message.frameInfo.securityOrigin)', receive)
