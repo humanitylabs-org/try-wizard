@@ -1,7 +1,7 @@
 """try-wizard#134: a fresh Mac starts private first (wizard-os DECISIONS #115, spec/AGENTS.md section 10).
 
-On for every fresh Mac (the Mac opens the front door with `?private_first=1`; the old `PrivateFirstSetup` switch is
-gone). With it on, the
+On for a fresh Mac unless its StandardFirstSetup switch is on (try-wizard#171): the Mac opens the front door with
+`?private_first=1`; the old `PrivateFirstSetup` switch is gone. With it on, the
 setup's brain step leads with Tinfoil, runs none of its own brains (no ChatGPT device flow, no API key into Hermes'
 .env), switches the box's `wizard/private-first-setup` on in the owner's Look file and hands over to the Wizard UX
 Welcome, where the wizard-tinfoil app signs in and the Agent Service makes the private agent the default. Claude and
@@ -282,20 +282,68 @@ class PageAndMacSwitch(unittest.TestCase):
         self.assertIn("'/api/brain/private'", self.html)
         self.assertIn("private_first", self.html)
 
-    def test_mac_always_asks_private_first_and_the_switch_is_gone(self):
+    def test_mac_asks_private_first_unless_standard_first_is_on(self):
         block = self.swift[self.swift.index("enum WizardPrivateFirstSetup"):]
         block = block[:block.index("\n}\n") + 3]
-        self.assertIn("private_first=1", block)
-        self.assertNotIn("isOn", block)
+        # try-wizard#171: the StandardFirstSetup switch (off by default) drops the ask; off keeps #150's front door.
+        self.assertIn('static let standardFirstKey = "StandardFirstSetup"', block)
+        self.assertIn("UserDefaults.standard.bool(forKey: standardFirstKey)", block)
+        self.assertIn('(standardFirst ? "" : "?private_first=1")', block)
+        self.assertIn("static var setupURL: URL { setupURL(standardFirst: standardFirst) }", block)
         self.assertNotIn("WizardShared.localSetupURL", block)
         self.assertNotIn('UserDefaults.standard.bool(forKey: "PrivateFirstSetup")', self.swift)
         self.assertNotIn('static let key = "PrivateFirstSetup"', self.swift)
-        # The stored value of the old switch is cleared at launch.
+        # The stored value of the old switch is cleared at launch; the new one is never cleared.
         self.assertIn('UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")', self.swift)
+        self.assertNotIn('removeObject(forKey: "StandardFirstSetup")', self.swift)
         # Both places the window opens the front door on This Mac (ready, and the quiet retry).
         self.assertEqual(self.swift.count("load(WizardPrivateFirstSetup.setupURL)"), 2)
         self.assertNotIn("self.load(WizardShared.localSetupURL)", self.swift)
         self.assertNotIn("self?.load(WizardShared.localSetupURL)", self.swift)
+
+    def test_page_asks_only_when_the_mac_sent_private_first(self):
+        self.assertIn("get('private_first') === '1'", self.html)
+        self.assertIn("if (pfAsked && !state.done) state = await api('/api/private-first'", self.html)
+
+
+class StandardFirstMac(unittest.TestCase):
+    """try-wizard#171: a Mac with StandardFirstSetup on opens the front door without `?private_first=1`, so the page
+    never asks; a fresh box (the Agent Service says off) takes Claude or ChatGPT as its first agent."""
+
+    setUp, tearDown = PrivateFirstSetup.setUp, PrivateFirstSetup.tearDown
+    no_restart, run_with = PrivateFirstSetup.no_restart, PrivateFirstSetup.run_with
+
+    def test_fresh_box_takes_claude_and_chatgpt(self):
+        started = []
+        service = FakeAgentService()
+        with patch.object(server, "_codex_worker", side_effect=lambda attempt: started.append(attempt)):
+            out = self.run_with(service, [
+                ("GET", "/api/state", None),
+                ("POST", "/api/brain", {"kind": "apikey", "provider": "anthropic", "key": "sk-ant-" + "x" * 30}),
+                ("POST", "/api/brain/chatgpt/start", {"attempt": "b" * 32}),
+            ])
+        self.assertFalse(out[0][1]["privateFirst"]["on"])
+        self.assertEqual(out[1][0], 200, out[1][1])
+        self.assertEqual(out[2][0], 200, out[2][1])
+        for _, body in out:
+            self.assertNotIn(server.PRIVATE_FIRST_REFUSAL, json.dumps(body))
+        self.assertEqual(self.brains, ["apikey"])
+        self.assertEqual(started, ["b" * 32])
+        self.assertFalse(any(path == server.LOOK_FILE for _, path, _ in service.calls), "standard first never writes the Look file")
+        with server._codex_lock:
+            server._codex.clear()
+            server._codex.update(status="idle")
+
+    def test_private_first_still_runs_when_the_box_asks(self):
+        os.environ["WIZARD_PRIVATE_FIRST"] = "1"
+        [(status, body)] = self.run_with(FakeAgentService(), [("POST", "/api/brain", {"kind": "free"})])
+        self.assertEqual((status, body["error"]), (409, server.PRIVATE_FIRST_REFUSAL))
+
+    def test_a_setup_that_already_asked_is_not_moved(self):
+        (self.root / "setup.json").write_text(json.dumps({"name": "Merlin", "privateFirst": True}))
+        [(status, _)] = self.run_with(FakeAgentService(), [("POST", "/api/brain", {"kind": "free"})])
+        self.assertEqual(status, 409)
+
 
 if __name__ == "__main__":
     unittest.main()
