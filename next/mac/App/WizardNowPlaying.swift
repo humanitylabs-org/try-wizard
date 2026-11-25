@@ -2,8 +2,7 @@ import AppKit
 import MediaPlayer
 import WebKit
 
-/// Now Playing and the media keys for Music and Podcasts (try-wizard#142). Off unless the `NowPlaying` switch is on
-/// (enum WizardNowPlaying in main.swift). The page script below runs only in a Music or Podcasts frame: it reads the
+/// Now Playing and the media keys for Music and Podcasts (try-wizard#142), on for every Mac. The page script below runs only in a Music or Podcasts frame: it reads the
 /// app's own `navigator.mediaSession` metadata and action handlers plus the audio element that plays, and reports a
 /// small state object. This class shows the owner's latest player in Control Center (title, artist/show, artwork,
 /// progress) and routes play/pause, skip back 15 / forward 30 (Podcasts) or next/previous (Music) and scrubbing back
@@ -33,12 +32,12 @@ final class WizardNowPlayingCenter: NSObject, WKScriptMessageHandler {
     private var artworkLoading: URL?
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard WizardNowPlaying.isOn, let owner, let web = message.webView, owner.web === web,
+        guard let owner, let web = message.webView, owner.web === web,
               let body = message.body as? [String: Any], let state = Rule.State(body),
               let url = message.frameInfo.request.url,
-              let appId = Rule.admit(switchOn: true, trustedShell: owner.isTrustedDocument,
-                                     wizardAddress: owner.isWizardAppAddress(message.frameInfo.securityOrigin),
-                                     path: url.path) else { return }
+              let appId = Rule.admit(trustedShell: owner.isTrustedDocument,
+                           wizardAddress: owner.isWizardAppAddress(message.frameInfo.securityOrigin),
+                           path: url.path) else { return }
         activeApp = Rule.owner(current: activeApp, report: appId, playing: state.playing, gone: state.gone)
         if state.gone {
             states[appId] = nil; frames[appId] = nil
@@ -140,7 +139,7 @@ final class WizardNowPlayingCenter: NSObject, WKScriptMessageHandler {
     /// Hands a media key / Control Center press to the playing app's own frame (its media session handler, else its
     /// audio element). Never to any other frame.
     private func send(_ command: Rule.Command, value: Double?, to app: String) {
-        guard WizardNowPlaying.isOn, activeApp == app, let frame = frames[app], let web = owner?.web,
+        guard activeApp == app, let frame = frames[app], let web = owner?.web,
               owner?.isTrustedDocument == true else { return }
         web.evaluateJavaScript(Rule.script(command, value: value), in: frame, in: .page) { _ in }
     }
@@ -148,7 +147,7 @@ final class WizardNowPlayingCenter: NSObject, WKScriptMessageHandler {
     /// Wizard was brought forward (Now Playing clicked, or the Dock icon) while Music or Podcasts holds Now Playing:
     /// show that app.
     func openPlayingApp() {
-        guard WizardNowPlaying.isOn, let app = activeApp, let script = Rule.openScript(app),
+        guard let app = activeApp, let script = Rule.openScript(app),
               let owner, owner.isTrustedDocument else { return }
         owner.web.evaluateJavaScript(script)
     }

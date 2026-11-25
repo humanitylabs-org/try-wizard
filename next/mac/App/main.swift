@@ -711,16 +711,12 @@ enum WizardAppLocation {
     static var thisMacAppsOrigin: NativeOrigin? { NativeOrigin(scheme: "http", host: "localhost", port: Int(WizardShared.uxPort)) }
 }
 
-/// Music and Podcasts show in Control Center's Now Playing and answer the media keys / AirPods buttons (try-wizard#142,
-/// the Mac part of wizard-ux#1661): title, artist/show, artwork and progress; play/pause, skip back 15 / forward 30 for
-/// Podcasts, next/previous for Music, all routed to the playing app's own page. Clicking Now Playing brings Wizard
-/// forward on that app. Only those two apps (Shared/NowPlaying.swift); the class is App/WizardNowPlaying.swift.
-/// Read when the window is made, so it takes effect the next time Wizard opens.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp NowPlaying -bool YES` turns it on.
-enum WizardNowPlaying {
-    static let key = "NowPlaying"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
-}
+// Music and Podcasts show in Control Center's Now Playing and answer the media keys / AirPods buttons (try-wizard#142,
+// the Mac part of wizard-ux#1661): title, artist/show, artwork and progress; play/pause, skip back 15 / forward 30 for
+// Podcasts, next/previous for Music, all routed to the playing app's own page. Clicking Now Playing brings Wizard
+// forward on that app. Only those two apps (Shared/NowPlaying.swift); the class is App/WizardNowPlaying.swift.
+// On for every Mac (try-wizard#142 approved); the old `NowPlaying` switch is gone and its stored value is cleared at
+// launch.
 
 /// Shows macOS's location prompt (once; macOS remembers the answer) and reports the owner's choice.
 final class WizardLocationConsent: NSObject, CLLocationManagerDelegate {
@@ -903,8 +899,8 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDragView.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // The shell's Add to home screen, answered with a Dock icon per app (try-wizard#147). After the meeting adapter.
         cfg.userContentController.addUserScript(WKUserScript(source: WizardDockApps.portJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        // Music and Podcasts in Now Playing (try-wizard#142): nothing is installed unless the NowPlaying switch is on.
-        if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }
+        // Music and Podcasts in Now Playing (try-wizard#142, on for everyone).
+        WizardNowPlayingCenter.install(into: cfg.userContentController)
         web = WKWebView(frame: .zero, configuration: cfg)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 780),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -1915,6 +1911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         UserDefaults.standard.removeObject(forKey: "PrivateFirstSetup")   // try-wizard#134: the old private-first switch is gone
         UserDefaults.standard.removeObject(forKey: "StandardFirstSetup")   // try-wizard#171: standard first is on for everyone; the switch is gone
         UserDefaults.standard.removeObject(forKey: "AppLocation")   // try-wizard#135: Maps location is on for everyone; the switch is gone
+        UserDefaults.standard.removeObject(forKey: "NowPlaying")   // try-wizard#142: Now Playing is on for everyone; the switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

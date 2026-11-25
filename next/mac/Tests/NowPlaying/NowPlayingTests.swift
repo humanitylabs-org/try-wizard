@@ -18,11 +18,11 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertNil(R.appId(path: "/files/wizard-music/"))
     }
 
-    func testAdmitNeedsSwitchShellAndWizardAddress() {
-        XCTAssertNil(R.admit(switchOn: false, trustedShell: true, wizardAddress: true, path: "/wizard-music/"))
-        XCTAssertNil(R.admit(switchOn: true, trustedShell: false, wizardAddress: true, path: "/wizard-music/"))
-        XCTAssertNil(R.admit(switchOn: true, trustedShell: true, wizardAddress: false, path: "/wizard-music/"))
-        XCTAssertEqual(R.admit(switchOn: true, trustedShell: true, wizardAddress: true, path: "/apps/wizard-podcasts/"), "wizard-podcasts")
+    func testAdmitNeedsShellAndWizardAddress() {
+        XCTAssertNil(R.admit(trustedShell: false, wizardAddress: true, path: "/wizard-music/"))
+        XCTAssertNil(R.admit(trustedShell: true, wizardAddress: false, path: "/wizard-music/"))
+        XCTAssertNil(R.admit(trustedShell: true, wizardAddress: true, path: "/apps/wizard-maps/"))
+        XCTAssertEqual(R.admit(trustedShell: true, wizardAddress: true, path: "/apps/wizard-podcasts/"), "wizard-podcasts")
     }
 
     func testPodcastsSkipsMusicTracks() {

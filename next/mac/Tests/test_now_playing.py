@@ -92,14 +92,16 @@ class NowPlayingTests(unittest.TestCase):
         self.rule = (MAC / 'Shared/NowPlaying.swift').read_text()
         self.build = (MAC / 'build.sh').read_text()
 
-    def test_switch_is_off_by_default(self):
-        body = block(self.main, 'enum WizardNowPlaying {', '\n}\n')
-        self.assertIn('static let key = "NowPlaying"', body)
-        self.assertRegex(body, r'static var isOn: Bool \{ UserDefaults\.standard\.bool\(forKey: key\) \}')
-        self.assertIn('defaults write org.humanitylabs.wizard.mvp NowPlaying -bool YES', self.main)
+    def test_on_for_everyone_switch_gone(self):
+        # try-wizard#142 switch-default: no NowPlaying switch; its stored value is cleared at launch.
+        self.assertNotIn('enum WizardNowPlaying {', self.main)
+        self.assertNotIn('WizardNowPlaying.isOn', self.main + self.center)
+        self.assertNotIn('bool(forKey: "NowPlaying")', self.main)
+        self.assertNotIn('switchOn', self.rule + self.center)
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "NowPlaying")', self.main)
 
-    def test_script_and_handler_only_with_switch_on(self):
-        self.assertIn('if WizardNowPlaying.isOn { WizardNowPlayingCenter.install(into: cfg.userContentController) }', self.main)
+    def test_script_and_handler_always_installed(self):
+        self.assertIn('        WizardNowPlayingCenter.install(into: cfg.userContentController)\n', self.main)
         self.assertEqual(self.main.count('WizardNowPlayingCenter.install('), 1)
         install = block(self.center, 'static func install(into controller: WKUserContentController) {', '\n    }\n')
         self.assertIn('controller.add(shared, name: name)', install)
@@ -108,12 +110,11 @@ class NowPlayingTests(unittest.TestCase):
 
     def test_reports_admitted_only_through_the_rule(self):
         handler = block(self.center, 'func userContentController(', '\n    }\n')
-        self.assertIn('WizardNowPlaying.isOn', handler)
         self.assertIn('owner.web === web', handler)
         self.assertIn('trustedShell: owner.isTrustedDocument', handler)
         self.assertIn('owner.isWizardAppAddress(message.frameInfo.securityOrigin)', handler)
         self.assertIn('path: url.path', handler)
-        self.assertIn('guard switchOn, trustedShell, wizardAddress else { return nil }', self.rule)
+        self.assertIn('guard trustedShell, wizardAddress else { return nil }', self.rule)
         self.assertIn('static let apps: Set<String> = ["wizard-music", "wizard-podcasts"]', self.rule)
         address = block(self.main, 'func isWizardAppAddress(', '\n    }\n')
         self.assertIn('selectedControlOrigins', address)

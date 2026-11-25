@@ -21,10 +21,10 @@ enum WizardNowPlayingRule {
         return apps.contains(id) ? id : nil
     }
 
-    /// The app whose report may be shown: switch on, the Wizard's own shell on screen, the frame at one of the Wizard's
-    /// own addresses, and its path naming Music or Podcasts.
-    static func admit(switchOn: Bool, trustedShell: Bool, wizardAddress: Bool, path: String) -> String? {
-        guard switchOn, trustedShell, wizardAddress else { return nil }
+    /// The app whose report may be shown: the Wizard's own shell on screen, the frame at one of the Wizard's own
+    /// addresses, and its path naming Music or Podcasts.
+    static func admit(trustedShell: Bool, wizardAddress: Bool, path: String) -> String? {
+        guard trustedShell, wizardAddress else { return nil }
         return appId(path: path)
     }
 
