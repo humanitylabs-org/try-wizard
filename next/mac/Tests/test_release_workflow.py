@@ -123,6 +123,15 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertNotIn('always()', condition)
         self.assertIn('needs: [build, publish]', jobs()['tag'])
 
+    def test_tag_runs_after_a_publish_that_followed_a_skipped_upgrade_test(self):
+        """try-wizard#195: an if without a status function gets an implicit success(), false after a skipped job."""
+        tag = jobs()['tag']
+        condition = re.search(r'(?m)^    if: (.*)$', tag).group(1).strip('"')
+        self.assertTrue(condition.startswith('!cancelled() && '), condition)
+        self.assertIn("needs.build.outputs.mode == 'release'", condition)
+        self.assertIn("needs.publish.result == 'success'", condition)
+        self.assertNotIn('always()', condition)
+
     def test_upgrade_test_runs_both_steps_without_secrets(self):
         test = jobs()['upgrade-test']
         self.assertIn('runs-on: macos-15', test)

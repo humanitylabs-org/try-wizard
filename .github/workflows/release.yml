@@ -563,7 +563,9 @@ jobs:
   tag:
     name: Tag v<version>
     needs: [build, publish]
-    if: needs.build.outputs.mode == 'release' && needs.publish.result == 'success'
+    # !cancelled(): without it GitHub adds success(), which is false whenever upgrade-test (needed by publish) was
+    # skipped, so no release was ever tagged with that switch off (try-wizard#195).
+    if: "!cancelled() && needs.build.outputs.mode == 'release' && needs.publish.result == 'success'"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
