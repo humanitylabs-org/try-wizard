@@ -116,3 +116,25 @@ All compilation, Sparkle, native/VM/browser and sustained QA stays on Thales und
 `tools/update-remote-qa.sh` obtains verified Sparkle if necessary and runs `tools/update-native-qa.py`. The latter builds a real bootstrap101, signed102/103 archives, installs101 in an owned external directory, exercises real check/download/Update button/relaunch, Later and busy guard, tampered archive/feed, authentic incompatible peer and offline errors, launches the retained prior bundle, and restores original preferences from a private snapshot. It writes receipts/screenshots/logs. The busy injection is explicitly a native guard test, not proof of an active real engine or physical microphone recording.
 
 A queued job is not a build or install proof. A completed native-only receipt is not guest, public-feed or Apple-signing proof. Parent must also re-run main.swift native trusted-origin/titlebar-drag acceptance after combining the separate native owner patch with these minimal updater additions.
+
+## Updates can't wait forever (try-wizard#128, switch `UpdateDeadlines`, off by default)
+
+`defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES` turns it on; rules in `Shared/ReadyUpdate.swift`.
+
+- **Later = until tomorrow.** Later stores `laterUntil` (now + 24 h) in `updates/ready.json`; a once-a-minute check
+  shows the ready bar again once when it passes (and after a relaunch the bar stays hidden until then).
+- **Offer on quit after 3 days** (`WizardReadyUpdate.offerOnQuitAfter`). `ready.json` keeps `readySince` per build, so
+  it survives relaunches and starts over when a newer build becomes ready. Quitting then shows "Wizard for Mac
+  <version> is ready. Install it while quitting?" with Install and quit (default) / Quit without updating. Install and
+  quit runs Update and restart's own guards (recording, agent work through `admitWebRestart`, foreign Host, Host
+  lease, clean WizardOS stop). When they pass, Wizard writes the journal and quits without replying to Sparkle, so
+  Sparkle installs the prepared update after the quit and doesn't relaunch; the next launch finishes the journal as
+  after any update. A guard that says no is shown ("Wizard can't update now") and Wizard quits as before: the
+  prepared install is cancelled (`.skip`, which per Sparkle doesn't skip the version), the old build stays.
+- **Critical releases.** `"critical": true` in `release/version.json` makes `tools/stage-release.py` add
+  `<sparkle:criticalUpdate/>` to the item; without the field the feed is byte-identical to before. The bar then has
+  no Later; Update and restart still waits for a recording or agent work. `ui.json` carries `critical`, and the
+  page's update status (`AppUpdates`) carries `"urgent": true` while that release downloads or waits, so Settings
+  shows it as an important update (wizard-ux `web/core/os-updates.js`).
+- QA: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlinesClockOffset -float 86400` moves this clock a day on
+  (use 259200 for 3 days); a loopback `SPARKLE_FEED` as above gives a ready update.

@@ -52,12 +52,24 @@ def manual_below(version_file, build):
     return value
 
 
-def appcast_template(version, build, manifest, archive_url, archive_bytes, manual_below=None):
+def critical(version_file):
+    """The optional `"critical": true` of next/mac/release/version.json (try-wizard#128), else False.
+
+    A critical release is marked <sparkle:criticalUpdate/> in the feed; Wizard for Mac (switch UpdateDeadlines) then
+    shows its update bar without Later.
+    """
+    value = json.loads(pathlib.Path(version_file).read_text()).get('critical', False)
+    assert value is True or value is False, 'critical must be true or false, not %r' % (value,)
+    return value
+
+
+def appcast_template(version, build, manifest, archive_url, archive_bytes, manual_below=None, critical=False):
     """The complete feed, except the enclosure's edSignature, which is PLACEHOLDER.
 
     With manual_below, installs older than that build see the item as information-only (Sparkle's
     informationalUpdate/belowVersion) with MANUAL_LINK as its page; newer installs still update by themselves.
-    Without it the feed is exactly what it was before try-wizard#126.
+    critical adds <sparkle:criticalUpdate/> to the item (try-wizard#128). Without either the feed is exactly what it
+    was before try-wizard#126.
     """
     X.register_namespace('sparkle', SPARKLE_NS)
     X.register_namespace('wizard', WIZARD_NS)
@@ -73,6 +85,8 @@ def appcast_template(version, build, manifest, archive_url, archive_bytes, manua
         X.SubElement(item, 'link').text = MANUAL_LINK
         informational = X.SubElement(item, '{%s}informationalUpdate' % SPARKLE_NS)
         X.SubElement(informational, '{%s}belowVersion' % SPARKLE_NS).text = str(manual_below)
+    if critical:
+        X.SubElement(item, '{%s}criticalUpdate' % SPARKLE_NS)
     X.SubElement(item, '{%s}contract' % WIZARD_NS).text = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
     X.SubElement(item, 'enclosure', {'url': archive_url, 'type': 'application/octet-stream',
                                      'length': str(archive_bytes), '{%s}edSignature' % SPARKLE_NS: PLACEHOLDER})
@@ -108,9 +122,10 @@ def main():
     p.add_argument('--base-url', required=True, help='public folder of this channel, e.g. https://downloads.aiwizards.com/mac')
     p.add_argument('--version', required=True)
     p.add_argument('--build', type=int, required=True)
-    p.add_argument('--version-file', type=pathlib.Path, default=VERSION_FILE, help='release/version.json (manualBelow)')
+    p.add_argument('--version-file', type=pathlib.Path, default=VERSION_FILE, help='release/version.json (manualBelow, critical)')
     a = p.parse_args()
     below = manual_below(a.version_file, a.build)
+    urgent = critical(a.version_file)
 
     info = plistlib.loads((a.app / 'Contents/Info.plist').read_bytes())
     manifest = json.loads((a.app / 'Contents/Resources/wizard-release.json').read_text())
@@ -133,8 +148,10 @@ def main():
     }
     if below is not None:
         stage['manualBelow'] = below
+    if urgent:
+        stage['critical'] = True
     (a.out / 'appcast.template.xml').write_text(
-        appcast_template(a.version, a.build, manifest, stage['archive']['url'], stage['archive']['bytes'], below))
+        appcast_template(a.version, a.build, manifest, stage['archive']['url'], stage['archive']['bytes'], below, urgent))
     (a.out / 'index.html').write_text(
         landing_page(a.version, a.build, stage['dmg']['url'], stage['dmg']['bytes'], stage['dmg']['sha256']))
     (a.out / 'release-stage.json').write_text(json.dumps(stage, indent=2) + '\n')

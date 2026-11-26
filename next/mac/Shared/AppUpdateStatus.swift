@@ -83,12 +83,16 @@ enum WizardAppUpdateStatus {
     }
 
     /// The `updates.status` answer and the `wizard:app-update` detail. JSON-ready: a missing value is NSNull.
+    /// `urgent` (try-wizard#128, switch UpdateDeadlines): the coming release is critical. Only then does the object
+    /// carry `"urgent": true`, and only while that release is on its way or ready; otherwise the key is absent, so the
+    /// object is exactly what it was before.
     static func object(installedVersion: String, installedBuild: String, phase: String,
                        latest: (version: String, build: String)?, progress: Double?, checkedAt: Date?,
-                       waitingFor: String?, manualURL: String?, error: String?, channel: String? = nil) -> [String: Any] {
+                       waitingFor: String?, manualURL: String?, error: String?, channel: String? = nil,
+                       urgent: Bool = false) -> [String: Any] {
         func value(_ v: Any?) -> Any { v ?? NSNull() }
         let showsLatest = latest.map { !$0.build.isEmpty } == true && ["downloading", "verifying", "ready", "installing", "manual"].contains(phase)
-        return [
+        var object: [String: Any] = [
             "schema": schema,
             "installed": ["version": installedVersion, "build": installedBuild],
             "phase": phases.contains(phase) ? phase : "idle",
@@ -100,5 +104,7 @@ enum WizardAppUpdateStatus {
             "error": value(phase == "failed" ? error : nil),
             "channel": value(channel),
         ]
+        if urgent && showsLatest && phase != "manual" { object["urgent"] = true }
+        return object
     }
 }

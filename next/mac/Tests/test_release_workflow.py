@@ -275,6 +275,58 @@ class StageRelease(unittest.TestCase):
         key.public_key().verify(base64.b64decode(sig), signed[:length])   # raises when it doesn't verify
         X.fromstring(signed[:length].split(b'\n', 1)[1])
 
+    def test_critical_release_marks_the_feed_and_no_field_changes_nothing(self):
+        # try-wizard#128: "critical": true in version.json -> <sparkle:criticalUpdate/>; without it, the same bytes.
+        stage = stage_module()
+        manifest = {'build': '326', 'arch': 'arm64', 'hostProtocol': 1, 'files': {}, 'guestPatch': None}
+        args = ('0.8.15', 326, manifest, 'https://downloads.example/mac/326/Wizard-326.zip', 1234)
+        plain = stage.appcast_template(*args)
+        self.assertEqual(plain, stage.appcast_template(*args, critical=False))
+        self.assertNotIn('criticalUpdate', plain)
+        # Today's feed (before #128), byte for byte.
+        self.assertEqual(plain, (
+            '<?xml version="1.0" encoding="utf-8"?>\n<rss xmlns:sparkle="%s" xmlns:wizard="%s" version="2.0"><channel>'
+            '<title>WizardOS updates</title><item><title>WizardOS 0.8.15</title><sparkle:version>326</sparkle:version>'
+            '<sparkle:shortVersionString>0.8.15</sparkle:shortVersionString>'
+            '<sparkle:minimumSystemVersion>14.0.0</sparkle:minimumSystemVersion>'
+            '<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements><wizard:contract>%s</wizard:contract>'
+            '<enclosure url="https://downloads.example/mac/326/Wizard-326.zip" type="application/octet-stream" '
+            'length="1234" sparkle:edSignature="@ED_SIGNATURE@" /></item></channel></rss>\n'
+        ) % (stage.SPARKLE_NS, stage.WIZARD_NS, json.dumps(manifest, sort_keys=True, separators=(',', ':'))))
+        urgent = stage.appcast_template(*args, critical=True)
+        self.assertEqual(urgent.count(stage.PLACEHOLDER), 1)
+        item = X.fromstring(urgent.split('\n', 1)[1]).find('channel/item')
+        found = item.find('s:criticalUpdate', {'s': stage.SPARKLE_NS})
+        self.assertIsNotNone(found)
+        self.assertEqual(len(found), 0)
+        self.assertIsNone(found.get('{%s}version' % stage.SPARKLE_NS))   # critical for every older install
+        self.assertEqual(urgent.replace('<sparkle:criticalUpdate />', ''), plain)
+
+    def test_manual_below_and_critical_together(self):
+        # try-wizard#126 and #128 in one release: both marks, each removable without touching the other.
+        stage = stage_module()
+        manifest = {'build': '330', 'arch': 'arm64', 'hostProtocol': 1, 'files': {}, 'guestPatch': None}
+        args = ('0.9.0', 330, manifest, 'https://downloads.example/mac/330/Wizard-330.zip', 1234)
+        both = stage.appcast_template(*args, manual_below=328, critical=True)
+        item = X.fromstring(both.split('\n', 1)[1]).find('channel/item')
+        ns = {'s': stage.SPARKLE_NS}
+        self.assertIsNotNone(item.find('s:criticalUpdate', ns))
+        self.assertEqual(item.find('s:informationalUpdate/s:belowVersion', ns).text, '328')
+        self.assertEqual(both.replace('<sparkle:criticalUpdate />', ''), stage.appcast_template(*args, manual_below=328))
+
+    def test_critical_is_read_from_version_json(self):
+        stage = stage_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / 'version.json'
+            f.write_text('{"version": "0.8.15", "build": 326}')
+            self.assertFalse(stage.critical(f))
+            f.write_text('{"version": "0.8.15", "build": 326, "critical": true}')
+            self.assertTrue(stage.critical(f))
+            f.write_text('{"version": "0.8.15", "build": 326, "critical": "yes"}')
+            with self.assertRaises(AssertionError):
+                stage.critical(f)
+        self.assertFalse(stage.critical(ROOT / 'next/mac/release/version.json'))
+
     def test_landing_page_names_the_new_dmg(self):
         page = stage_module().landing_page('0.8.0', 310, 'https://downloads.example/mac/310/Wizard-0.8.0.dmg',
                                            25_000_000, 'ab' * 32)

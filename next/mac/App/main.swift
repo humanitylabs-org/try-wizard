@@ -702,6 +702,16 @@ enum WizardAppUpdates {
     static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
 }
 
+/// Mac app updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift). Later hides the bar until
+/// tomorrow, an update ready for 3 days is offered when the owner quits, and a critical release has no Later.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES` turns it on.
+/// QA: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlinesClockOffset -float 86400` moves its clock a day on.
+enum WizardUpdateDeadlines {
+    static let key = "UpdateDeadlines"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+    static var now: Date { Date().addingTimeInterval(UserDefaults.standard.double(forKey: "UpdateDeadlinesClockOffset")) }
+}
+
 /// Standard first on a fresh Mac (try-wizard#171, pair of wizard-ux#1800; on for everyone since James's yes): the front
 /// door opens without `?private_first=1`, as on Linux: a fresh Wizard's brain step takes Claude or ChatGPT and private
 /// AI is offered after, in the Welcome. Private first (try-wizard#134) still runs when the box asks for it (guest env

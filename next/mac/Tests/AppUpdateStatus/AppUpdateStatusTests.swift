@@ -112,4 +112,19 @@ final class AppUpdateStatusTests: XCTestCase {
                                 checkedAt: nil, waitingFor: nil, manualURL: nil, error: nil)["phase"] as? String, "idle")
         _ = try JSONSerialization.data(withJSONObject: manual)
     }
+
+    func testUrgentOnlyForACriticalReleaseOnItsWay() {
+        // try-wizard#128: a critical release carries "urgent": true; otherwise the key is not there at all.
+        func object(_ phase: String, urgent: Bool, latest: (version: String, build: String)? = ("0.8.16", "327")) -> [String: Any] {
+            S.object(installedVersion: "0.8.15", installedBuild: "326", phase: phase, latest: latest, progress: nil,
+                     checkedAt: nil, waitingFor: nil, manualURL: S.defaultDownloadURL, error: nil, urgent: urgent)
+        }
+        for phase in ["downloading", "verifying", "ready", "installing"] {
+            XCTAssertEqual(object(phase, urgent: true)["urgent"] as? Bool, true, phase)
+            XCTAssertNil(object(phase, urgent: false)["urgent"], phase)
+        }
+        for phase in ["idle", "checking", "current", "manual", "failed"] { XCTAssertNil(object(phase, urgent: true)["urgent"], phase) }
+        XCTAssertNil(object("ready", urgent: true, latest: nil)["urgent"])
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(object("ready", urgent: true)))
+    }
 }

@@ -71,7 +71,7 @@ final class NoticeBarView: NSView {
         // Belt and braces: Later never grows past a normal button, whatever the label does.
         later.widthAnchor.constraint(lessThanOrEqualToConstant: 110).isActive = true
         action.target = self; action.action = #selector(updateAndRestart)
-        later.target = self; later.action = #selector(hideNotice)
+        later.target = self; later.action = #selector(laterPressed)
         for control in [label, action, later] { control.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(control) }
         NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14), label.topAnchor.constraint(equalTo: view.topAnchor, constant: 30), label.trailingAnchor.constraint(equalTo: action.leadingAnchor, constant: -8), action.centerYAnchor.constraint(equalTo: label.centerYAnchor), action.trailingAnchor.constraint(equalTo: later.leadingAnchor, constant: -6), later.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12), later.centerYAnchor.constraint(equalTo: label.centerYAnchor)])
         view.isHidden = true
@@ -84,6 +84,7 @@ final class NoticeBarView: NSView {
             try updater.start()
             if WizardAppUpdates.isOn { loadManual() }   // try-wizard#126
             if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
+            if WizardUpdateDeadlines.isOn { watchLater() }   // try-wizard#128
             recoverActivation()
         } catch { show("failed", "Updates unavailable — \(error.localizedDescription)", retry: true) }
     }
@@ -234,6 +235,87 @@ final class NoticeBarView: NSView {
     }
     // Later also stops a waiting update from asking again (waitThenRetry): the owner presses Update and restart anew.
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0; waitToken = UUID(); waitingSince = nil }
+    @objc private func laterPressed() {
+        hideNotice()
+        guard WizardUpdateDeadlines.isOn, ready != nil, let record = readyRecord, record.build == version else { return }
+        saveReady(WizardReadyUpdate.later(record, now: WizardUpdateDeadlines.now))
+    }
+
+    // MARK: Updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift, switch UpdateDeadlines)
+
+    /// The ready update's record (build, ready since, Later until, critical), kept beside ui.json so it outlives a quit.
+    static var readyFile: URL { WizardUpdate.dir.appendingPathComponent("ready.json") }
+    private var readyRecord: WizardReadyUpdate.Record? { WizardReadyUpdate.Record.read(WizardUpdate.json(Self.readyFile)) }
+    private func saveReady(_ record: WizardReadyUpdate.Record) { try? WizardUpdate.write(record.json, Self.readyFile) }
+    /// The update Sparkle found is marked `<sparkle:criticalUpdate>` (only read while the switch is on).
+    private var incomingCritical = false
+    private var installingOnQuit = false
+    private var quitAsked = false
+    /// The update is ready: remember since when (the same build keeps its time, a newer one starts over). True when an
+    /// unexpired Later keeps the bar hidden.
+    private func noteReady() -> Bool {
+        let record = WizardReadyUpdate.ready(readyRecord, build: version, critical: incomingCritical, now: WizardUpdateDeadlines.now)
+        saveReady(record)
+        return WizardReadyUpdate.staysHidden(record, now: WizardUpdateDeadlines.now)
+    }
+    /// Once a minute: a Later that ran out brings the bar back, once (not on every check).
+    private func watchLater() {
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            MainActor.assumeIsolated { WizardUpdater.shared.laterTick() }
+        }
+    }
+    private func laterTick() {
+        guard WizardUpdateDeadlines.isOn, ready != nil, !preparing, !installingOnQuit, let record = readyRecord, record.build == version,
+              WizardReadyUpdate.showAgain(record, now: WizardUpdateDeadlines.now, barHidden: view.isHidden) else { return }
+        saveReady(WizardReadyUpdate.shown(record))
+        show("ready", "Update \(version) available — ready to restart")
+    }
+    /// Quitting with an update ready for 3+ days: true when Wizard asks first (the quit is cancelled and redone after).
+    private func offerOnQuit() -> Bool {
+        guard WizardUpdateDeadlines.isOn, !quitAsked, ready != nil,
+              WizardReadyUpdate.offerOnQuit(readyRecord, readyBuild: version, now: WizardUpdateDeadlines.now) else { return false }
+        quitAsked = true
+        DispatchQueue.main.async { self.askInstallOnQuit() }
+        return true
+    }
+    private func ask(_ alert: NSAlert, _ done: @escaping (NSApplication.ModalResponse) -> Void) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.attachedSheet == nil && $0.canBecomeMain }) {
+            alert.beginSheetModal(for: window, completionHandler: done)
+        } else { done(alert.runModal()) }
+    }
+    private func askInstallOnQuit() {
+        guard ready != nil, !preparing else { quitWithoutUpdating(); return }
+        let shown = latestVersion.isEmpty ? version : latestVersion
+        // A recording, agent work or another candidate's Host: say so at once rather than offer what can't happen.
+        if isRecording() || qaBusy { cannotUpdateOnQuit("Something is recording or an agent is working, so Wizard can't update now"); return }
+        if HostControl.hasForeignRunner { cannotUpdateOnQuit("Another candidate's Wizard Host is running"); return }
+        let alert = NSAlert()
+        alert.messageText = WizardReadyUpdate.quitTitle(shown)
+        alert.informativeText = WizardReadyUpdate.quitText
+        alert.addButton(withTitle: WizardReadyUpdate.installAndQuit)      // default (Return)
+        alert.addButton(withTitle: WizardReadyUpdate.quitWithoutUpdating)
+        ask(alert) { [weak self] answer in
+            guard let self else { return }
+            guard answer == .alertFirstButtonReturn else { self.quitWithoutUpdating(); return }
+            // Update and restart, with all its guards; installApproved quits instead of relaunching.
+            self.installingOnQuit = true
+            self.updateAndRestart()
+        }
+    }
+    /// A guard said no: tell the owner why, then quit as today (the prepared update is cancelled, the old build stays).
+    private func cannotUpdateOnQuit(_ reason: String) {
+        installingOnQuit = false
+        let alert = NSAlert()
+        alert.messageText = WizardReadyUpdate.cannotTitle
+        alert.informativeText = WizardReadyUpdate.cannotText(reason)
+        alert.addButton(withTitle: WizardReadyUpdate.quitWithoutUpdating)
+        ask(alert) { [weak self] _ in self?.quitWithoutUpdating() }
+    }
+    private func quitWithoutUpdating() {
+        installingOnQuit = false
+        DispatchQueue.main.async { NSApp.terminate(nil) }   // shouldTerminate cancels the prepared install, as before
+    }
 
     // MARK: Hand install: the guest update this app carries and this disk hasn't received (try-wizard#162)
 
@@ -420,6 +502,7 @@ final class NoticeBarView: NSView {
         // out under news.
         action.isHidden = !(button != nil || retry || ready != nil)
         later.isEnabled = !preparing
+        if WizardUpdateDeadlines.isOn { later.isHidden = !WizardReadyUpdate.showsLater(critical: incomingCritical, phase: state) }   // try-wizard#128
         try? WizardUpdate.write(snapshot, WizardUpdate.dir.appendingPathComponent("ui.json"))
         // Good news needs no answer: let it go by itself unless something newer replaced it.
         let token = UUID(); noticeToken = token
@@ -433,13 +516,14 @@ final class NoticeBarView: NSView {
     }
     var snapshot: [String: Any] {
         let installed = NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String ?? "unconfirmed"
-        return ["pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden]
+        return ["pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden, "critical": WizardUpdateDeadlines.isOn && incomingCritical]
     }
     func shouldTerminate() -> NSApplication.TerminateReply {
         if restartAuthorized { return .terminateNow }
         // Sparkle otherwise installs a prepared update on an ordinary quit, outside the Host lease.
         // Cancel the pending installation first; never treat Later as permission to install on quit.
         if preparing { return .terminateCancel }
+        if offerOnQuit() { return .terminateCancel }   // try-wizard#128: ready for 3+ days, ask first
         if let reply = ready { ordinaryQuitPending = true; ready = nil; reply(.skip); return .terminateCancel }
         if let cancel { ordinaryQuitPending = true; self.cancel = nil; cancel(); return .terminateCancel }
         return .terminateNow
@@ -451,7 +535,10 @@ final class NoticeBarView: NSView {
         if ready == nil { checkForUpdates(); return }
         guard !preparing else { return }
         if isRecording() || qaBusy { waitThenRetry("Recording or agent work is active — updates when it finishes"); return }
-        if HostControl.hasForeignRunner { show("busy", "Another candidate's Wizard Host is running — close that candidate before updating"); return }
+        if HostControl.hasForeignRunner {
+            if installingOnQuit { cannotUpdateOnQuit("Another candidate's Wizard Host is running"); return }
+            show("busy", "Another candidate's Wizard Host is running — close that candidate before updating"); return
+        }
         plannedGuestActivation = incomingGuest && Store.active?.kind == .thisMac && WizardShared.osInstalled
         preparing = true
         admitWebRestart { [weak self] idle in
@@ -515,6 +602,14 @@ final class NoticeBarView: NSView {
         restartAuthorized = true; ready = nil; cancel = nil
         var journal = WizardUpdate.json(WizardUpdate.journal); journal["phase"] = "installing"
         do { try WizardUpdate.write(journal, WizardUpdate.journal) } catch { restartAuthorized = false; ready = reply; fail(error.localizedDescription); return }
+        if installingOnQuit {
+            // Install and quit (try-wizard#128): no reply, so Sparkle installs the prepared update once Wizard has quit
+            // (SPUUserDriver: "If the application terminates on its own, Sparkle will attempt to automatically install
+            // the update") and doesn't relaunch it. WizardOS was stopped above; the next launch finishes the journal.
+            show("installing", "Installing update and quitting…")
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+            return
+        }
         show("installing", "Installing update and restarting…")
         reply(.install)
     }
@@ -539,6 +634,7 @@ final class NoticeBarView: NSView {
     static let busyRetryEvery: TimeInterval = 30
     static let busyRetryFor: TimeInterval = 6 * 3600
     private func waitThenRetry(_ text: String) {
+        if installingOnQuit { cannotUpdateOnQuit(text); return }   // quitting: say why, don't wait
         show("busy", text, waiting: isRecording() ? "recording" : "work")
         let since = waitingSince ?? Date(); waitingSince = since
         guard Date().timeIntervalSince(since) < Self.busyRetryFor else { waitingSince = nil; return }
@@ -553,6 +649,7 @@ final class NoticeBarView: NSView {
         var journal = WizardUpdate.json(WizardUpdate.journal)
         if journal["phase"] as? String == "prepared" || journal["phase"] as? String == "installing" { journal["phase"] = "install-failed"; try? WizardUpdate.write(journal, WizardUpdate.journal) }
         if stoppedHost && !HostControl.isRunning { HostControl.ensureRunning() }
+        if installingOnQuit { cannotUpdateOnQuit(text); return }
         show("failed", "Update failed — \(text). Previous installed app or retained recovery bundle remains available.", retry: ready == nil)
     }
     private func recoverActivation() {
@@ -628,7 +725,8 @@ final class NoticeBarView: NSView {
         return WizardAppUpdateStatus.object(
             installedVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             installedBuild: installedBuild, phase: pagePhase, latest: latest, progress: progress,
-            checkedAt: updater?.lastUpdateCheckDate, waitingFor: waitingFor, manualURL: manual?.url, error: message)
+            checkedAt: updater?.lastUpdateCheckDate, waitingFor: waitingFor, manualURL: manual?.url, error: message,
+            urgent: WizardUpdateDeadlines.isOn && incomingCritical)   // try-wizard#128
     }
     private func publishStatus() {
         guard WizardAppUpdates.isOn else { return }
@@ -788,6 +886,7 @@ final class NoticeBarView: NSView {
         version = item.versionString; latestVersion = item.displayVersionString
         if item.isInformationOnlyUpdate, WizardAppUpdates.isOn { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }   // try-wizard#126
         if item.isInformationOnlyUpdate { show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss); return }
+        incomingCritical = WizardUpdateDeadlines.isOn && item.isCriticalUpdate   // try-wizard#128
         // A newer release that installs itself replaces a remembered one that needed a new download.
         if let manual, !WizardAppUpdateStatus.isOlder(item.versionString, than: manual.build) { clearManual() }
         show("available", "Update \(item.displayVersionString) available — downloading…")
@@ -808,7 +907,12 @@ final class NoticeBarView: NSView {
     func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; progress = expected > 0 ? min(1, Double(received) / Double(expected)) : nil; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
     func showDownloadDidStartExtractingUpdate() { cancel = nil; progress = nil; show("verifying", "Verifying and preparing update…") }
     func showExtractionReceivedProgress(_ progress: Double) { self.progress = progress; show("verifying", "Preparing update \(Int(progress * 100))%") }
-    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; waitingSince = nil; show("ready", "Update \(version) available — ready to restart") }
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        cancel = nil; ready = reply; waitingSince = nil
+        let hidden = WizardUpdateDeadlines.isOn && noteReady()   // try-wizard#128
+        show("ready", "Update \(version) available — ready to restart")
+        if hidden { hideNotice() }   // Later until tomorrow outlives a relaunch
+    }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
         show("installing", "Installing update and restarting…")
         // Installation handoff is confirmed. Quit ourselves after the deliberate
