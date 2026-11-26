@@ -547,6 +547,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
         let boot = VZLinuxBootLoader(kernelURL: dir.appendingPathComponent("boot/vmlinux"))
         boot.initialRamdiskURL = dir.appendingPathComponent("boot/initrd")
         boot.commandLine = (manifest["cmdline"] as? String) ?? "console=hvc0 root=/dev/vda rw quiet"
+        // Public DNS next to the Mac's NAT DNS on every disk, also one the bundled guest update never reached (the 0.4.0
+        // download predates 50-wizard-dns.conf): systemd-resolved takes nameserver= from the kernel command line as its
+        // global servers, the same as that drop-in's DNS=, and Docker hands them to the engine container. Without
+        // them a Mac whose NAT DNS truncates answers (Tailscale) can't reach Nous, so Start free fails (try-wizard#192).
+        if !boot.commandLine.contains("nameserver=") { boot.commandLine += " nameserver=1.1.1.1 nameserver=9.9.9.9" }
         if let token = WizardShared.coldBootstrapToken {
             // Fixed command line: bypass systemd completely until PID1 seals Docker.
             boot.commandLine = "console=hvc0 root=/dev/vda rw init=/bin/sh wizard.dev=1 wizard.cold=\(token)"

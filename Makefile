@@ -99,6 +99,7 @@ test-contracts:
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_macos14_launch.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_update_after_vm_error.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_lease_retry.py"
+	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_guest_dns_boot.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_fresh_install_guest_update.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_fresh_mac_download.py"
 	@PYTHONDONTWRITEBYTECODE=1 python3 "$(ROOT)/next/mac/Tests/test_hand_install_guest_update.py"
