@@ -77,6 +77,23 @@ The temporary R2 credentials in `mac-publish` must include the `mac-beta/` prefi
 "Run workflow" on `main` runs the same pipeline as a dry run by default: it publishes to `mac-dryrun/` only and never
 touches `mac/appcast.xml` or `index.html`. Until the Sparkle key is in `mac-sign`, a run builds and stops before signing.
 
+**Upgrade test** (try-wizard#129, off by default). With repo variable `WOS_MAC_UPGRADE_TEST=on` (or the "upgrade
+test" tick on Run workflow, for that run only) `publish` also waits for an `upgrade-test` job (macos-15, no secrets):
+
+- `build` also builds a test-only **candidate + 1** (the same source and release ID, `BUILD+1`, sealed by `build.sh`
+  like the candidate) and stages two loopback feeds (`http://127.0.0.1:48219/`): one for the candidate's own archive,
+  one for candidate + 1. `sign` signs both with the same key and still runs no project code; neither is ever published.
+- `upgrade-test` runs `next/mac/tools/upgrade-test.py run`: (1) the app the live `mac/appcast.xml` offers, installed
+  in a temporary Applications folder, updates to the candidate; (2) the installed candidate updates itself to candidate
+  + 1. Each app runs with a throwaway DataHome, QA hooks, automatic checks off, `SUFeedURL` pointed at the loopback
+  feed and a stand-in "remote" Wizard page on the same server (voice idle), so no VM starts. Pass = the relaunched app
+  reports the target build, the installed `CFBundleVersion` is the target, `codesign --verify --deep --strict` passes
+  and `updates/transaction.json` says `native-activated`. The table lands in the run summary; on a failure the
+  journals, `ui.json`, `qa.json`, the app log and the feed requests are uploaded as `mac-upgrade-test-evidence`, the
+  run fails and `publish` never runs, so the live feed is untouched.
+- Step 1 is skipped with a warning when the live build is older than 312 (the first build from this workflow, all with
+  the QA control channel) or not older than the candidate (a dry run of a released version); step 2 still runs.
+
 The WizardOS image (`os/`) is still published by the operator helper (`aiwizards_downloads_publish.py os <feed dir>
 <version>`), which follows the same order: versioned files first, verified through the public URL, `os/latest.json` last.
 

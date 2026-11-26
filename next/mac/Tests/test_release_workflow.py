@@ -110,6 +110,71 @@ class ReleaseWorkflow(unittest.TestCase):
             self.assertRegex(key, r'^"?(\$CHANNEL|mac)/')
         self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]]', publish)
 
+    def test_publish_waits_for_the_upgrade_test(self):
+        """try-wizard#129: with the switch on, nothing reaches the live feed before upgrade-test passed."""
+        publish = jobs()['publish']
+        self.assertIn('needs: [build, sign, upgrade-test]', publish)
+        condition = publish.split('if: >-', 1)[1].split('runs-on:', 1)[0]
+        self.assertIn("needs.upgrade-test.result == 'success'", condition)
+        # Skipped counts only when the switch is off for this run.
+        self.assertIn("needs.upgrade-test.result == 'skipped' && needs.build.outputs.upgrade != 'yes'", condition)
+        self.assertIn("needs.sign.result == 'success'", condition)
+        self.assertIn("needs.sign.outputs.signed == 'true'", condition)
+        self.assertNotIn('always()', condition)
+        self.assertIn('needs: [build, publish]', jobs()['tag'])
+
+    def test_upgrade_test_runs_both_steps_without_secrets(self):
+        test = jobs()['upgrade-test']
+        self.assertIn('runs-on: macos-15', test)
+        self.assertIn('needs: [build, sign]', test)
+        self.assertIn("needs.build.outputs.upgrade == 'yes' && needs.sign.outputs.signed == 'true'", test)
+        self.assertNotIn('secrets.', test)
+        self.assertNotIn('environment:', test)
+        self.assertIn('next/mac/tools/upgrade-test.py run --live-feed "$DOWNLOADS/mac/appcast.xml"', test)
+        self.assertIn('--plus-one', test)
+        evidence = test.split('Upload the upgrade test', 1)[1]
+        self.assertIn('if: failure()', evidence)
+        self.assertIn('upgrade-evidence', evidence)
+
+    def test_private_key_appears_only_in_sign(self):
+        for name, body in jobs().items():
+            if name != 'sign':
+                self.assertNotIn('SPARKLE_ED_PRIVATE_KEY', body, name)
+                self.assertNotIn('--ed-key-file', body, name)
+        head = WORKFLOW.read_text().split('\njobs:\n', 1)[0]
+        head = '\n'.join(line for line in head.splitlines() if not line.lstrip().startswith('#'))
+        self.assertNotIn('SPARKLE_ED_PRIVATE_KEY', head)
+        self.assertNotIn('secrets.', head)
+
+    def test_upgrade_test_switch_is_off_by_default(self):
+        text = WORKFLOW.read_text()
+        self.assertIn("UPGRADE_TEST: ${{ vars.WOS_MAC_UPGRADE_TEST == 'on' || inputs.upgrade_test == true }}", text)
+        upgrade_input = text.split('upgrade_test:', 1)[1].split('pull_request:', 1)[0]
+        self.assertIn('default: false', upgrade_input)
+        build = jobs()['build']
+        self.assertIn('[[ "$UPGRADE_TEST" == true && "$mode" != check ]] && upgrade=yes', build)
+        # Every upgrade step in build and sign waits for the switch.
+        for job in ('build', 'sign'):
+            body = jobs()[job]
+            for step in re.split(r'(?m)^      - name: ', body)[1:]:
+                if 'upgrade' in step.split('\n', 1)[0].lower():
+                    self.assertRegex(step, r"if: .*upgrade == 'yes'", step.split('\n', 1)[0])
+        sign = jobs()['sign']
+        self.assertIn('if [[ "$UPGRADE" == yes ]]; then', sign)
+
+    def test_candidate_plus_one_is_built_unsigned_and_signed_only_in_sign(self):
+        build = jobs()['build']
+        self.assertIn('BUILD=$plus next/mac/build.sh', build)
+        self.assertIn('plus=$((BUILD + 1))', build)
+        self.assertIn('--base-url "$UPGRADE_LOOPBACK"', build)
+        sign = jobs()['sign']
+        self.assertIn('plus_sig=$(sign_update -p "$plus_archive")', sign)
+        self.assertIn('sign_update --verify signed-upgrade/appcast-plus-one.xml', sign)
+        self.assertIn('sign_update --verify signed-upgrade/appcast-candidate.xml', sign)
+        # Never published: publish reads only the mac-stage and mac-signed artifacts.
+        publish = jobs()['publish']
+        self.assertNotIn('upgrade', publish.split('steps:', 1)[1])
+
     def test_only_main_releases_and_tags_are_written_by_the_workflow(self):
         text = WORKFLOW.read_text()
         self.assertIn("refs/heads/main", text)

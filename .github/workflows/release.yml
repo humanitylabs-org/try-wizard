@@ -15,6 +15,11 @@ name: Mac release
 #              try-wizard#115). Uploads with the runner's aws CLI to downloads.aiwizards.com/<channel>/<build>/,
 #              never overwrites a versioned key, checks every file byte for byte through the public URL, then
 #              switches the appcast last (a real release also writes mac/index.html). No checkout, no project code.
+#  upgrade-test (try-wizard#129; only with the switch on, below) macos-15, no secrets, no environment. Before publish:
+#              the app the live mac/appcast.xml offers is installed and updates to the candidate, then the installed
+#              candidate updates itself to a test-only copy with the build raised by one (built by build, signed by
+#              sign, never published). Real Sparkle installs over a loopback feed; next/mac/tools/upgrade-test.py.
+#              publish waits for it, so a candidate whose updater is broken never reaches the live feed.
 #  4. tag      a real release tags the released commit v<version> and writes a GitHub release with the links.
 #
 # How a release starts: a PR that raises next/mac/release/version.json (version and build; the build must be higher
@@ -29,6 +34,8 @@ name: Mac release
 # under mac-beta/<build>/), never touches mac/, and its GitHub release is a prerelease. Installed apps read only
 # mac/appcast.xml, so nobody is updated to it until the release train (promote.yml, every 6h, no person) finds it soaked
 # 72h with no release-blocker open and copies that build's signed feed to mac/ with the same bytes, no rebuild.
+# Switch (try-wizard#129, off by default): repo variable WOS_MAC_UPGRADE_TEST=on runs upgrade-test on every real and
+# dry-run release; the "upgrade test" tick on Run workflow runs it for that one run. Off: the jobs run as before.
 on:
   push:
     branches: [main]
@@ -40,6 +47,10 @@ on:
         description: 'Dry run: publish to mac-dryrun/ only (untick for a real release)'
         type: boolean
         default: true
+      upgrade_test:
+        description: 'Upgrade test: live app -> this build -> this build + 1 before publishing (try-wizard#129)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - '.github/workflows/release.yml'
@@ -58,6 +69,8 @@ env:
   SPARKLE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
   DOWNLOADS: https://downloads.aiwizards.com
   BUCKET: aiwizards-downloads
+  # try-wizard#129: the upgrade test's loopback feed (upgrade-test.py serves it on the upgrade-test runner).
+  UPGRADE_LOOPBACK: http://127.0.0.1:48219
 
 jobs:
   build:
@@ -69,6 +82,7 @@ jobs:
       channel: ${{ steps.settings.outputs.channel }}
       version: ${{ steps.settings.outputs.version }}
       build: ${{ steps.settings.outputs.build }}
+      upgrade: ${{ steps.settings.outputs.upgrade }}
     steps:
       - name: Check out
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -81,6 +95,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
           LANES: ${{ vars.WOS_RELEASE_LANES }}
+          UPGRADE_TEST: ${{ vars.WOS_MAC_UPGRADE_TEST == 'on' || inputs.upgrade_test == true }}
         run: |
           set -euo pipefail
           version=$(python3 -c 'import json;print(json.load(open("next/mac/release/version.json"))["version"])')
@@ -111,8 +126,13 @@ jobs:
               (( build > ${beta:-0} )) || { echo "::error::build $build is not higher than the tester appcast's $beta; raise next/mac/release/version.json"; exit 1; }
             fi
           fi
-          printf 'mode=%s\nchannel=%s\nversion=%s\nbuild=%s\n' "$mode" "$channel" "$version" "$build" >> "$GITHUB_OUTPUT"
+          # The upgrade test (try-wizard#129) runs only with its switch on, and only where something is signed.
+          upgrade=no
+          [[ "$UPGRADE_TEST" == true && "$mode" != check ]] && upgrade=yes
+          printf 'mode=%s\nchannel=%s\nversion=%s\nbuild=%s\nupgrade=%s\n' "$mode" "$channel" "$version" "$build" "$upgrade" >> "$GITHUB_OUTPUT"
           echo "### WizardOS $version (build $build): $mode" >> "$GITHUB_STEP_SUMMARY"
+          [[ "$upgrade" == yes ]] && echo "Upgrade test: on (live app -> $build -> $((build + 1)) before publishing)" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
 
       - name: Fetch Sparkle (checksum-pinned)
         run: |
@@ -194,6 +214,44 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Stage the upgrade test (candidate + 1 and loopback feeds; test-only, never published)
+        if: steps.settings.outputs.upgrade == 'yes'
+        env:
+          VER: ${{ steps.settings.outputs.version }}
+          BUILD: ${{ steps.settings.outputs.build }}
+          CHANNEL: ${{ steps.settings.outputs.channel }}
+          RELEASE_ID: ${{ github.sha }}
+          SIGN_IDENTITY: '-'
+        run: |
+          set -euo pipefail
+          up="$RUNNER_TEMP/upgrade"; mkdir -p "$up"
+          # The candidate's own archive, offered by a feed on the loopback test server (sign signs it for this archive).
+          python3 next/mac/tools/upgrade-test.py loopback-feed --template "$RUNNER_TEMP/stage/appcast.template.xml" \
+            --out "$up/appcast-candidate.template.xml" --public-base "$DOWNLOADS/$CHANNEL" --loopback-base "$UPGRADE_LOOPBACK"
+          # Candidate + 1: the same source and release ID with the build raised by one, built and sealed like the
+          # candidate, so the installed candidate's updater has something newer to install.
+          plus=$((BUILD + 1))
+          export SPARKLE_DIR="$RUNNER_TEMP/sparkle" GUEST_UPDATE_PAYLOAD="$RUNNER_TEMP/guest-update" DMG=0
+          SPARKLE_PUBLIC_KEY=$(tr -d '[:space:]' < next/mac/release/sparkle-public-key.txt)
+          export SPARKLE_PUBLIC_KEY SPARKLE_FEED="$DOWNLOADS/mac/appcast.xml"
+          BUILD=$plus next/mac/build.sh
+          codesign --verify --deep --strict next/mac/dist/Wizard.app
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' next/mac/dist/Wizard.app/Contents/Info.plist)" == "$plus" ]]
+          python3 next/mac/tools/stage-release.py --app next/mac/dist/Wizard.app --dmg "$RUNNER_TEMP/stage/Wizard-$VER.dmg" \
+            --out "$up/plus-one" --base-url "$UPGRADE_LOOPBACK" --version "$VER" --build "$plus" > /dev/null
+          rm -f "$up/plus-one/Wizard-$VER.dmg" "$up/plus-one/index.html"
+          mv "$up/plus-one/appcast.template.xml" "$up/appcast-plus-one.template.xml"
+          echo "Upgrade test staged: candidate $BUILD and test-only $plus on $UPGRADE_LOOPBACK" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the upgrade test's staged files
+        if: steps.settings.outputs.upgrade == 'yes'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-upgrade-stage
+          path: ${{ runner.temp }}/upgrade/
+          if-no-files-found: error
+          retention-days: 7
+
   sign:
     name: Sign the appcast (mac-sign)
     needs: build
@@ -211,6 +269,13 @@ jobs:
           name: mac-stage
           path: stage
 
+      - name: Download the upgrade test's staged files
+        if: needs.build.outputs.upgrade == 'yes'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-upgrade-stage
+          path: upgrade
+
       - name: Fetch Sparkle sign_update (checksum-pinned)
         run: |
           set -euo pipefail
@@ -224,6 +289,7 @@ jobs:
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           MODE: ${{ needs.build.outputs.mode }}
+          UPGRADE: ${{ needs.build.outputs.upgrade }}
         run: |
           set -euo pipefail
           if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
@@ -270,7 +336,38 @@ jobs:
             echo "::error::The mac-sign key does not match the public key built into the app; installed apps would reject this update."
             exit 1
           fi
+
+          # The upgrade test (try-wizard#129): the same key signs two test-only feeds on the loopback server, one for
+          # the archive above and one for the candidate + 1 archive. Neither is ever published.
+          if [[ "$UPGRADE" == yes ]]; then
+            mkdir -p signed-upgrade
+            [[ $(grep -c '@ED_SIGNATURE@' upgrade/appcast-candidate.template.xml) == 1 ]] || { echo "::error::upgrade test feed placeholder missing"; exit 1; }
+            sed "s|@ED_SIGNATURE@|$sig|" upgrade/appcast-candidate.template.xml > signed-upgrade/appcast-candidate.xml
+            sign_update signed-upgrade/appcast-candidate.xml
+            sign_update --verify signed-upgrade/appcast-candidate.xml
+            plus_field() { /usr/bin/plutil -extract "$1" raw -o - upgrade/plus-one/release-stage.json; }
+            plus_archive="upgrade/plus-one/$(plus_field archive.name)"
+            [[ "$(shasum -a 256 "$plus_archive" | cut -d' ' -f1)" == "$(plus_field archive.sha256)" ]] || {
+              echo "::error::candidate + 1 archive checksum changed between jobs"; exit 1; }
+            plus_sig=$(sign_update -p "$plus_archive")
+            [[ "$plus_sig" =~ ^[A-Za-z0-9+/]{86}==$ ]] || { echo "::error::unexpected signature format"; exit 1; }
+            [[ $(grep -c '@ED_SIGNATURE@' upgrade/appcast-plus-one.template.xml) == 1 ]] || { echo "::error::upgrade test feed placeholder missing"; exit 1; }
+            sed "s|@ED_SIGNATURE@|$plus_sig|" upgrade/appcast-plus-one.template.xml > signed-upgrade/appcast-plus-one.xml
+            sign_update signed-upgrade/appcast-plus-one.xml
+            sign_update --verify signed-upgrade/appcast-plus-one.xml
+            sign_update --verify "$plus_archive" "$plus_sig"
+            echo "Upgrade test feeds signed (test-only, never published)." >> "$GITHUB_STEP_SUMMARY"
+          fi
           printf 'signed=true\narchive_sha256=%s\n' "$sum" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the upgrade test's signed feeds
+        if: steps.sign.outputs.signed == 'true' && needs.build.outputs.upgrade == 'yes'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-upgrade-signed
+          path: signed-upgrade/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload signed appcast
         if: steps.sign.outputs.signed == 'true'
@@ -281,10 +378,62 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  upgrade-test:
+    name: Upgrade test (live app -> candidate -> candidate + 1)
+    needs: [build, sign]
+    if: needs.build.outputs.upgrade == 'yes' && needs.sign.outputs.signed == 'true'
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download staged release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-stage
+          path: ${{ runner.temp }}/stage
+
+      - name: Download the upgrade test's staged files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-upgrade-stage
+          path: ${{ runner.temp }}/upgrade
+
+      - name: Download the upgrade test's signed feeds
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mac-upgrade-signed
+          path: ${{ runner.temp }}/upgrade-signed
+
+      - name: Live app -> candidate -> candidate + 1 (real Sparkle installs, loopback feed, no VM)
+        run: |
+          set -euo pipefail
+          python3 next/mac/tools/upgrade-test.py run --live-feed "$DOWNLOADS/mac/appcast.xml" \
+            --candidate "$RUNNER_TEMP/stage" --plus-one "$RUNNER_TEMP/upgrade/plus-one" \
+            --signed "$RUNNER_TEMP/upgrade-signed" --work "$RUNNER_TEMP/upgrade-work" \
+            --evidence "$RUNNER_TEMP/upgrade-evidence" --port "${UPGRADE_LOOPBACK##*:}"
+
+      - name: Upload the upgrade test's logs and journals
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-upgrade-test-evidence
+          path: ${{ runner.temp }}/upgrade-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   publish:
     name: Publish to downloads.aiwizards.com (mac-publish)
-    needs: [build, sign]
-    if: needs.sign.outputs.signed == 'true'
+    needs: [build, sign, upgrade-test]
+    # upgrade-test is skipped only with its switch off (try-wizard#129); on, publish runs only after it passed.
+    if: >-
+      !cancelled() && needs.build.result == 'success' && needs.sign.result == 'success'
+      && needs.sign.outputs.signed == 'true'
+      && (needs.upgrade-test.result == 'success'
+          || (needs.upgrade-test.result == 'skipped' && needs.build.outputs.upgrade != 'yes'))
     runs-on: ubuntu-latest
     environment: mac-publish
     timeout-minutes: 30
