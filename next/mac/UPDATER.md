@@ -81,6 +81,33 @@ passes the same fixed Host check (SOUL.md, .env and account credentials unchange
 every installed file runs from that boot. The full `mac-stack-v1` payload (Service image, managed Hermes, WAM) is
 still built only on the owned arm64 build machine; see `next/guest/build-runtime-payload.py`.
 
+## Update state for the page, and releases that need a new download (try-wizard#126)
+
+Off by default: `defaults write org.humanitylabs.wizard.mvp AppUpdates -bool YES`, then reopen Wizard. With it on:
+
+- The native bridge answers `updates.status` with `{schema: 1, installed: {version, build}, phase, latest: {version,
+  build} | null, progress: 0..1 | null, checkedAt: ms | null, waitingFor: "recording" | "work" | null, manual: {url} |
+  null, error, channel}` (`phase` is one of idle, checking, current, downloading, verifying, ready, installing, manual,
+  failed; `channel` stays null until wizard-os#720's `mac-beta`). `updates.check` is the menu's Check for Updates… and
+  answers the status. `updates.install` is the bar's Update and restart with all its guards and answers
+  `{started: true}` or `{started: false, reason}`. `updates.download` opens `manual.url` in the browser; only https
+  pages on www.aiwizards.com or downloads.aiwizards.com ever open. Rules: `Shared/AppUpdateStatus.swift`.
+- Every change of the update bar reaches the trusted shell document as the window event `wizard:app-update` (same
+  object), never an app frame or another page.
+- An information-only appcast item (Sparkle `informationalUpdate`) is remembered in `updates/manual.json` until the
+  installed build reaches it. The bar says "Wizard for Mac <version> needs a new download" with Download and Later;
+  the hourly check doesn't bring the bar back after Later, a Check for Updates… does.
+
+Switch off: no `updates.` capability in `app.info`, no events, and an information-only item still shows "Update
+available but cannot be downloaded from this feed" as before.
+
+To publish such a release, add `"manualBelow": <build>` to `next/mac/release/version.json` (at most the release's own
+build). `tools/stage-release.py` then writes `<link>https://www.aiwizards.com/downloads</link>` and
+`<sparkle:informationalUpdate><sparkle:belowVersion>N</sparkle:belowVersion></sparkle:informationalUpdate>` on the
+item: installs older than build N get "needs a new download", newer ones still update by themselves. Without the field
+the appcast is byte-identical to before. For a local QA feed, `tools/make-update-feed.py --manual-below N` does the
+same.
+
 ## Evidence / QA
 
 All compilation, Sparkle, native/VM/browser and sustained QA stays on Thales under the shared lock. Root:

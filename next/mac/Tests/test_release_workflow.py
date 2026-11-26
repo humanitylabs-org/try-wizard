@@ -205,6 +205,76 @@ class StageRelease(unittest.TestCase):
         self.assertEqual(enclosure.get('url'), 'https://downloads.example/mac/310/Wizard-310.zip')
         self.assertEqual(enclosure.get('length'), '1234')
 
+    # try-wizard#126: releases that need a new download.
+    ARGS = ('0.9.0', 330, {'build': '330', 'arch': 'arm64', 'hostProtocol': 1, 'files': {}, 'guestPatch': None},
+            'https://downloads.example/mac/330/Wizard-330.zip', 1234)
+    # appcast_template('0.9.0', 330, ...) as stage-release.py wrote it before try-wizard#126, byte for byte.
+    BEFORE = ('<?xml version="1.0" encoding="utf-8"?>\n<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" '
+              'xmlns:wizard="https://humanitylabs.co/wizard-updates/v1" version="2.0"><channel><title>WizardOS updates</title>'
+              '<item><title>WizardOS 0.9.0</title><sparkle:version>330</sparkle:version><sparkle:shortVersionString>0.9.0'
+              '</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0.0</sparkle:minimumSystemVersion>'
+              '<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements><wizard:contract>{"arch":"arm64",'
+              '"build":"330","files":{},"guestPatch":null,"hostProtocol":1}</wizard:contract><enclosure '
+              'url="https://downloads.example/mac/330/Wizard-330.zip" type="application/octet-stream" length="1234" '
+              'sparkle:edSignature="@ED_SIGNATURE@" /></item></channel></rss>\n')
+
+    def test_without_manual_below_the_appcast_is_unchanged(self):
+        stage = stage_module()
+        self.assertEqual(stage.appcast_template(*self.ARGS), self.BEFORE)
+        self.assertEqual(stage.appcast_template(*self.ARGS, manual_below=None), self.BEFORE)
+        with tempfile.TemporaryDirectory(prefix='try-wizard-126-') as tmp:
+            version = Path(tmp, 'version.json')
+            version.write_text(json.dumps({'version': '0.9.0', 'build': 330}))
+            self.assertIsNone(stage.manual_below(version, 330))
+        # The release's own version.json, as committed, sets nothing.
+        self.assertIsNone(stage.manual_below(stage.VERSION_FILE, 10 ** 6))
+
+    def test_manual_below_makes_older_installs_download_the_new_dmg(self):
+        stage = stage_module()
+        text = stage.appcast_template(*self.ARGS, manual_below=328)
+        self.assertEqual(text.count(stage.PLACEHOLDER), 1)
+        item = X.fromstring(text.split('\n', 1)[1]).find('channel/item')
+        ns = {'s': stage.SPARKLE_NS}
+        self.assertEqual(item.find('s:informationalUpdate/s:belowVersion', ns).text, '328')
+        self.assertEqual(item.find('link').text, 'https://www.aiwizards.com/downloads')
+        # Newer installs still update by themselves: the signed enclosure stays.
+        self.assertEqual(item.find('enclosure').get('url'), 'https://downloads.example/mac/330/Wizard-330.zip')
+        self.assertEqual(item.find('s:version', ns).text, '330')
+        # Nothing else in the item moved.
+        trimmed = text.replace('<link>https://www.aiwizards.com/downloads</link><sparkle:informationalUpdate>'
+                               '<sparkle:belowVersion>328</sparkle:belowVersion></sparkle:informationalUpdate>', '')
+        self.assertEqual(trimmed, self.BEFORE)
+
+    def test_manual_below_is_read_from_version_json_and_bounded(self):
+        stage = stage_module()
+        with tempfile.TemporaryDirectory(prefix='try-wizard-126-') as tmp:
+            version = Path(tmp, 'version.json')
+            version.write_text(json.dumps({'version': '0.9.0', 'build': 330, 'manualBelow': 330}))
+            self.assertEqual(stage.manual_below(version, 330), 330)
+            # Above its own build the release would tell its own installs to download it again.
+            for bad in (331, 0, -1, '328', True, 328.0):
+                version.write_text(json.dumps({'version': '0.9.0', 'build': 330, 'manualBelow': bad}))
+                with self.assertRaises(AssertionError, msg=repr(bad)):
+                    stage.manual_below(version, 330)
+
+    def test_appcast_with_manual_below_signs_and_verifies(self):
+        """sign_update signs the feed's bytes with Ed25519 and appends them in a comment; promote.yml checks that."""
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        except ImportError:
+            self.skipTest('python cryptography not installed')
+        stage = stage_module()
+        key = Ed25519PrivateKey.generate()
+        archive_sig = base64.b64encode(key.sign(b'archive bytes')).decode()
+        body = stage.appcast_template(*self.ARGS, manual_below=328).replace(stage.PLACEHOLDER, archive_sig).encode()
+        signature = key.sign(body)
+        signed = body + ('<!-- sparkle-signatures:\nedSignature: %s\nlength: %d\n-->\n'
+                         % (base64.b64encode(signature).decode(), len(body))).encode()
+        sig = re.search(rb'edSignature: (\S+)', signed.split(b'<!-- sparkle-signatures:')[1]).group(1)
+        length = int(re.search(rb'length: (\d+)', signed).group(1))
+        key.public_key().verify(base64.b64decode(sig), signed[:length])   # raises when it doesn't verify
+        X.fromstring(signed[:length].split(b'\n', 1)[1])
+
     def test_landing_page_names_the_new_dmg(self):
         page = stage_module().landing_page('0.8.0', 310, 'https://downloads.example/mac/310/Wizard-0.8.0.dmg',
                                            25_000_000, 'ab' * 32)

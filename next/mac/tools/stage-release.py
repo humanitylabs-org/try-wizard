@@ -22,6 +22,9 @@ import subprocess
 import xml.etree.ElementTree as X
 
 PLACEHOLDER = '@ED_SIGNATURE@'
+VERSION_FILE = pathlib.Path(__file__).resolve().parents[1] / 'release/version.json'
+# Where an install that can't take this release in place gets the new DMG (try-wizard#126).
+MANUAL_LINK = 'https://www.aiwizards.com/downloads'
 SPARKLE_NS = 'http://www.andymatuschak.org/xml-namespaces/sparkle'
 WIZARD_NS = 'https://humanitylabs.co/wizard-updates/v1'
 
@@ -34,8 +37,28 @@ def sha256(path):
     return h.hexdigest()
 
 
-def appcast_template(version, build, manifest, archive_url, archive_bytes):
-    """The complete feed, except the enclosure's edSignature, which is PLACEHOLDER."""
+def manual_below(version_file, build):
+    """The optional `manualBelow` of next/mac/release/version.json (try-wizard#126), or None.
+
+    Installs older than that build can't take this release in place (a change Sparkle can't apply, an old updater, a
+    signing change): the appcast tells them to download the new DMG instead. It may not exceed this release's own
+    build, or this release would tell its own installs to download it again.
+    """
+    value = json.loads(pathlib.Path(version_file).read_text()).get('manualBelow')
+    if value is None:
+        return None
+    assert isinstance(value, int) and not isinstance(value, bool) and 0 < value <= build, \
+        'manualBelow must be a build number from 1 to this release\'s build %d, not %r' % (build, value)
+    return value
+
+
+def appcast_template(version, build, manifest, archive_url, archive_bytes, manual_below=None):
+    """The complete feed, except the enclosure's edSignature, which is PLACEHOLDER.
+
+    With manual_below, installs older than that build see the item as information-only (Sparkle's
+    informationalUpdate/belowVersion) with MANUAL_LINK as its page; newer installs still update by themselves.
+    Without it the feed is exactly what it was before try-wizard#126.
+    """
     X.register_namespace('sparkle', SPARKLE_NS)
     X.register_namespace('wizard', WIZARD_NS)
     rss = X.Element('rss', version='2.0')
@@ -46,6 +69,10 @@ def appcast_template(version, build, manifest, archive_url, archive_bytes):
     for key, value in [('version', str(build)), ('shortVersionString', version),
                        ('minimumSystemVersion', '14.0.0'), ('hardwareRequirements', 'arm64')]:
         X.SubElement(item, '{%s}%s' % (SPARKLE_NS, key)).text = value
+    if manual_below is not None:
+        X.SubElement(item, 'link').text = MANUAL_LINK
+        informational = X.SubElement(item, '{%s}informationalUpdate' % SPARKLE_NS)
+        X.SubElement(informational, '{%s}belowVersion' % SPARKLE_NS).text = str(manual_below)
     X.SubElement(item, '{%s}contract' % WIZARD_NS).text = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
     X.SubElement(item, 'enclosure', {'url': archive_url, 'type': 'application/octet-stream',
                                      'length': str(archive_bytes), '{%s}edSignature' % SPARKLE_NS: PLACEHOLDER})
@@ -81,7 +108,9 @@ def main():
     p.add_argument('--base-url', required=True, help='public folder of this channel, e.g. https://downloads.aiwizards.com/mac')
     p.add_argument('--version', required=True)
     p.add_argument('--build', type=int, required=True)
+    p.add_argument('--version-file', type=pathlib.Path, default=VERSION_FILE, help='release/version.json (manualBelow)')
     a = p.parse_args()
+    below = manual_below(a.version_file, a.build)
 
     info = plistlib.loads((a.app / 'Contents/Info.plist').read_bytes())
     manifest = json.loads((a.app / 'Contents/Resources/wizard-release.json').read_text())
@@ -102,8 +131,10 @@ def main():
         'archive': {'name': archive.name, 'url': base + archive.name, 'bytes': archive.stat().st_size, 'sha256': sha256(archive)},
         'dmg': {'name': dmg.name, 'url': base + dmg.name, 'bytes': dmg.stat().st_size, 'sha256': sha256(dmg)},
     }
+    if below is not None:
+        stage['manualBelow'] = below
     (a.out / 'appcast.template.xml').write_text(
-        appcast_template(a.version, a.build, manifest, stage['archive']['url'], stage['archive']['bytes']))
+        appcast_template(a.version, a.build, manifest, stage['archive']['url'], stage['archive']['bytes'], below))
     (a.out / 'index.html').write_text(
         landing_page(a.version, a.build, stage['dmg']['url'], stage['dmg']['bytes'], stage['dmg']['sha256']))
     (a.out / 'release-stage.json').write_text(json.dumps(stage, indent=2) + '\n')
