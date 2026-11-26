@@ -28,7 +28,9 @@ let package = Package(
         .target(name: "WizardShellToken", path: "Shared", exclude: ["Shared.swift"], sources: ["ShellToken.swift"]),
         .testTarget(name: "WizardShellTokenTests", dependencies: ["WizardShellToken"], path: "Tests/ShellToken"),
         .target(name: "WizardOSDownload", path: "Shared", exclude: ["Shared.swift"], sources: ["OSDownload.swift"]),
-        .testTarget(name: "WizardOSDownloadTests", dependencies: ["WizardOSDownload"], path: "Tests/OSDownload")
+        .testTarget(name: "WizardOSDownloadTests", dependencies: ["WizardOSDownload"], path: "Tests/OSDownload"),
+        .target(name: "WizardAppUpdateStatus", path: "Shared", exclude: ["Shared.swift"], sources: ["AppUpdateStatus.swift"]),
+        .testTarget(name: "WizardAppUpdateStatusTests", dependencies: ["WizardAppUpdateStatus"], path: "Tests/AppUpdateStatus")
     ],
     swiftLanguageModes: [.v5]
 )

@@ -82,6 +82,7 @@ final class NoticeBarView: NSView {
             try WizardRelease.read(Bundle.main.bundleURL).validate(Bundle.main.bundleURL, verifyGuestFiles: false)
             updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
             try updater.start()
+            if WizardAppUpdates.isOn { loadManual() }   // try-wizard#126
             if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
             recoverActivation()
         } catch { show("failed", "Updates unavailable — \(error.localizedDescription)", retry: true) }
@@ -410,8 +411,8 @@ final class NoticeBarView: NSView {
     /// window included; the window adds no notice of its own.
     private func osUpdateTick() {}
     private var noticeToken = UUID()
-    private func show(_ state: String, _ text: String, retry: Bool = false, button: String? = nil) {
-        phase = state; message = text; label.stringValue = text
+    private func show(_ state: String, _ text: String, retry: Bool = false, button: String? = nil, waiting: String? = nil) {
+        phase = state; message = text; label.stringValue = text; waitingFor = waiting
         view.isHidden = false; height?.constant = 94
         action.title = button ?? (retry ? "Retry" : "Update and restart")
         action.isEnabled = button != nil && !preparing || retry || ready != nil && !preparing
@@ -428,6 +429,7 @@ final class NoticeBarView: NSView {
                 self.hideNotice()
             }
         }
+        publishStatus()
     }
     var snapshot: [String: Any] {
         let installed = NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String ?? "unconfirmed"
@@ -443,6 +445,7 @@ final class NoticeBarView: NSView {
         return .terminateNow
     }
     @objc func updateAndRestart() {
+        if phase == "manual", manual != nil, ready == nil { _ = openManualDownload(); return }   // try-wizard#126
         if phase == "host-recovery" { _ = retryHostHandover(); return }
         if phase == "guest-pending" && ready == nil { finishBundledGuestUpdate(); return }   // try-wizard#162
         if ready == nil { checkForUpdates(); return }
@@ -536,7 +539,7 @@ final class NoticeBarView: NSView {
     static let busyRetryEvery: TimeInterval = 30
     static let busyRetryFor: TimeInterval = 6 * 3600
     private func waitThenRetry(_ text: String) {
-        show("busy", text)
+        show("busy", text, waiting: isRecording() ? "recording" : "work")
         let since = waitingSince ?? Date(); waitingSince = since
         guard Date().timeIntervalSince(since) < Self.busyRetryFor else { waitingSince = nil; return }
         let token = UUID(); waitToken = token
@@ -601,6 +604,100 @@ final class NoticeBarView: NSView {
                 show("installed", "Wizard updated — build \(current)")
             }
         } catch { releaseLease(); show("failed", "The update couldn't be checked. Quit Wizard and open it again. Your data is safe.", retry: false) }
+    }
+
+    // MARK: The update state for the page (try-wizard#126; rules in Shared/AppUpdateStatus.swift, switch AppUpdates)
+
+    /// Called with the status object each time it changes, only while the AppUpdates switch is on (main.swift sends it
+    /// to the trusted page as `wizard:app-update`).
+    var onStatus: ([String: Any]) -> Void = { _ in }
+    private var latestVersion = ""
+    private var progress: Double?
+    private var waitingFor: String?
+    private var lastStatus: Data?
+    /// A release that can't install itself and needs the new download (an information-only Sparkle item).
+    private(set) var manual: WizardAppUpdateStatus.ManualRecord?
+    /// Kept beside ui.json so it outlives a quit, until the installed build reaches it.
+    static var manualFile: URL { WizardUpdate.dir.appendingPathComponent("manual.json") }
+    private var installedBuild: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "" }
+
+    var status: [String: Any] {
+        let pagePhase = WizardAppUpdateStatus.phase(phase, ready: ready != nil, manual: manual != nil)
+        let latest: (version: String, build: String)? = pagePhase == "manual"
+            ? manual.map { ($0.version, $0.build) } : (version.isEmpty ? nil : (latestVersion, version))
+        return WizardAppUpdateStatus.object(
+            installedVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            installedBuild: installedBuild, phase: pagePhase, latest: latest, progress: progress,
+            checkedAt: updater?.lastUpdateCheckDate, waitingFor: waitingFor, manualURL: manual?.url, error: message)
+    }
+    private func publishStatus() {
+        guard WizardAppUpdates.isOn else { return }
+        let current = status
+        // Download progress moves the bar on every chunk; the page hears only real changes (progress in 1% steps).
+        guard let data = try? JSONSerialization.data(withJSONObject: current, options: [.sortedKeys]), data != lastStatus else { return }
+        lastStatus = data
+        onStatus(current)
+    }
+    /// The hourly check finds the same release again: after Later the bar stays away (the page still says manual);
+    /// a check the owner asked for, or a different release, shows it again.
+    private func rememberManual(_ item: SUAppcastItem, asked: Bool) {
+        let link = item.infoURL?.absoluteString
+        if let link, !WizardAppUpdateStatus.allowsDownload(link) {
+            NSLog("Wizard: the feed's download page %@ is not an aiwizards.com page; offering %@ instead", link, WizardAppUpdateStatus.defaultDownloadURL)
+        }
+        let record = WizardAppUpdateStatus.ManualRecord(version: item.displayVersionString, build: item.versionString,
+                                                        url: WizardAppUpdateStatus.manualURL(link: link))
+        let known = manual == record
+        manual = record
+        try? FileManager.default.createDirectory(at: WizardUpdate.dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? WizardUpdate.write(record.json, Self.manualFile)
+        if known, !asked, view.isHidden { phase = "manual"; message = WizardAppUpdateStatus.manualText(record.version); publishStatus(); return }
+        showManual()
+    }
+    private func loadManual() {
+        let stored = WizardUpdate.json(Self.manualFile)
+        guard !stored.isEmpty else { return }
+        guard let record = WizardAppUpdateStatus.ManualRecord.read(stored, installedBuild: installedBuild) else { clearManual(); return }
+        manual = record
+        showManual()
+    }
+    private func clearManual() {
+        manual = nil
+        try? FileManager.default.removeItem(at: Self.manualFile)
+    }
+    private func showManual() {
+        guard let manual else { return }
+        show("manual", WizardAppUpdateStatus.manualText(manual.version), button: "Download")
+    }
+    /// nil when the browser opened the download page, else why not.
+    func openManualDownload() -> String? {
+        guard let page = manual?.url else { return "No Wizard for Mac release needs a new download." }
+        guard WizardAppUpdateStatus.allowsDownload(page), let url = URL(string: page) else {
+            return "That download page is not on aiwizards.com, so Wizard didn't open it."
+        }
+        return NSWorkspace.shared.open(url) ? nil : "The browser didn't open."
+    }
+    /// `updates.check`: the menu's Check for Updates…; answers the status once Sparkle has taken the check.
+    func checkFromPage(_ done: @escaping ([String: Any]) -> Void) {
+        checkForUpdates()
+        DispatchQueue.main.async { done(self.status) }
+    }
+    /// `updates.install`: the bar's Update and restart, with all its guards. Refuses at once, in plain words, when
+    /// it can't start now; nothing is scheduled then.
+    func installFromPage() -> [String: Any] {
+        let finish = phase == "guest-pending" && ready == nil
+        if let reason = WizardAppUpdateStatus.installRefusal(ready: ready != nil, finishPending: finish,
+                preparing: preparing || activatingGuest, recording: isRecording(), work: qaBusy,
+                foreignHost: HostControl.hasForeignRunner) {
+            return ["started": false, "reason": reason]
+        }
+        updateAndRestart()
+        return ["started": true]
+    }
+    /// `updates.download`: opens the remembered download page (aiwizards.com only).
+    func downloadFromPage() -> [String: Any] {
+        if let reason = openManualDownload() { return ["opened": false, "reason": reason] }
+        return ["opened": true, "url": manual?.url ?? ""]
     }
 
     // MARK: New Host after an app update (try-wizard#127; decisions in Shared/HostHandover.swift)
@@ -688,21 +785,29 @@ final class NoticeBarView: NSView {
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) { reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false)) }
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { cancel = cancellation; show("checking", "Checking for updates…") }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        version = item.versionString
+        version = item.versionString; latestVersion = item.displayVersionString
+        if item.isInformationOnlyUpdate, WizardAppUpdates.isOn { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }   // try-wizard#126
         if item.isInformationOnlyUpdate { show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss); return }
+        // A newer release that installs itself replaces a remembered one that needed a new download.
+        if let manual, !WizardAppUpdateStatus.isOlder(item.versionString, than: manual.build) { clearManual() }
         show("available", "Update \(item.displayVersionString) available — downloading…")
         // Automatic download; the ready callback below keeps restart under deliberate user control.
         reply(.install)
     }
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
-    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) { cancel = nil; show("current", "No compatible newer update is available", retry: true); acknowledgement() }
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        cancel = nil
+        // Nothing installs itself, but a release that needs a new download is still waiting: keep saying so.
+        if manual != nil { showManual() } else { show("current", "No compatible newer update is available", retry: true) }
+        acknowledgement()
+    }
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) { cancel = nil; ready = nil; fail(error.localizedDescription); acknowledgement() }
-    func showDownloadInitiated(cancellation: @escaping () -> Void) { cancel = cancellation; expected = 0; received = 0; show("downloading", "Update available — downloading…") }
+    func showDownloadInitiated(cancellation: @escaping () -> Void) { cancel = cancellation; expected = 0; received = 0; progress = 0; show("downloading", "Update available — downloading…") }
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) { expected = expectedContentLength }
-    func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
-    func showDownloadDidStartExtractingUpdate() { cancel = nil; show("verifying", "Verifying and preparing update…") }
-    func showExtractionReceivedProgress(_ progress: Double) { show("verifying", "Preparing update \(Int(progress * 100))%") }
+    func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; progress = expected > 0 ? min(1, Double(received) / Double(expected)) : nil; show("downloading", expected > 0 ? "Update available — downloading \(min(100, Int(Double(received) / Double(expected) * 100)))%" : "Update available — downloading…") }
+    func showDownloadDidStartExtractingUpdate() { cancel = nil; progress = nil; show("verifying", "Verifying and preparing update…") }
+    func showExtractionReceivedProgress(_ progress: Double) { self.progress = progress; show("verifying", "Preparing update \(Int(progress * 100))%") }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { cancel = nil; ready = reply; waitingSince = nil; show("ready", "Update \(version) available — ready to restart") }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
         show("installing", "Installing update and restarting…")

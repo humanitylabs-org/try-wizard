@@ -690,6 +690,18 @@ enum WizardImportConnectPrompt {
     }
 }
 
+/// Wizard for Mac tells the page about its own updates (try-wizard#126, pair of wizard-ux#1624). With it on, the native
+/// bridge answers `updates.status`, `updates.check`, `updates.install` and `updates.download`, and every change of the
+/// update bar reaches the trusted page as the window event `wizard:app-update` (the same object as `updates.status`;
+/// rules in Shared/AppUpdateStatus.swift). A release Sparkle can't install in place (an information-only appcast
+/// item, see `manualBelow` in next/mac/release/version.json) is remembered until this Mac runs it, and the bar offers
+/// Download (aiwizards.com pages only). Off: no `updates.` methods, no events, and the bar works as before.
+/// Off by default: `defaults write org.humanitylabs.wizard.mvp AppUpdates -bool YES`, then reopen Wizard.
+enum WizardAppUpdates {
+    static let key = "AppUpdates"
+    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
 /// Standard first on a fresh Mac (try-wizard#171, pair of wizard-ux#1800; on for everyone since James's yes): the front
 /// door opens without `?private_first=1`, as on Linux: a fresh Wizard's brain step takes Claude or ChatGPT and private
 /// AI is offered after, in the Welcome. Private first (try-wizard#134) still runs when the box asks for it (guest env
@@ -929,6 +941,21 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             WizardDockApps.shared.answer(data, reply: reply)
         }
         WizardDockApps.shared.install(window: window)
+        // updates.*: the Mac app's own update state for the page (try-wizard#126). Not registered with the switch off,
+        // so app.info lists no `updates.` capability then.
+        if WizardAppUpdates.isOn {
+            NativeBridge.shared.register("updates.") { method, _, reply in
+                let updater = WizardUpdater.shared
+                switch method {
+                case "updates.status": reply(updater.status)
+                case "updates.check": updater.checkFromPage { reply($0) }
+                case "updates.install": reply(updater.installFromPage())
+                case "updates.download": reply(updater.downloadFromPage())
+                default: reply(nil)
+                }
+            }
+            WizardUpdater.shared.onStatus = { [weak self] status in self?.sendAppUpdate(status) }
+        }
         dragView.owner = self
         window.isMovableByWindowBackground = false
 
@@ -1246,6 +1273,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             case .failure(let e): NSLog("Wizard: bridge %@ failed: %@", event, e.localizedDescription); done(nil)
             }
         }
+    }
+
+    /// Native → page: the Mac app's update state (try-wizard#126), only to the trusted shell document on screen.
+    func sendAppUpdate(_ status: [String: Any]) {
+        guard WizardAppUpdates.isOn, isTrustedDocument else { return }
+        web.callAsyncJavaScript("window.dispatchEvent(new CustomEvent(name, { detail })); return true;",
+                                arguments: ["name": WizardAppUpdateStatus.event, "detail": status], in: nil, in: .page) { _ in }
     }
 
     /// Freeze admission in the trusted MAIN document in the same JavaScript
