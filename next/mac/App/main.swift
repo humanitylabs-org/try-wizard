@@ -1897,6 +1897,13 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
         if origin.port != (origin.scheme == "https" ? 443 : 80) { c.port = origin.port }
         return c.url
     }
+    /// The window shows this Mac's setup page (front door, :48030), so setup is not done yet: the setup server sends a
+    /// finished Wizard straight on to Wizard UX. App and view requests wait until then (try-wizard#192).
+    var showsLocalSetup: Bool {
+        guard Store.active?.kind == .thisMac, let u = web.url, let origin = NativeOrigin(u),
+              let setup = NativeOrigin(WizardShared.localSetupURL) else { return false }
+        return origin == setup
+    }
     var isTrustedDocument: Bool {
         guard let actual = web.url.flatMap(NativeOrigin.init), !actual.isInstalledApp else { return false }
         return selectedControlOrigins.contains(actual)
@@ -2035,6 +2042,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let link = WizardDockAppsRule.parse(url) else { continue }
+            // Setup isn't done: show it instead of an app window that can't load yet (try-wizard#192).
+            if controller.showsLocalSetup { showMainWindow(); continue }
             WizardAppWindows.shared.open(link.appId, path: link.path)
         }
     }
@@ -2205,6 +2214,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let origin = wizardOrigin, let url = URL(string: path, relativeTo: origin)?.absoluteURL,
               url.host == origin.host else { return }
         showMainWindow()
+        // Before setup is done there is no Wizard UX to open it in: loading the view would leave a blank page with no
+        // way back. Stay on setup (try-wizard#192).
+        if controller.showsLocalSetup { NSLog("Wizard: %@ waits until setup is done", path); return }
         // Wizard UX opens it as a window on its desktop; anything else navigates the page.
         controller.uxSend("wizard:open", ["path": path]) { [weak self] r in
             if r == nil { self?.controller.load(url) }
