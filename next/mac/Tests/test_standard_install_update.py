@@ -38,7 +38,8 @@ class StandardInstallAdmission(unittest.TestCase):
         self.assertIn('WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(stopWhenIdle) }, stopWhenIdle)', prepare)
         self.assertIn('self.vm.stop(forceOnTimeout: false', prepare)
         guest = block(host, '    private func applyGuestUpdate()', '    private func admitStandardGuest(')
-        self.assertIn('WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(apply) }, apply)', guest)
+        self.assertIn('WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(answer) }, answer)', guest)
+        self.assertIn('done: apply)', guest)
         admit = block(host, '    private func admitStandardGuest(', '    private func prepareUpdate()')
         for needle in ('vm.control("work"', 'vm.control("update-status"', 'WizardShared.localUXHealthURL',
                        'WizardStandardAdmission.reason(work: work, status: status, health: health)'):

@@ -32,7 +32,9 @@ let package = Package(
         .target(name: "WizardAppUpdateStatus", path: "Shared", exclude: ["Shared.swift"], sources: ["AppUpdateStatus.swift"]),
         .testTarget(name: "WizardAppUpdateStatusTests", dependencies: ["WizardAppUpdateStatus"], path: "Tests/AppUpdateStatus"),
         .target(name: "WizardReadyUpdate", path: "Shared", exclude: ["Shared.swift"], sources: ["ReadyUpdate.swift"]),
-        .testTarget(name: "WizardReadyUpdateTests", dependencies: ["WizardReadyUpdate"], path: "Tests/ReadyUpdate")
+        .testTarget(name: "WizardReadyUpdateTests", dependencies: ["WizardReadyUpdate"], path: "Tests/ReadyUpdate"),
+        .target(name: "WizardLeaseRetry", path: "Shared", exclude: ["Shared.swift"], sources: ["LeaseRetry.swift"]),
+        .testTarget(name: "WizardLeaseRetryTests", dependencies: ["WizardLeaseRetry"], path: "Tests/LeaseRetry")
     ],
     swiftLanguageModes: [.v5]
 )
