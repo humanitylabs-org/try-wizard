@@ -235,7 +235,7 @@ class ReleaseLanes(unittest.TestCase):
     def test_tester_release_is_a_prerelease(self):
         tag = jobs()['tag']
         self.assertIn('lane=(--prerelease --latest=false)', tag)
-        self.assertIn('"${lane[@]}"', tag)
+        self.assertIn('${lane[@]+"${lane[@]}"}', tag, 'macOS bash 3.2 + set -u: an empty array needs the + form')
 
     def test_no_human_approval_file(self):
         # Miguel, 21 Nov 2026: no human approval step for releases; the train promotes.
