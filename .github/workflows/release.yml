@@ -428,6 +428,8 @@ jobs:
           CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
           set -euo pipefail
+          # No channel output (lanes off, or an older caller) means the public mac channel, as before wizard-os#720.
+          CHANNEL="${CHANNEL:-mac}"
           tag="v$VERSION"
           # gh prints GitHub's 404 body on stdout, so only its output on success is a tag (try-wizard#182).
           if ! existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then
