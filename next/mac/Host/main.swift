@@ -754,7 +754,16 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         if WizardShared.coldBootstrapToken != nil { apply(nil) }
-        else { WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(apply) }, apply) }
+        else {
+            // A guest that has only just booted can't show its runtimes to the lease yet (try-wizard#191): ask again
+            // for a bounded while instead of rolling the update back on that first refusal. Real refusals stay final.
+            WizardLeaseRetry.acquire(
+                lease: { answer in WizardUpdate.maintenance(nonce, onMissing: { [weak self] in self?.admitStandardGuest(answer) }, answer) },
+                release: { next in WizardUpdate.maintenance(nonce, release: true) { _ in next() } },
+                after: { delay, next in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: next) },
+                log: { log($0) },
+                done: apply)
+        }
     }
 
     /// A standard-install guest has no maintenance lease route (try-wizard#154): ask it what is running, the way a
