@@ -2,8 +2,8 @@
 """Mac release upgrade test (try-wizard#129): before a release is published, prove that the app installed Macs run
 today updates to the candidate, and that the candidate's own updater can update it again.
 
-Runs in the release workflow's `upgrade-test` job (macos-15, no secrets), only when the switch is on (repo variable
-WOS_MAC_UPGRADE_TEST=on, or the "upgrade test" tick on a dry run). Two subcommands:
+Runs in the release workflow's `upgrade-test` job (macos-15, no secrets) on every real and dry-run release, before
+publish. Two subcommands:
 
   loopback-feed   (build job) copy an appcast template with its enclosure moved from the public channel folder to the
                   loopback test server, so the sign job can sign a test feed for the very archive it publishes.
