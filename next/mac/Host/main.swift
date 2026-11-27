@@ -305,7 +305,11 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
 
     var canTerminateWithoutStopping: Bool { vm == nil || vm?.state == .stopped }
     func stop(completion: (() -> Void)? = nil) { stop(forceOnTimeout: true, completion: completion) }
-    func stop(forceOnTimeout: Bool, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
+    /// The clean-stop budget of the stop that ends a guest update's maintenance boot (request `maintenance: true`,
+    /// WizardGuestActivation.finish). try-wizard#191: the guest's own clean poweroff can take longer than 90 s (systemd
+    /// gives each unit up to 90 s, the Hermes engine has a 1 min stop grace); still never a forced stop.
+    static let maintenanceStopBudget: TimeInterval = 240
+    func stop(forceOnTimeout: Bool, budget: TimeInterval = 90, onTimeout: (() -> Void)? = nil, completion: (() -> Void)? = nil) {
         Pipe2.dropAll()
         guard let machine = vm else { completion?(); return }
         guard state == .running || state == .starting || state == .error else {
@@ -347,7 +351,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
             }
             return
         }
-        // Ask WizardOS to power off cleanly; force-stop if it hasn't within 90 s (Docker stops every app first).
+        // Ask WizardOS to power off cleanly; force-stop if it hasn't within the budget (90 s; Docker stops every app first).
         socketDevice?.connect(toPort: WizardShared.guestControlPort) { result in
             if case .success(let conn) = result {
                 _ = "poweroff\n".withCString { write(conn.fileDescriptor, $0, 9) }
@@ -356,7 +360,7 @@ final class VMController: NSObject, VZVirtualMachineDelegate, VZVirtioSocketList
                 try? machine.requestStop()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + budget) {
             guard !finished else { return }
             if !forceOnTimeout {
                 timedOut = true
@@ -811,7 +815,9 @@ final class HostDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let stopWhenIdle: (String?) -> Void = { [weak self] reason in
             guard let self else { return }
             if let reason { self.preparingUpdate = false; try? WizardUpdate.write(["nonce": nonce, "state": "busy", "error": reason], WizardUpdate.response); return }
-            self.vm.stop(forceOnTimeout: false, onTimeout: {
+            let budget = request["maintenance"] as? Bool == true ? VMController.maintenanceStopBudget : 90
+            log("update stop: asking WizardOS to power off cleanly (budget \(Int(budget)) s)")
+            self.vm.stop(forceOnTimeout: false, budget: budget, onTimeout: {
                 try? WizardUpdate.write(["nonce": nonce, "state": "failed", "error": "Clean shutdown not confirmed; rollback disk retained"], WizardUpdate.response)
                 if WizardShared.coldBootstrapToken == nil { WizardUpdate.releaseMaintenance(nonce) }
                 self.preparingUpdate = false

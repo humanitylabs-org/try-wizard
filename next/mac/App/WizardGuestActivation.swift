@@ -105,25 +105,75 @@ import Darwin
         guard Date() < deadline else { finish("Guest migration did not finish within its bounded window"); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.waitApplied(nonce, deadline) }
     }
+    /// How long the stop that ends the maintenance boot may take: the Host's lease ask (up to 90 s) plus its clean
+    /// stop budget for this stop (240 s, Host `VMController.maintenanceStopBudget`), with a margin. try-wizard#191: the guest's own
+    /// clean poweroff can take longer than 90 s (systemd gives each unit up to 90 s, the Hermes engine has 1 min).
+    static let stopWindow: TimeInterval = 360
+    static let busyRetry: TimeInterval = 5
     private func finish(_ error: String?) {
         onProgress(error == nil ? "Software activated; restarting without maintenance access…" : "Activation failed; stopping safely to restore the prior disk…")
         if !HostControl.isRunning { completeStopped(error); return }
+        requestStop(error, until: Date().addingTimeInterval(Self.stopWindow))
+    }
+    private func requestStop(_ migrationError: String?, until deadline: Date) {
         do {
             let nonce = UUID().uuidString
-            try WizardUpdate.write(["nonce": nonce, "pid": getpid(), "peer": WizardRelease.peer, "expires": Date().timeIntervalSince1970 + 110, "appPath": Bundle.main.bundleURL.standardizedFileURL.path, "maintenance": true], WizardUpdate.request)
+            try WizardUpdate.write(["nonce": nonce, "pid": getpid(), "peer": WizardRelease.peer, "expires": deadline.timeIntervalSince1970, "appPath": Bundle.main.bundleURL.standardizedFileURL.path, "maintenance": true], WizardUpdate.request)
             HostControl.send("prepare-update")
-            waitStopped(nonce, Date().addingTimeInterval(105), error)
+            waitStopped(nonce, deadline, migrationError)
         } catch { onDone("Could not stop maintenance guest — retained rollback disk; \(error.localizedDescription)") }
     }
     private func waitStopped(_ nonce: String, _ deadline: Date, _ migrationError: String?) {
         let response = WizardUpdate.json(WizardUpdate.response)
-        if response["nonce"] as? String == nonce, response["state"] as? String == "failed" { onDone("Guest shutdown failed; no live disk restored, rollback copy retained"); return }
-        if response["nonce"] as? String == nonce, response["state"] as? String == "stopped", !HostControl.isRunning {
+        let mine = response["nonce"] as? String == nonce
+        if mine, response["state"] as? String == "failed" { stopNotConfirmed(migrationError, "Guest shutdown failed; no live disk restored, rollback copy retained"); return }
+        if mine, response["state"] as? String == "stopped", !HostControl.isRunning {
             completeStopped(migrationError)
             return
         }
-        guard Date() < deadline else { onDone("Clean guest shutdown not confirmed; no live disk restored, prior disk retained"); return }
+        // The Host couldn't take the lease for this stop yet (state busy): ask again rather than wait out the window.
+        if mine, response["state"] as? String == "busy", Date().addingTimeInterval(Self.busyRetry) < deadline {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.busyRetry) { self.requestStop(migrationError, until: deadline) }
+            return
+        }
+        guard Date() < deadline else { stopNotConfirmed(migrationError, "Clean guest shutdown not confirmed; no live disk restored, prior disk retained"); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.waitStopped(nonce, deadline, migrationError) }
+    }
+    private func stopNotConfirmed(_ migrationError: String?, _ text: String) {
+        if migrationError == nil, activateInPlace(text) { return }
+        onDone(text)
+    }
+    /// try-wizard#191: the guest applied a code-only update, which restarts the guest services it changes itself, on
+    /// this same disk, but the restart that ends the maintenance boot couldn't be confirmed. Leaving the journal at
+    /// guest-activating kept every later boot a maintenance boot whose lease is never given back (the Host releases
+    /// it only once no payload is attached), so the guest refused all work ("update holds launch admission") and a
+    /// relaunch went through the same stop again. Record the update as activated on this disk instead, and keep
+    /// asking the Host for an ordinary guest: its release loop gives the lease back on this boot if the guest is
+    /// still up, or on the next ordinary boot once a late poweroff ends. Only for a code-only receipt on the disk
+    /// the update was admitted on; legacy and full updates keep the stopped-disk path.
+    private func activateInPlace(_ reason: String) -> Bool {
+        let receiptURL = WizardUpdate.dir.appendingPathComponent("guest-receipt.json")
+        var receipt = WizardUpdate.json(receiptURL)
+        var journal = WizardUpdate.json(WizardUpdate.journal)
+        guard receipt["kind"] as? String == "code-only", journal["kind"] as? String != "legacy-cold",
+              journal["phase"] as? String == "guest-activating",
+              let identity = WizardDiskIdentity.read(WizardShared.osDir.appendingPathComponent("disk.img")),
+              journal["diskIdentity"] as? String == identity,
+              let nonce = journal["nonce"] as? String, !nonce.isEmpty else { return false }
+        do {
+            receipt["diskIdentity"] = identity; receipt["transactionNonce"] = nonce
+            if let releaseID = journal["releaseID"] as? String, !releaseID.isEmpty { receipt["releaseID"] = releaseID }
+            try WizardUpdate.write(receipt, receiptURL)
+            journal["phase"] = "guest-activated"; journal["activatedInPlace"] = true; journal["restartNote"] = reason
+            try WizardUpdate.write(journal, WizardUpdate.journal)
+        } catch { return false }
+        NSLog("Wizard: guest update activated in place (%@); waiting for an ordinary guest", reason)
+        onProgress("Software activated; starting Wizard normally…")
+        try? FileManager.default.removeItem(at: WizardUpdate.request)
+        HostControl.ensureRunning()
+        HostControl.send("start")
+        waitForNormalRuntime(Date().addingTimeInterval(300), nil)
+        return true
     }
     private func completeStopped(_ migrationError: String?) {
             do {
@@ -192,6 +242,9 @@ import Darwin
         let held = FileManager.default.fileExists(atPath: WizardUpdate.maintenanceJournal.path)
         func retry() {
             guard Date() < deadline else { self.onDone("Normal runtime did not reconnect after maintenance; prior disk and app remain available"); return }
+            // A guest that finished a late poweroff (try-wizard#191) is started again, now as an ordinary boot.
+            if !HostControl.isRunning { HostControl.ensureRunning() }
+            else if WizardUpdate.json(WizardShared.statusFile)["state"] as? String == "stopped" { HostControl.send("start") }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.waitForNormalRuntime(deadline, migrationError) }
         }
         guard running, !held else { retry(); return }
