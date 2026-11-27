@@ -1,10 +1,10 @@
 import Foundation
 
-/// The Mac app's own update state for the page (try-wizard#126), behind the `AppUpdates` switch.
+/// The Mac app's own update state for the page (try-wizard#126), on for every Mac.
 ///
 /// The bar at the top of the window used to be the only place that showed Sparkle's progress, so an owner who
-/// pressed Later had no way back but the menu, and Settings couldn't say which Wizard for Mac version runs. With the
-/// switch on, the native bridge answers `updates.status` with `object(...)` below and pushes the same object as the
+/// pressed Later had no way back but the menu, and Settings couldn't say which Wizard for Mac version runs. The
+/// native bridge answers `updates.status` with `object(...)` below and pushes the same object as the
 /// window event `wizard:app-update` each time the bar changes.
 ///
 /// Some releases can't install themselves (a change Sparkle can't apply in place, an old updater, a signing change).

@@ -83,7 +83,8 @@ still built only on the owned arm64 build machine; see `next/guest/build-runtime
 
 ## Update state for the page, and releases that need a new download (try-wizard#126)
 
-Off by default: `defaults write org.humanitylabs.wizard.mvp AppUpdates -bool YES`, then reopen Wizard. With it on:
+On for every Mac (try-wizard#126 approved; the old `AppUpdates` switch is gone and its stored value is cleared at
+launch):
 
 - The native bridge answers `updates.status` with `{schema: 1, installed: {version, build}, phase, latest: {version,
   build} | null, progress: 0..1 | null, checkedAt: ms | null, waitingFor: "recording" | "work" | null, manual: {url} |
@@ -134,7 +135,7 @@ A queued job is not a build or install proof. A completed native-only receipt is
 - **Critical releases.** `"critical": true` in `release/version.json` makes `tools/stage-release.py` add
   `<sparkle:criticalUpdate/>` to the item; without the field the feed is byte-identical to before. The bar then has
   no Later; Update and restart still waits for a recording or agent work. `ui.json` carries `critical`, and the
-  page's update status (`AppUpdates`) carries `"urgent": true` while that release downloads or waits, so Settings
+  page's update status (try-wizard#126) carries `"urgent": true` while that release downloads or waits, so Settings
   shows it as an important update (wizard-ux `web/core/os-updates.js`).
 - QA: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlinesClockOffset -float 86400` moves this clock a day on
   (use 259200 for 3 days); a loopback `SPARKLE_FEED` as above gives a ready update.
