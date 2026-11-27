@@ -23,8 +23,8 @@ def main():
     stop = host[host.index('    func stop(completion:'):host.index('    func runGuestPatch(')]
     prepare = host[host.index('    private func prepareUpdate()'):host.index('    func refresh()')]
     # Only timing and bundle I/O differ; do not replace force policy or responses.
-    assert stop.count('.now() + 90') == 1
-    stop = stop.replace('.now() + 90', '.now() + 0.01')
+    assert stop.count('.now() + budget') == 1
+    stop = stop.replace('.now() + budget', '.now() + 0.01')
     bundle = 'Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL.path'
     assert prepare.count(bundle) == 1
     prepare = prepare.replace(bundle, 'Bundle.main.bundleURL.standardizedFileURL.path')
