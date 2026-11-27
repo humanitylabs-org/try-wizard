@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Wizard for Mac tells the page about its own updates (try-wizard#126), behind the off-by-default AppUpdates switch.
+"""Wizard for Mac tells the page about its own updates (try-wizard#126), on for every Mac.
 
 The rules (phases, the status object, the aiwizards.com-only download pages, the remembered new-download release,
 the install refusals) are in Shared/AppUpdateStatus.swift and tested by Tests/AppUpdateStatus (swift test). The
-release tooling's manualBelow is tested in test_release_workflow.py. This checks the wiring, and that with the switch
-off nothing changes: no updates.* methods, no events, the bar and the information-only text as before.
+release tooling's manualBelow is tested in test_release_workflow.py. This checks the wiring, and that the old
+`AppUpdates` switch is gone (approved, switch-default): no gate, no off path, its stored value cleared at launch.
 """
 import re
 import unittest
@@ -25,20 +25,24 @@ class AppUpdatesWiring(unittest.TestCase):
         self.updater = (MAC / 'App/WizardUpdater.swift').read_text()
         self.rule = (MAC / 'Shared/AppUpdateStatus.swift').read_text()
 
-    def test_switch_is_off_by_default_and_documented(self):
-        switch = block(self.main, 'enum WizardAppUpdates {', '\n}\n')
-        self.assertIn('static let key = "AppUpdates"', switch)
-        self.assertIn('UserDefaults.standard.bool(forKey: key)', switch)
-        self.assertIn('defaults write org.humanitylabs.wizard.mvp AppUpdates -bool YES', self.main)
+    def test_switch_is_gone_and_its_stored_value_cleared(self):
+        for src in (self.main, self.updater, self.rule):
+            self.assertNotIn('WizardAppUpdates', src)
+            self.assertNotIn('AppUpdates -bool YES', src)
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "AppUpdates")', self.main)
+        self.assertNotIn('AppUpdates -bool YES', (MAC / 'UPDATER.md').read_text())
 
-    def test_bridge_methods_exist_only_with_the_switch_on(self):
+    def test_bridge_methods_are_always_registered(self):
         self.assertEqual(self.main.count('register("updates.")'), 1)
-        gate = block(self.main, '        if WizardAppUpdates.isOn {\n            NativeBridge.shared.register("updates.")',
-                     '        dragView.owner = self')
+        gate = block(self.main, '        NativeBridge.shared.register("updates.")', '        dragView.owner = self')
         for method in ('updates.status', 'updates.check', 'updates.install', 'updates.download'):
             self.assertIn(f'case "{method}"', gate)
         self.assertIn('WizardUpdater.shared.onStatus = ', gate)
         self.assertEqual(self.main.count('WizardUpdater.shared.onStatus'), 1)
+        # Registered unconditionally, right after the dock bridge, inside the window setup.
+        setup = block(self.main, '        WizardDockApps.shared.install(window: window)', '        dragView.owner = self')
+        self.assertIn('NativeBridge.shared.register("updates.")', setup)
+        self.assertNotIn('if ', setup.split('NativeBridge.shared.register("updates.")')[0])
         # Every bridge method goes through NativeBridge's one admission (trusted main frame, document generation).
         bridge = block(self.main, 'final class NativeBridge', '// MARK: - Local voice presentation')
         self.assertIn('owner?.allowsNative(message.frameInfo) == true', bridge)
@@ -46,24 +50,22 @@ class AppUpdatesWiring(unittest.TestCase):
 
     def test_events_reach_only_the_trusted_main_document(self):
         send = block(self.main, '    func sendAppUpdate(', '\n    }\n')
-        self.assertIn('guard WizardAppUpdates.isOn, isTrustedDocument else { return }', send)
+        self.assertIn('guard isTrustedDocument else { return }', send)
         self.assertIn('arguments: ["name": WizardAppUpdateStatus.event, "detail": status], in: nil, in: .page', send)
         self.assertIn('static let event = "wizard:app-update"', self.rule)
         publish = block(self.updater, '    private func publishStatus() {', '\n    }\n')
-        self.assertIn('guard WizardAppUpdates.isOn else { return }', publish)
+        self.assertIn('onStatus(current)', publish)
         show = block(self.updater, '    private func show(_ state: String, _ text: String', '    var snapshot:')
         self.assertIn('publishStatus()', show)
 
-    def test_switch_off_keeps_the_information_only_bar(self):
+    def test_information_only_items_always_offer_the_download(self):
         found = block(self.updater, '    func showUpdateFound(', '    func showUpdateReleaseNotes(')
-        self.assertIn('if item.isInformationOnlyUpdate, WizardAppUpdates.isOn { rememberManual(', found)
-        self.assertIn('show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss)', found)
-        self.assertLess(found.index('WizardAppUpdates.isOn { rememberManual('), found.index('show("unavailable"'))
+        self.assertIn('if item.isInformationOnlyUpdate { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }', found)
+        self.assertNotIn('cannot be downloaded from this feed', self.updater)
         start = block(self.updater, '    func start() {', '    /// Called before *every* local boot')
-        self.assertIn('if WizardAppUpdates.isOn { loadManual() }', start)
-        # The remembered release (and so the Download button) can only come from the switch-on paths.
+        self.assertIn('            loadManual()   // try-wizard#126', start)
         self.assertEqual(len(re.findall(r'\bmanual = record\b', self.updater)), 2)
-        self.assertEqual(self.updater.count('rememberManual('), 2)   # its definition and the one switch-on call
+        self.assertEqual(self.updater.count('rememberManual('), 2)   # its definition and the one call
         self.assertEqual(self.updater.count('loadManual()'), 2)
 
     def test_install_uses_the_bars_path_and_download_only_aiwizards(self):

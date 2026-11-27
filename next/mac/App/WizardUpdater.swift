@@ -82,7 +82,7 @@ final class NoticeBarView: NSView {
             try WizardRelease.read(Bundle.main.bundleURL).validate(Bundle.main.bundleURL, verifyGuestFiles: false)
             updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
             try updater.start()
-            if WizardAppUpdates.isOn { loadManual() }   // try-wizard#126
+            loadManual()   // try-wizard#126
             if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
             if WizardUpdateDeadlines.isOn { watchLater() }   // try-wizard#128
             recoverActivation()
@@ -703,10 +703,10 @@ final class NoticeBarView: NSView {
         } catch { releaseLease(); show("failed", "The update couldn't be checked. Quit Wizard and open it again. Your data is safe.", retry: false) }
     }
 
-    // MARK: The update state for the page (try-wizard#126; rules in Shared/AppUpdateStatus.swift, switch AppUpdates)
+    // MARK: The update state for the page (try-wizard#126; rules in Shared/AppUpdateStatus.swift)
 
-    /// Called with the status object each time it changes, only while the AppUpdates switch is on (main.swift sends it
-    /// to the trusted page as `wizard:app-update`).
+    /// Called with the status object each time it changes (main.swift sends it to the trusted page as
+    /// `wizard:app-update`).
     var onStatus: ([String: Any]) -> Void = { _ in }
     private var latestVersion = ""
     private var progress: Double?
@@ -729,7 +729,6 @@ final class NoticeBarView: NSView {
             urgent: WizardUpdateDeadlines.isOn && incomingCritical)   // try-wizard#128
     }
     private func publishStatus() {
-        guard WizardAppUpdates.isOn else { return }
         let current = status
         // Download progress moves the bar on every chunk; the page hears only real changes (progress in 1% steps).
         guard let data = try? JSONSerialization.data(withJSONObject: current, options: [.sortedKeys]), data != lastStatus else { return }
@@ -884,8 +883,7 @@ final class NoticeBarView: NSView {
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) { cancel = cancellation; show("checking", "Checking for updates…") }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         version = item.versionString; latestVersion = item.displayVersionString
-        if item.isInformationOnlyUpdate, WizardAppUpdates.isOn { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }   // try-wizard#126
-        if item.isInformationOnlyUpdate { show("unavailable", "Update available but cannot be downloaded from this feed"); reply(.dismiss); return }
+        if item.isInformationOnlyUpdate { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }   // try-wizard#126
         incomingCritical = WizardUpdateDeadlines.isOn && item.isCriticalUpdate   // try-wizard#128
         // A newer release that installs itself replaces a remembered one that needed a new download.
         if let manual, !WizardAppUpdateStatus.isOlder(item.versionString, than: manual.build) { clearManual() }

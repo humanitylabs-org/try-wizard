@@ -690,18 +690,6 @@ enum WizardImportConnectPrompt {
     }
 }
 
-/// Wizard for Mac tells the page about its own updates (try-wizard#126, pair of wizard-ux#1624). With it on, the native
-/// bridge answers `updates.status`, `updates.check`, `updates.install` and `updates.download`, and every change of the
-/// update bar reaches the trusted page as the window event `wizard:app-update` (the same object as `updates.status`;
-/// rules in Shared/AppUpdateStatus.swift). A release Sparkle can't install in place (an information-only appcast
-/// item, see `manualBelow` in next/mac/release/version.json) is remembered until this Mac runs it, and the bar offers
-/// Download (aiwizards.com pages only). Off: no `updates.` methods, no events, and the bar works as before.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp AppUpdates -bool YES`, then reopen Wizard.
-enum WizardAppUpdates {
-    static let key = "AppUpdates"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
-}
-
 /// Mac app updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift). Later hides the bar until
 /// tomorrow, an update ready for 3 days is offered when the owner quits, and a critical release has no Later.
 /// Off by default: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES` turns it on.
@@ -951,21 +939,19 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
             WizardDockApps.shared.answer(data, reply: reply)
         }
         WizardDockApps.shared.install(window: window)
-        // updates.*: the Mac app's own update state for the page (try-wizard#126). Not registered with the switch off,
-        // so app.info lists no `updates.` capability then.
-        if WizardAppUpdates.isOn {
-            NativeBridge.shared.register("updates.") { method, _, reply in
-                let updater = WizardUpdater.shared
-                switch method {
-                case "updates.status": reply(updater.status)
-                case "updates.check": updater.checkFromPage { reply($0) }
-                case "updates.install": reply(updater.installFromPage())
-                case "updates.download": reply(updater.downloadFromPage())
-                default: reply(nil)
-                }
+        // updates.*: the Mac app's own update state for the page (try-wizard#126; on for every Mac, the old `AppUpdates`
+        // switch is gone). Every change also reaches the trusted page as `wizard:app-update` (sendAppUpdate).
+        NativeBridge.shared.register("updates.") { method, _, reply in
+            let updater = WizardUpdater.shared
+            switch method {
+            case "updates.status": reply(updater.status)
+            case "updates.check": updater.checkFromPage { reply($0) }
+            case "updates.install": reply(updater.installFromPage())
+            case "updates.download": reply(updater.downloadFromPage())
+            default: reply(nil)
             }
-            WizardUpdater.shared.onStatus = { [weak self] status in self?.sendAppUpdate(status) }
         }
+        WizardUpdater.shared.onStatus = { [weak self] status in self?.sendAppUpdate(status) }
         dragView.owner = self
         window.isMovableByWindowBackground = false
 
@@ -1287,7 +1273,7 @@ final class WizardWindowController: NSWindowController, WKNavigationDelegate, WK
 
     /// Native → page: the Mac app's update state (try-wizard#126), only to the trusted shell document on screen.
     func sendAppUpdate(_ status: [String: Any]) {
-        guard WizardAppUpdates.isOn, isTrustedDocument else { return }
+        guard isTrustedDocument else { return }
         web.callAsyncJavaScript("window.dispatchEvent(new CustomEvent(name, { detail })); return true;",
                                 arguments: ["name": WizardAppUpdateStatus.event, "detail": status], in: nil, in: .page) { _ in }
     }
@@ -1963,6 +1949,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         UserDefaults.standard.removeObject(forKey: "StandardFirstSetup")   // try-wizard#171: standard first is on for everyone; the switch is gone
         UserDefaults.standard.removeObject(forKey: "AppLocation")   // try-wizard#135: Maps location is on for everyone; the switch is gone
         UserDefaults.standard.removeObject(forKey: "NowPlaying")   // try-wizard#142: Now Playing is on for everyone; the switch is gone
+        UserDefaults.standard.removeObject(forKey: "AppUpdates")   // try-wizard#126: update state for the page is on for everyone; the switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()
