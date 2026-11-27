@@ -1,6 +1,6 @@
 import Foundation
 
-/// How long a downloaded Wizard for Mac update may wait (try-wizard#128, switch `UpdateDeadlines`).
+/// How long a downloaded Wizard for Mac update may wait (try-wizard#128, on for every Mac).
 ///
 /// Before this, an update that was ready to install could wait forever: Later hid the bar with no deadline and a quit
 /// cancelled the prepared install. With the switch on:

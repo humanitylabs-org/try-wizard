@@ -118,9 +118,10 @@ All compilation, Sparkle, native/VM/browser and sustained QA stays on Thales und
 
 A queued job is not a build or install proof. A completed native-only receipt is not guest, public-feed or Apple-signing proof. Parent must also re-run main.swift native trusted-origin/titlebar-drag acceptance after combining the separate native owner patch with these minimal updater additions.
 
-## Updates can't wait forever (try-wizard#128, switch `UpdateDeadlines`, off by default)
+## Updates can't wait forever (try-wizard#128, on for every Mac)
 
-`defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES` turns it on; rules in `Shared/ReadyUpdate.swift`.
+On for every Mac since James's yes; the old `UpdateDeadlines` switch is gone and its stored value is cleared at launch.
+Rules in `Shared/ReadyUpdate.swift`.
 
 - **Later = until tomorrow.** Later stores `laterUntil` (now + 24 h) in `updates/ready.json`; a once-a-minute check
   shows the ready bar again once when it passes (and after a relaunch the bar stays hidden until then).

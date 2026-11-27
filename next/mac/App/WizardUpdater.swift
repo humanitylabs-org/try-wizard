@@ -84,7 +84,7 @@ final class NoticeBarView: NSView {
             try updater.start()
             loadManual()   // try-wizard#126
             if updater.automaticallyChecksForUpdates { updater.checkForUpdatesInBackground() }
-            if WizardUpdateDeadlines.isOn { watchLater() }   // try-wizard#128
+            watchLater()   // try-wizard#128
             recoverActivation()
         } catch { show("failed", "Updates unavailable — \(error.localizedDescription)", retry: true) }
     }
@@ -237,17 +237,17 @@ final class NoticeBarView: NSView {
     @objc private func hideNotice() { view.isHidden = true; height.constant = 0; waitToken = UUID(); waitingSince = nil }
     @objc private func laterPressed() {
         hideNotice()
-        guard WizardUpdateDeadlines.isOn, ready != nil, let record = readyRecord, record.build == version else { return }
+        guard ready != nil, let record = readyRecord, record.build == version else { return }
         saveReady(WizardReadyUpdate.later(record, now: WizardUpdateDeadlines.now))
     }
 
-    // MARK: Updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift, switch UpdateDeadlines)
+    // MARK: Updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift, on for every Mac)
 
     /// The ready update's record (build, ready since, Later until, critical), kept beside ui.json so it outlives a quit.
     static var readyFile: URL { WizardUpdate.dir.appendingPathComponent("ready.json") }
     private var readyRecord: WizardReadyUpdate.Record? { WizardReadyUpdate.Record.read(WizardUpdate.json(Self.readyFile)) }
     private func saveReady(_ record: WizardReadyUpdate.Record) { try? WizardUpdate.write(record.json, Self.readyFile) }
-    /// The update Sparkle found is marked `<sparkle:criticalUpdate>` (only read while the switch is on).
+    /// The update Sparkle found is marked `<sparkle:criticalUpdate>`.
     private var incomingCritical = false
     private var installingOnQuit = false
     private var quitAsked = false
@@ -265,14 +265,14 @@ final class NoticeBarView: NSView {
         }
     }
     private func laterTick() {
-        guard WizardUpdateDeadlines.isOn, ready != nil, !preparing, !installingOnQuit, let record = readyRecord, record.build == version,
+        guard ready != nil, !preparing, !installingOnQuit, let record = readyRecord, record.build == version,
               WizardReadyUpdate.showAgain(record, now: WizardUpdateDeadlines.now, barHidden: view.isHidden) else { return }
         saveReady(WizardReadyUpdate.shown(record))
         show("ready", "Update \(version) available — ready to restart")
     }
     /// Quitting with an update ready for 3+ days: true when Wizard asks first (the quit is cancelled and redone after).
     private func offerOnQuit() -> Bool {
-        guard WizardUpdateDeadlines.isOn, !quitAsked, ready != nil,
+        guard !quitAsked, ready != nil,
               WizardReadyUpdate.offerOnQuit(readyRecord, readyBuild: version, now: WizardUpdateDeadlines.now) else { return false }
         quitAsked = true
         DispatchQueue.main.async { self.askInstallOnQuit() }
@@ -502,7 +502,7 @@ final class NoticeBarView: NSView {
         // out under news.
         action.isHidden = !(button != nil || retry || ready != nil)
         later.isEnabled = !preparing
-        if WizardUpdateDeadlines.isOn { later.isHidden = !WizardReadyUpdate.showsLater(critical: incomingCritical, phase: state) }   // try-wizard#128
+        later.isHidden = !WizardReadyUpdate.showsLater(critical: incomingCritical, phase: state)   // try-wizard#128
         try? WizardUpdate.write(snapshot, WizardUpdate.dir.appendingPathComponent("ui.json"))
         // Good news needs no answer: let it go by itself unless something newer replaced it.
         let token = UUID(); noticeToken = token
@@ -516,7 +516,7 @@ final class NoticeBarView: NSView {
     }
     var snapshot: [String: Any] {
         let installed = NSDictionary(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String ?? "unconfirmed"
-        return ["pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden, "critical": WizardUpdateDeadlines.isOn && incomingCritical]
+        return ["pid": getpid(), "appPath": Bundle.main.bundleURL.path, "phase": phase, "message": message, "version": version, "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "", "installedBundleBuild": installed, "ready": ready != nil, "restartAuthorized": restartAuthorized, "dataHome": WizardShared.supportDir.path, "hostRunning": HostControl.isRunning, "recording": isRecording(), "visible": !view.isHidden, "critical": incomingCritical]
     }
     func shouldTerminate() -> NSApplication.TerminateReply {
         if restartAuthorized { return .terminateNow }
@@ -726,7 +726,7 @@ final class NoticeBarView: NSView {
             installedVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             installedBuild: installedBuild, phase: pagePhase, latest: latest, progress: progress,
             checkedAt: updater?.lastUpdateCheckDate, waitingFor: waitingFor, manualURL: manual?.url, error: message,
-            urgent: WizardUpdateDeadlines.isOn && incomingCritical)   // try-wizard#128
+            urgent: incomingCritical)   // try-wizard#128
     }
     private func publishStatus() {
         let current = status
@@ -884,7 +884,7 @@ final class NoticeBarView: NSView {
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         version = item.versionString; latestVersion = item.displayVersionString
         if item.isInformationOnlyUpdate { rememberManual(item, asked: state.userInitiated); reply(.dismiss); return }   // try-wizard#126
-        incomingCritical = WizardUpdateDeadlines.isOn && item.isCriticalUpdate   // try-wizard#128
+        incomingCritical = item.isCriticalUpdate   // try-wizard#128
         // A newer release that installs itself replaces a remembered one that needed a new download.
         if let manual, !WizardAppUpdateStatus.isOlder(item.versionString, than: manual.build) { clearManual() }
         show("available", "Update \(item.displayVersionString) available — downloading…")
@@ -907,7 +907,7 @@ final class NoticeBarView: NSView {
     func showExtractionReceivedProgress(_ progress: Double) { self.progress = progress; show("verifying", "Preparing update \(Int(progress * 100))%") }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
         cancel = nil; ready = reply; waitingSince = nil
-        let hidden = WizardUpdateDeadlines.isOn && noteReady()   // try-wizard#128
+        let hidden = noteReady()   // try-wizard#128
         show("ready", "Update \(version) available — ready to restart")
         if hidden { hideNotice() }   // Later until tomorrow outlives a relaunch
     }

@@ -692,11 +692,9 @@ enum WizardImportConnectPrompt {
 
 /// Mac app updates can't wait forever (try-wizard#128; rules in Shared/ReadyUpdate.swift). Later hides the bar until
 /// tomorrow, an update ready for 3 days is offered when the owner quits, and a critical release has no Later.
-/// Off by default: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES` turns it on.
+/// On for every Mac since James's yes; the old `UpdateDeadlines` switch is gone and its stored value is cleared at launch.
 /// QA: `defaults write org.humanitylabs.wizard.mvp UpdateDeadlinesClockOffset -float 86400` moves its clock a day on.
 enum WizardUpdateDeadlines {
-    static let key = "UpdateDeadlines"
-    static var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
     static var now: Date { Date().addingTimeInterval(UserDefaults.standard.double(forKey: "UpdateDeadlinesClockOffset")) }
 }
 
@@ -1950,6 +1948,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         UserDefaults.standard.removeObject(forKey: "AppLocation")   // try-wizard#135: Maps location is on for everyone; the switch is gone
         UserDefaults.standard.removeObject(forKey: "NowPlaying")   // try-wizard#142: Now Playing is on for everyone; the switch is gone
         UserDefaults.standard.removeObject(forKey: "AppUpdates")   // try-wizard#126: update state for the page is on for everyone; the switch is gone
+        UserDefaults.standard.removeObject(forKey: "UpdateDeadlines")   // try-wizard#128: update deadlines are on for everyone; the switch is gone
         buildMenus()
         installQAHooks()
         controller = WizardWindowController()

@@ -83,7 +83,7 @@ enum WizardAppUpdateStatus {
     }
 
     /// The `updates.status` answer and the `wizard:app-update` detail. JSON-ready: a missing value is NSNull.
-    /// `urgent` (try-wizard#128, switch UpdateDeadlines): the coming release is critical. Only then does the object
+    /// `urgent` (try-wizard#128): the coming release is critical. Only then does the object
     /// carry `"urgent": true`, and only while that release is on its way or ready; otherwise the key is absent, so the
     /// object is exactly what it was before.
     static func object(installedVersion: String, installedBuild: String, phase: String,

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Mac app updates can't wait forever (try-wizard#128, switch UpdateDeadlines, off by default).
+"""Mac app updates can't wait forever (try-wizard#128, on for every Mac).
 
 The rules (Later until tomorrow, 3 days then offer on quit, critical has no Later, ready since kept per build) are in
 Shared/ReadyUpdate.swift and tested by Tests/ReadyUpdate (swift test). This checks the wiring in the app: everything
-new waits for the switch, the quit sheet goes through Update and restart's guards, and Install and quit lets Sparkle
+new runs on every Mac (the old switch is gone), the quit sheet goes through Update and restart's guards, and Install and quit lets Sparkle
 install on termination instead of relaunching.
 """
 import re
@@ -23,13 +23,16 @@ class UpdateDeadlinesWiring(unittest.TestCase):
         self.up = (MAC / 'App/WizardUpdater.swift').read_text()
         self.main = (MAC / 'App/main.swift').read_text()
 
-    def test_switch_is_off_by_default(self):
-        switch = block(self.main, 'enum WizardUpdateDeadlines {', '\n}\n')
-        self.assertIn('static let key = "UpdateDeadlines"', switch)
-        self.assertIn('UserDefaults.standard.bool(forKey: key)', switch)
-        self.assertIn('defaults write org.humanitylabs.wizard.mvp UpdateDeadlines -bool YES', self.main)
+    def test_switch_is_gone_and_its_value_cleared(self):
+        clock = block(self.main, 'enum WizardUpdateDeadlines {', '\n}\n')
+        self.assertNotIn('isOn', clock)
+        self.assertNotIn('static let key', clock)
+        self.assertNotIn('WizardUpdateDeadlines.isOn', self.up + self.main)
+        self.assertNotIn('UpdateDeadlines -bool YES', self.main + (MAC / 'UPDATER.md').read_text())
+        launch = block(self.main, 'func applicationDidFinishLaunching', 'buildMenus()')
+        self.assertIn('UserDefaults.standard.removeObject(forKey: "UpdateDeadlines")', launch)
         # The QA clock (Done when 1: "with the clock moved forward a day").
-        self.assertIn('UpdateDeadlinesClockOffset', switch)
+        self.assertIn('UpdateDeadlinesClockOffset', clock)
 
     def test_rules_are_built_in_and_tested(self):
         build = (MAC / 'build.sh').read_text()
@@ -41,19 +44,20 @@ class UpdateDeadlinesWiring(unittest.TestCase):
         self.assertEqual(len(re.findall(r'3 \* 24 \* 3600', rules)), 1)   # the 3 days, in one constant
         self.assertNotRegex(self.up, r'3 \* 24 \* 3600|259200')
 
-    def test_every_new_path_waits_for_the_switch(self):
+    def test_every_path_runs_on_every_mac(self):
         later = block(self.up, '@objc private func laterPressed()', '\n    }\n')
         self.assertIn('hideNotice()', later.split('guard')[0])          # Later still hides the bar first
-        self.assertIn('guard WizardUpdateDeadlines.isOn', later)
+        self.assertIn('guard ready != nil, let record = readyRecord', later)
         self.assertIn('later.action = #selector(laterPressed)', self.up)
-        self.assertIn('if WizardUpdateDeadlines.isOn { watchLater() }', self.up)
+        start = block(self.up, 'func start() {', '\n    }\n')
+        self.assertIn('            watchLater()   // try-wizard#128', start)
         offer = block(self.up, 'private func offerOnQuit() -> Bool', '\n    }\n')
-        self.assertIn('guard WizardUpdateDeadlines.isOn', offer)
+        self.assertIn('guard !quitAsked, ready != nil,', offer)
         ready = block(self.up, 'func showReady(toInstallAndRelaunch', '\n    }\n')
-        self.assertIn('WizardUpdateDeadlines.isOn && noteReady()', ready)
-        self.assertIn('incomingCritical = WizardUpdateDeadlines.isOn && item.isCriticalUpdate', self.up)
+        self.assertIn('let hidden = noteReady()', ready)
+        self.assertIn('incomingCritical = item.isCriticalUpdate', self.up)
         show = block(self.up, 'private func show(_ state: String', '\n    }\n')
-        self.assertIn('if WizardUpdateDeadlines.isOn { later.isHidden = !WizardReadyUpdate.showsLater(', show)
+        self.assertIn('later.isHidden = !WizardReadyUpdate.showsLater(critical: incomingCritical, phase: state)', show)
         # installingOnQuit is only ever set from the sheet's Install and quit.
         sets = re.findall(r'installingOnQuit = true', self.up)
         self.assertEqual(len(sets), 1)
@@ -99,8 +103,8 @@ class UpdateDeadlinesWiring(unittest.TestCase):
         self.assertIn('WizardReadyUpdate.ready(readyRecord, build: version, critical: incomingCritical', self.up)
 
     def test_settings_hears_a_critical_release_as_urgent(self):
-        # Ask 3: the page's update status (try-wizard#126) carries urgent only with this switch on.
-        self.assertIn('urgent: WizardUpdateDeadlines.isOn && incomingCritical)', self.up)
+        # Ask 3: the page's update status (try-wizard#126) carries urgent for a critical release.
+        self.assertIn('urgent: incomingCritical)', self.up)
         status = (MAC / 'Shared/AppUpdateStatus.swift').read_text()
         self.assertIn('if urgent && showsLatest && phase != "manual" { object["urgent"] = true }', status)
 
