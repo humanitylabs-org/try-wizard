@@ -77,8 +77,8 @@ The temporary R2 credentials in `mac-publish` must include the `mac-beta/` prefi
 "Run workflow" on `main` runs the same pipeline as a dry run by default: it publishes to `mac-dryrun/` only and never
 touches `mac/appcast.xml` or `index.html`. Until the Sparkle key is in `mac-sign`, a run builds and stops before signing.
 
-**Upgrade test** (try-wizard#129, off by default). With repo variable `WOS_MAC_UPGRADE_TEST=on` (or the "upgrade
-test" tick on Run workflow, for that run only) `publish` also waits for an `upgrade-test` job (macos-15, no secrets):
+**Upgrade test** (try-wizard#129). On every real and dry-run release `publish` also waits for an `upgrade-test` job
+(macos-15, no secrets); it publishes only when that job passed:
 
 - `build` also builds a test-only **candidate + 1** (the same source and release ID, `BUILD+1`, sealed by `build.sh`
   like the candidate) and stages two loopback feeds (`http://127.0.0.1:48219/`): one for the candidate's own archive,

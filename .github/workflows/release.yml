@@ -15,7 +15,7 @@ name: Mac release
 #              try-wizard#115). Uploads with the runner's aws CLI to downloads.aiwizards.com/<channel>/<build>/,
 #              never overwrites a versioned key, checks every file byte for byte through the public URL, then
 #              switches the appcast last (a real release also writes mac/index.html). No checkout, no project code.
-#  upgrade-test (try-wizard#129; only with the switch on, below) macos-15, no secrets, no environment. Before publish:
+#  upgrade-test (try-wizard#129) macos-15, no secrets, no environment. Every real and dry-run release, before publish:
 #              the app the live mac/appcast.xml offers is installed and updates to the candidate, then the installed
 #              candidate updates itself to a test-only copy with the build raised by one (built by build, signed by
 #              sign, never published). Real Sparkle installs over a loopback feed; next/mac/tools/upgrade-test.py.
@@ -34,8 +34,6 @@ name: Mac release
 # under mac-beta/<build>/), never touches mac/, and its GitHub release is a prerelease. Installed apps read only
 # mac/appcast.xml, so nobody is updated to it until the release train (promote.yml, every 6h, no person) finds it soaked
 # 72h with no release-blocker open and copies that build's signed feed to mac/ with the same bytes, no rebuild.
-# Switch (try-wizard#129, off by default): repo variable WOS_MAC_UPGRADE_TEST=on runs upgrade-test on every real and
-# dry-run release; the "upgrade test" tick on Run workflow runs it for that one run. Off: the jobs run as before.
 on:
   push:
     branches: [main]
@@ -47,10 +45,6 @@ on:
         description: 'Dry run: publish to mac-dryrun/ only (untick for a real release)'
         type: boolean
         default: true
-      upgrade_test:
-        description: 'Upgrade test: live app -> this build -> this build + 1 before publishing (try-wizard#129)'
-        type: boolean
-        default: false
   pull_request:
     paths:
       - '.github/workflows/release.yml'
@@ -95,7 +89,6 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
           LANES: ${{ vars.WOS_RELEASE_LANES }}
-          UPGRADE_TEST: ${{ vars.WOS_MAC_UPGRADE_TEST == 'on' || inputs.upgrade_test == true }}
         run: |
           set -euo pipefail
           version=$(python3 -c 'import json;print(json.load(open("next/mac/release/version.json"))["version"])')
@@ -126,9 +119,9 @@ jobs:
               (( build > ${beta:-0} )) || { echo "::error::build $build is not higher than the tester appcast's $beta; raise next/mac/release/version.json"; exit 1; }
             fi
           fi
-          # The upgrade test (try-wizard#129) runs only with its switch on, and only where something is signed.
+          # The upgrade test (try-wizard#129) runs on every real and dry-run release (where something is signed).
           upgrade=no
-          [[ "$UPGRADE_TEST" == true && "$mode" != check ]] && upgrade=yes
+          [[ "$mode" != check ]] && upgrade=yes
           printf 'mode=%s\nchannel=%s\nversion=%s\nbuild=%s\nupgrade=%s\n' "$mode" "$channel" "$version" "$build" "$upgrade" >> "$GITHUB_OUTPUT"
           echo "### WizardOS $version (build $build): $mode" >> "$GITHUB_STEP_SUMMARY"
           [[ "$upgrade" == yes ]] && echo "Upgrade test: on (live app -> $build -> $((build + 1)) before publishing)" >> "$GITHUB_STEP_SUMMARY"
@@ -428,12 +421,11 @@ jobs:
   publish:
     name: Publish to downloads.aiwizards.com (mac-publish)
     needs: [build, sign, upgrade-test]
-    # upgrade-test is skipped only with its switch off (try-wizard#129); on, publish runs only after it passed.
+    # Publish runs only after upgrade-test passed (try-wizard#129): a candidate whose updater is broken never goes out.
     if: >-
       !cancelled() && needs.build.result == 'success' && needs.sign.result == 'success'
       && needs.sign.outputs.signed == 'true'
-      && (needs.upgrade-test.result == 'success'
-          || (needs.upgrade-test.result == 'skipped' && needs.build.outputs.upgrade != 'yes'))
+      && needs.upgrade-test.result == 'success'
     runs-on: ubuntu-latest
     environment: mac-publish
     timeout-minutes: 30
@@ -563,8 +555,8 @@ jobs:
   tag:
     name: Tag v<version>
     needs: [build, publish]
-    # !cancelled(): without it GitHub adds success(), which is false whenever upgrade-test (needed by publish) was
-    # skipped, so no release was ever tagged with that switch off (try-wizard#195).
+    # !cancelled(): without it GitHub adds success(), which is false whenever a job publish needs was skipped
+    # (try-wizard#195).
     if: "!cancelled() && needs.build.outputs.mode == 'release' && needs.publish.result == 'success'"
     runs-on: ubuntu-latest
     timeout-minutes: 5

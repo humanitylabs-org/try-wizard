@@ -111,13 +111,13 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]]', publish)
 
     def test_publish_waits_for_the_upgrade_test(self):
-        """try-wizard#129: with the switch on, nothing reaches the live feed before upgrade-test passed."""
+        """try-wizard#129: nothing reaches the live feed before upgrade-test passed."""
         publish = jobs()['publish']
         self.assertIn('needs: [build, sign, upgrade-test]', publish)
         condition = publish.split('if: >-', 1)[1].split('runs-on:', 1)[0]
         self.assertIn("needs.upgrade-test.result == 'success'", condition)
-        # Skipped counts only when the switch is off for this run.
-        self.assertIn("needs.upgrade-test.result == 'skipped' && needs.build.outputs.upgrade != 'yes'", condition)
+        # No way around it: a skipped upgrade test never lets publish run.
+        self.assertNotIn("'skipped'", condition)
         self.assertIn("needs.sign.result == 'success'", condition)
         self.assertIn("needs.sign.outputs.signed == 'true'", condition)
         self.assertNotIn('always()', condition)
@@ -155,14 +155,15 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertNotIn('SPARKLE_ED_PRIVATE_KEY', head)
         self.assertNotIn('secrets.', head)
 
-    def test_upgrade_test_switch_is_off_by_default(self):
+    def test_upgrade_test_runs_on_every_signed_release(self):
+        """try-wizard#129 switch-default: no repo variable or Run workflow tick turns the upgrade test off."""
         text = WORKFLOW.read_text()
-        self.assertIn("UPGRADE_TEST: ${{ vars.WOS_MAC_UPGRADE_TEST == 'on' || inputs.upgrade_test == true }}", text)
-        upgrade_input = text.split('upgrade_test:', 1)[1].split('pull_request:', 1)[0]
-        self.assertIn('default: false', upgrade_input)
+        self.assertNotIn('WOS_MAC_UPGRADE_TEST', text)
+        self.assertNotIn('upgrade_test', text)
+        self.assertNotIn('UPGRADE_TEST', text)
         build = jobs()['build']
-        self.assertIn('[[ "$UPGRADE_TEST" == true && "$mode" != check ]] && upgrade=yes', build)
-        # Every upgrade step in build and sign waits for the switch.
+        self.assertIn('[[ "$mode" != check ]] && upgrade=yes', build)
+        # Every upgrade step in build and sign runs only where something is signed (not on pull requests).
         for job in ('build', 'sign'):
             body = jobs()[job]
             for step in re.split(r'(?m)^      - name: ', body)[1:]:
