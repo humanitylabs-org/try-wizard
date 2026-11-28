@@ -84,9 +84,10 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertNotIn('next/', publish)
         self.assertNotIn('uses:', publish.split('Upload versioned files', 1)[1])
         # Versioned files first, then the landing page, the feed last.
-        self.assertLess(publish.index('application/zip'), publish.index('put mac/index.html'))
-        self.assertLess(publish.index('application/x-apple-diskimage'), publish.index('put mac/index.html'))
-        self.assertLess(publish.index('put mac/index.html'), publish.index('signed/appcast.xml application/xml'))
+        page = 'put "$CHANNEL/index.html"'
+        self.assertLess(publish.index('application/zip'), publish.index(page))
+        self.assertLess(publish.index('application/x-apple-diskimage'), publish.index(page))
+        self.assertLess(publish.index(page), publish.index('put "$CHANNEL/appcast.xml" signed/appcast.xml application/xml'))
 
     def test_publish_uses_bucket_scoped_temporary_credentials(self):
         """try-wizard#115: S3 API with a session token, no account-wide API token, every guard kept."""
@@ -108,7 +109,7 @@ class ReleaseWorkflow(unittest.TestCase):
         # Every key written stays inside the credential's prefixes.
         for key in re.findall(r'(?m)^\s+put (\S+) ', publish):
             self.assertRegex(key, r'^"?(\$CHANNEL|mac)/')
-        self.assertIn('[[ "$CHANNEL" == mac || "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]]', publish)
+        self.assertIn('[[ "$CHANNEL" == mac-dryrun || "$CHANNEL" == mac-beta ]]', publish)
 
     def test_publish_waits_for_the_upgrade_test(self):
         """try-wizard#129: nothing reaches the live feed before upgrade-test passed."""
@@ -230,7 +231,7 @@ exit 3
 class TagStep(unittest.TestCase):
     """Runs the tag job's own script with a fake gh that answers like gh 2.10x does (try-wizard#182)."""
 
-    def run_step(self, tag_sha='', channel='mac'):
+    def run_step(self, tag_sha='', channel='mac-beta'):
         script = re.search(r'(?ms)^        run: \|\n(.*)', jobs()['tag']).group(1)
         script = '\n'.join(line[10:] for line in script.splitlines())
         with tempfile.TemporaryDirectory(prefix='try-wizard-182-') as tmp:
@@ -257,15 +258,13 @@ class TagStep(unittest.TestCase):
         self.assertNotIn('git/refs -f', log)
         self.assertIn('release create v1.2.3', log)
 
-    def test_tester_build_is_a_prerelease_and_a_public_build_is_not(self):
-        # wizard-os#720: with release lanes on (channel mac-beta) the GitHub release is a prerelease, never latest.
-        done, log = self.run_step(channel='mac-beta')
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertIn('--prerelease --latest=false', log)
-        self.assertIn('/mac-beta/400/Wizard-1.2.3.dmg', log)
-        done, log = self.run_step()
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        self.assertNotIn('--prerelease', log)
+    def test_every_release_is_a_tester_prerelease(self):
+        # wizard-os#720 (on for everyone): the GitHub release is a prerelease, never latest, with or without a channel.
+        for channel in ('mac-beta', ''):
+            done, log = self.run_step(channel=channel)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertIn('--prerelease --latest=false', log)
+            self.assertIn('/mac-beta/400/Wizard-1.2.3.dmg', log)
 
     def test_tag_at_another_commit_stops(self):
         done, log = self.run_step('b' * 40)
@@ -286,17 +285,18 @@ def promote_jobs():
 class ReleaseLanes(unittest.TestCase):
     """wizard-os#720: merges publish tester builds to mac-beta/; the release train promotes one after a 72h soak."""
 
-    def test_tester_lane_is_off_until_the_variable_is_on(self):
+    def test_tester_lane_is_on_for_everyone(self):
         build = jobs()['build']
-        self.assertIn('LANES: ${{ vars.WOS_RELEASE_LANES }}', build)
-        self.assertIn('if [[ "$mode" == release && "$LANES" == on ]]; then channel=mac-beta; fi', build)
+        self.assertNotIn('WOS_RELEASE_LANES', WORKFLOW.read_text())
+        self.assertIn('channel=$([[ "$mode" == dry-run ]] && echo mac-dryrun || echo mac-beta)', build)
         # The app always reads the public feed, so promoted bytes update installed apps.
         self.assertIn('SPARKLE_FEED="$DOWNLOADS/mac/appcast.xml"', build)
 
     def test_tester_build_never_writes_mac(self):
         publish = jobs()['publish']
-        self.assertIn('if [[ "$MODE" == release && "$CHANNEL" == mac ]]; then', publish)
-        tester = publish.split('elif [[ "$MODE" == release ]]; then', 1)[1].split('\n          fi\n', 1)[0]
+        self.assertNotIn('"$CHANNEL" == mac ]]', publish)
+        self.assertNotRegex(publish, r'(?m)^\s+put mac/')
+        tester = publish.split('if [[ "$MODE" == release ]]; then\n            # A tester build', 1)[1].split('\n          fi\n', 1)[0]
         keys = re.findall(r'(?m)^\s+put (\S+) ', tester)
         self.assertEqual(len(keys), 3)
         for key in keys:
@@ -309,8 +309,7 @@ class ReleaseLanes(unittest.TestCase):
 
     def test_tester_release_is_a_prerelease(self):
         tag = jobs()['tag']
-        self.assertIn('lane=(--prerelease --latest=false)', tag)
-        self.assertIn('${lane[@]+"${lane[@]}"}', tag, 'macOS bash 3.2 + set -u: an empty array needs the + form')
+        self.assertIn('--notes "$notes" --prerelease --latest=false', tag)
 
     def test_no_human_approval_file(self):
         # Miguel, 21 Nov 2026: no human approval step for releases; the train promotes.
@@ -359,7 +358,8 @@ class ReleaseLanes(unittest.TestCase):
             self.assertRegex(use.strip(), PIN)
         js = promote_jobs()
         self.assertEqual(list(js), ['read', 'promote', 'release'])
-        self.assertIn("if: vars.WOS_RELEASE_LANES == 'on' && github.ref == 'refs/heads/main'", js['read'])
+        self.assertIn("if: github.ref == 'refs/heads/main'", js['read'])
+        self.assertNotIn('WOS_RELEASE_LANES', text)
         self.assertNotIn('secrets.', js['read'])
         self.assertNotIn('environment:', js['read'])
         # The blocker check sits between the pick and the outputs that start the promotion.

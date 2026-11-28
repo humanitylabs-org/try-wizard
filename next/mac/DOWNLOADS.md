@@ -44,18 +44,18 @@ than the live appcast's). The workflow then:
    (`next/mac/release/sparkle-public-key.txt`). It runs no project code.
 3. **publish** (environment `mac-publish`, `main` only, secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
    `R2_SESSION_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`): temporary R2 S3 credentials scoped to bucket `aiwizards-downloads`,
-   prefixes `mac/` and `mac-dryrun/` (and `mac-beta/` once release lanes are on), object read-write, valid 7 days at most (try-wizard#115). Archimedes mints fresh
+   prefixes `mac/`, `mac-beta/` and `mac-dryrun/`, object read-write, valid 7 days at most (try-wizard#115). Archimedes mints fresh
    ones weekly and loads them into `mac-publish`; GitHub never holds an account-wide token. The job uploads with the
    runner's preinstalled `aws` CLI through `https://<account>.r2.cloudflarestorage.com`. It first checks that the
    credentials still work (expired ones fail with a clear error) and that a write outside `mac/` is refused, then uploads
    the versioned zip and DMG (a HEAD check first: the same bytes are skipped, different bytes fail), verifies each file
-   byte for byte through `https://downloads.aiwizards.com` with a unique query string, and uploads `mac/appcast.xml`
-   last (a real release writes the landing page to `mac/index.html` just before it; the bucket root is out of scope).
+   byte for byte through `https://downloads.aiwizards.com` with a unique query string, and uploads the tester feed
+   `mac-beta/appcast.xml` last (see the lanes below; only the release train writes `mac/`; the bucket root is out of scope).
 4. **tag**: tags the released commit `v<version>` and writes a GitHub release with the links.
 
-### Tester and public lanes (off by default, wizard-os#720)
+### Tester and public lanes (wizard-os#720)
 
-With the repository variable `WOS_RELEASE_LANES=on`, a merge that raises `version.json` is a **tester build**: the
+A merge that raises `version.json` is a **tester build**: the
 same pipeline publishes it to `mac-beta/` (`mac-beta/<build>/Wizard-<build>.zip` and `Wizard-<version>.dmg`, its signed
 feed and landing page kept immutable as `mac-beta/<build>/appcast.xml` and `index.html`, then `mac-beta/index.html` and
 `mac-beta/appcast.xml`), never touches `mac/`, and tags `v<version>` as a GitHub prerelease. Installed apps read only
@@ -72,7 +72,7 @@ landing page to `mac/index.html` and its signed feed to `mac/appcast.xml` (last)
 rebuild and no new signature: the public feed points at the very archive testers ran, under `mac-beta/<build>/`. It
 finally marks the GitHub release latest. To stop a tester build reaching everyone, open (or label) any org issue
 `release-blocker`.
-The temporary R2 credentials in `mac-publish` must include the `mac-beta/` prefix before the variable is switched on.
+The temporary R2 credentials in `mac-publish` must include the `mac-beta/` prefix.
 
 "Run workflow" on `main` runs the same pipeline as a dry run by default: it publishes to `mac-dryrun/` only and never
 touches `mac/appcast.xml` or `index.html`. Until the Sparkle key is in `mac-sign`, a run builds and stops before signing.
