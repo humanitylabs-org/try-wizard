@@ -19,7 +19,7 @@ name: Mac promote
 #              mac/appcast.xml last and reads both back byte for byte.
 #  3. release  flips the GitHub release v<version> from prerelease to latest.
 #
-# Off by default, like the tester lane: nothing runs until the repository variable WOS_RELEASE_LANES=on.
+# On for everyone (wizard-os#720 approved; no repository variable).
 # "Run workflow" on main promotes right away when a build is due, or repeats a promotion that stopped half way.
 on:
   schedule:
@@ -41,7 +41,7 @@ env:
 jobs:
   read:
     name: Pick the soaked tester build
-    if: vars.WOS_RELEASE_LANES == 'on' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
